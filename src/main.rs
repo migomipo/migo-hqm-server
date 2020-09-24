@@ -28,6 +28,44 @@ struct HQMGame {
     game_id: u32,
     game_step: u32,
     packet: u32,
+    rink: HQMRink
+}
+
+struct HQMRink {
+    corner_radius: f32,
+    width: f32,
+    length: f32,
+    planes: Vec<(Point3<f32>, Vector3<f32>)>,
+    corners: Vec<(Point3<f32>, Vector3<f32>, f32)>
+}
+
+impl HQMRink {
+    fn new(width: f32, length: f32, corner_radius: f32) -> Self {
+        let zero = Point3::new(0.0,0.0,0.0);
+        let planes = vec![
+            (zero.clone(), Vector3::y()),
+            (Point3::new(0.0, 0.0, length), -Vector3::z()),
+            (zero.clone(), Vector3::z()),
+            (Point3::new(width, 0.0, 0.0), -Vector3::x()),
+            (zero.clone(), Vector3::x()),
+        ];
+        let r = corner_radius;
+        let wr = width - corner_radius;
+        let lr = length - corner_radius;
+        let corners = vec![
+            (Point3::new(r, 0.0, r),   Vector3::new(-1.0, 0.0, -1.0), corner_radius),
+            (Point3::new(wr, 0.0, r),  Vector3::new( 1.0, 0.0, -1.0), corner_radius),
+            (Point3::new(wr, 0.0, lr), Vector3::new( 1.0, 0.0,  1.0), corner_radius),
+            (Point3::new(r, 0.0, lr),  Vector3::new(-1.0, 0.0,  1.0), corner_radius)
+        ];
+        HQMRink {
+            width,
+            length,
+            corner_radius,
+            planes,
+            corners
+        }
+    }
 }
 
 impl HQMGame {
@@ -44,8 +82,8 @@ impl HQMGame {
                 rot_axis: Vector3::identity(),
                 rot_mul: Vector3::new(223.5, 128.0, 223.5)
             },
-            radius: 0.0,
-            height: 0.0,
+            radius: 0.125,
+            height: 0.0412500016391,
         });
         HQMGame {
             objects: object_vec,
@@ -57,7 +95,8 @@ impl HQMGame {
             timeout: 0,
             game_id,
             game_step: 0,
-            packet: 0
+            packet: 0,
+            rink: HQMRink::new(30.0, 61.0, 8.5)
         }
     }
 }

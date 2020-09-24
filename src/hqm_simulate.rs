@@ -1,4 +1,4 @@
-use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody};
+use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink};
 use nalgebra::{Vector3, Rotation3, Matrix3, U3, U1, Matrix, ComplexField, Vector2, Point3};
 use std::cmp::{min, max};
 use std::ops::{Sub, AddAssign};
@@ -9,27 +9,112 @@ impl HQMServer {
 
 
     pub(crate) fn simulate_step (&mut self) {
-
-        for p in self.game.objects.iter_mut() {
-            if let HQMGameObject::Player (player) = p {
-                update_player(player);
-                let pos_delta_copy = player.body.pos_delta.clone_owned();
-                let rot_axis_copy = player.body.rot_axis.clone_owned();
-                update_player2(player);
-                update_stick(player, & pos_delta_copy, & rot_axis_copy);
-                player.old_input = player.input.clone();
-
+        let mut players = Vec::new();
+        let mut pucks = Vec::new();
+        for o in self.game.objects.iter_mut() {
+            match o {
+                HQMGameObject::Player(player) => players.push(player),
+                HQMGameObject::Puck(puck) => pucks.push(puck),
+                _ => {}
             }
         }
-        for p in self.game.objects.iter_mut() {
-            if let HQMGameObject::Player (player) = p {
-                for i in 1..10 {
-                    player.stick_pos += player.stick_pos_delta.scale(0.1);
+
+        for player in players.iter_mut() {
+            update_player(player);
+            let pos_delta_copy = player.body.pos_delta.clone_owned();
+            let rot_axis_copy = player.body.rot_axis.clone_owned();
+            update_player2(player);
+            update_stick(player, & pos_delta_copy, & rot_axis_copy);
+            player.old_input = player.input.clone();
+        }
+        for puck in pucks.iter_mut() {
+            puck.body.pos_delta[1] -= GRAVITY;
+
+        }
+
+        for i in 0..10 {
+
+            for player in players.iter_mut() {
+                player.stick_pos += player.stick_pos_delta.scale(0.1);
+            }
+            for puck in pucks.iter_mut() {
+                puck.body.pos += puck.body.pos_delta.scale(0.1);
+
+                let old_pos_delta = puck.body.pos_delta.clone_owned();
+                let old_rot_axis = puck.body.rot_axis.clone_owned();
+                let puck_vertices = get_puck_vertices(&puck.body.pos, &puck.body.rot, puck.height, puck.radius);
+                if i == 0 {
+                    collisions_between_puck_and_rink(puck, & puck_vertices, & self.game.rink, &old_pos_delta, &old_rot_axis);
+                }
+                for player in players.iter_mut() {
+                    // TODO for puck-stick interaction
                 }
             }
+
         }
 
+
     }
+}
+
+fn collisions_between_puck_and_rink(puck: & mut HQMPuck, puck_vertices: &Vec<Point3<f32>>, rink: & HQMRink, old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>) {
+    for vertex in puck_vertices.iter() {
+        let c = collision_between_vertex_and_rink(vertex, rink);
+        if let Some((projection, normal)) = c {
+            let mut temp1 = normal.scale(projection * 0.125 * 0.125 * 0.5);
+            let temp2 = momentum_stuff(&vertex, &puck.body.pos, old_pos_delta, old_rot_axis);
+            temp1 -= temp2.scale(0.015625);
+            if normal.dot (&temp1) > 0.0 {
+                limit_rejection(& mut temp1, & normal, 0.05);
+                update_object_stuff(& mut puck.body, &temp1, &vertex);
+            }
+        }
+    }
+}
+
+fn collision_between_vertex_and_rink(vertex: &Point3<f32>, rink: & HQMRink) -> Option<(f32, Vector3<f32>)> {
+    let mut max_proj = 0f32;
+    let mut coll_normal  = None;
+    for (p, normal) in rink.planes.iter() {
+        let proj = (p - vertex).dot (normal);
+        if proj > max_proj {
+            max_proj = proj;
+            coll_normal = Some(normal.clone_owned());
+        }
+    }
+    for (p, dir, radius) in rink.corners.iter() {
+        let mut p2 = p - vertex;
+        p2[1] = 0.0;
+        if p2[0]*dir[0] < 0.0 && p2[2]*dir[2] < 0.0 {
+            let diff = p2.norm() - radius;
+            if diff > max_proj {
+                max_proj = diff;
+                let p2n = p2.normalize();
+                coll_normal = Some(p2n);
+            }
+
+        }
+    }
+
+    match coll_normal {
+        Some(n) => Some((max_proj, n)),
+        None => None
+    }
+
+}
+
+fn get_puck_vertices (pos: & Point3<f32>, rot: & Matrix3<f32>, height: f32, radius: f32) -> Vec<Point3<f32>> {
+    let mut res = Vec::with_capacity(48);
+    for i in 0..16 {
+
+        let (sin, cos) = ((i as f32)*std::f32::consts::PI/8.0).sin_cos();
+        for j in -1..=1 {
+            let point = Vector3::new(cos * radius, (j as f32)*height, sin * radius);
+            let point2 = rot * point;
+            res.push(pos + point2);
+        }
+    }
+    res
 }
 
 fn update_player(player: & mut HQMSkater) {
