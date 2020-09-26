@@ -129,6 +129,7 @@ fn collisions_between_puck_and_stick(puck: & mut HQMPuck, player: & mut HQMSkate
             if t.dot(&normal) > 0.0 {
                 limit_rejection(& mut t, &normal, 0.5);
                 player.stick_velocity -= t.scale(0.25);
+                t.scale_mut(0.75);
                 apply_acceleration_to_object(& mut puck.body, & t, & puck_vertex);
             }
         }
