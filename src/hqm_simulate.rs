@@ -1,5 +1,5 @@
-use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink};
-use nalgebra::{Vector3, Rotation3, Matrix3, U3, U1, Matrix, ComplexField, Vector2, Point3};
+use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMPlayerInput};
+use nalgebra::{Vector3, Rotation3, Matrix3, U3, U1, Matrix, ComplexField, Vector2, Point3, MatrixMN};
 use std::cmp::{min, max};
 use std::ops::{Sub, AddAssign};
 use nalgebra::base::storage::{Storage, StorageMut};
@@ -21,40 +21,141 @@ impl HQMServer {
 
         for player in players.iter_mut() {
             update_player(player);
-            let pos_delta_copy = player.body.pos_delta.clone_owned();
-            let rot_axis_copy = player.body.rot_axis.clone_owned();
+            let pos_delta_copy = player.body.linear_velocity.clone_owned();
+            let rot_axis_copy = player.body.angular_velocity.clone_owned();
             update_player2(player);
             update_stick(player, & pos_delta_copy, & rot_axis_copy);
             player.old_input = player.input.clone();
         }
         for puck in pucks.iter_mut() {
-            puck.body.pos_delta[1] -= GRAVITY;
+            puck.body.linear_velocity[1] -= GRAVITY;
 
         }
 
         for i in 0..10 {
 
             for player in players.iter_mut() {
-                player.stick_pos += player.stick_pos_delta.scale(0.1);
+                player.stick_pos += player.stick_velocity.scale(0.1);
             }
             for puck in pucks.iter_mut() {
-                puck.body.pos += puck.body.pos_delta.scale(0.1);
+                puck.body.pos += puck.body.linear_velocity.scale(0.1);
 
-                let old_pos_delta = puck.body.pos_delta.clone_owned();
-                let old_rot_axis = puck.body.rot_axis.clone_owned();
+                let old_pos_delta = puck.body.linear_velocity.clone_owned();
+                let old_rot_axis = puck.body.angular_velocity.clone_owned();
                 let puck_vertices = get_puck_vertices(&puck.body.pos, &puck.body.rot, puck.height, puck.radius);
                 if i == 0 {
                     collisions_between_puck_and_rink(puck, & puck_vertices, & self.game.rink, &old_pos_delta, &old_rot_axis);
                 }
                 for player in players.iter_mut() {
-                    // TODO for puck-stick interaction
+                    let old_stick_pos_delta = player.stick_velocity.clone_owned();
+                    if (&puck.body.pos - &player.stick_pos).norm() < 1.0 {
+                        collisions_between_puck_and_stick(puck, player, & puck_vertices, &old_pos_delta, &old_rot_axis, &old_stick_pos_delta);
+                    }
                 }
             }
 
         }
+        for puck in pucks.iter_mut() {
+            if puck.body.linear_velocity.norm () > 0.000015258789 {
 
+                let scale = puck.body.linear_velocity.norm ().powi(2) * 0.015625;
+                let scaled = puck.body.linear_velocity.normalize().scale(scale);
+                puck.body.linear_velocity -= scaled;
+
+
+            }
+            if puck.body.angular_velocity.norm() > 0.000015258789 {
+                rotate_matrix_around_axis(& mut puck.body.rot, &puck.body.angular_velocity.normalize(), puck.body.angular_velocity.norm())
+            }
+        }
 
     }
+}
+
+fn collision_between_vertex_and_stick2(puck_pos: &Point3<f32>, vertex: &Point3<f32>, p1: &Point3<f32>, p2: &Point3<f32>, p3: &Point3<f32>) -> Option<(f32, Vector3<f32>, f32)> {
+    let normal = (p3 - p1).cross(&(p2 - p1)).normalize();
+    if (p1 - vertex).dot(&normal) >= 0.0 {
+        let dot2 = (p1 - puck_pos).dot(&normal);
+        if dot2 <= 0.0 {
+            let diff = vertex - puck_pos;
+            let dot3 = diff.dot(&normal);
+            if dot3 != 0.0 {
+                let overlap = dot2/dot3;
+                let overlap_pos = puck_pos + diff.scale(overlap);
+                if (overlap_pos - p1).cross(&(p2 - p1)).dot(&normal) >= 0.0 &&
+                    (overlap_pos - p2).cross(&(p3 - p2)).dot(&normal) >= 0.0 &&
+                    (overlap_pos - p3).cross(&(p1 - p3)).dot(&normal) >= 0.0 {
+                    let dot_res = (overlap_pos - vertex).dot(&normal);
+                    return Some((overlap, normal, dot_res));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn collision_between_vertex_and_stick(puck_pos: &Point3<f32>, vertex: &Point3<f32>, stick_planes: &Vec<(Point3<f32>,Point3<f32>,Point3<f32>,Point3<f32>)>) -> Option<(f32, Vector3<f32>)> {
+    let mut overlap = 1f32;
+    let mut res = None;
+    for plane in stick_planes.iter() {
+        let col1 = collision_between_vertex_and_stick2(puck_pos, vertex, &plane.0, &plane.1, &plane.2);
+        let col2 = collision_between_vertex_and_stick2(puck_pos, vertex, &plane.0, &plane.2, &plane.3);
+        if let Some((o, normal, dot)) = col1 {
+            if o < overlap {
+                res = Some((dot, normal));
+                overlap = o;
+            }
+        } if let Some((o, normal, dot)) = col2 {
+            if o < overlap {
+                res = Some((dot, normal));
+                overlap = o;
+            }
+        }
+    }
+    res
+}
+
+
+fn collisions_between_puck_and_stick(puck: & mut HQMPuck, player: & mut HQMSkater, puck_vertices: &Vec<Point3<f32>>,
+                                     old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>, old_stick_pos_delta: & Vector3<f32>) {
+    let stick_planes = get_stick_planes(player);
+
+    for puck_vertex in puck_vertices.iter() {
+        let col = collision_between_vertex_and_stick(& puck.body.pos, puck_vertex, &stick_planes);
+        if let Some ((dot, normal)) = col {
+            let s = momentum_stuff(&puck_vertex, & puck.body.pos, old_pos_delta, old_rot_axis);
+
+            let mut t = normal.scale(dot * 0.125 * 0.5) - s.scale(0.125) + old_stick_pos_delta.scale(0.125);
+            if t.dot(&normal) > 0.0 {
+                limit_rejection(& mut t, &normal, 0.5);
+                player.stick_velocity -= t.scale(0.25);
+                apply_acceleration_to_object(& mut puck.body, & t, & puck_vertex);
+            }
+        }
+    }
+}
+
+fn get_stick_planes (player: & HQMSkater) -> Vec<(Point3<f32>,Point3<f32>,Point3<f32>,Point3<f32>)> {
+    let stick_size = Vector3::new(0.0625, 0.25, 0.5);
+    let nnn = &player.stick_pos + &player.stick_rot * Vector3::new(-0.5, -0.5, -0.5).component_mul(&stick_size);
+    let nnp = &player.stick_pos + &player.stick_rot * Vector3::new(-0.5, -0.5,  0.5).component_mul(&stick_size);
+    let npn = &player.stick_pos + &player.stick_rot * Vector3::new(-0.5,  0.5, -0.5).component_mul(&stick_size);
+    let npp = &player.stick_pos + &player.stick_rot * Vector3::new(-0.5,  0.5,  0.5).component_mul(&stick_size);
+    let pnn = &player.stick_pos + &player.stick_rot * Vector3::new( 0.5, -0.5, -0.5).component_mul(&stick_size);
+    let pnp = &player.stick_pos + &player.stick_rot * Vector3::new( 0.5, -0.5,  0.5).component_mul(&stick_size);
+    let ppn = &player.stick_pos + &player.stick_rot * Vector3::new( 0.5,  0.5, -0.5).component_mul(&stick_size);
+    let ppp = &player.stick_pos + &player.stick_rot * Vector3::new( 0.5,  0.5,  0.5).component_mul(&stick_size);
+
+    let res = vec![
+        (nnp.clone(), pnp.clone(), pnn.clone(), nnn.clone()),
+        (npp.clone(), ppp.clone(), pnp.clone(), nnp.clone()),
+        (npn.clone(), npp.clone(), nnp.clone(), nnn.clone()),
+        (ppn.clone(), npn.clone(), nnn.clone(), pnn.clone()),
+        (ppp.clone(), ppn.clone(), pnn.clone(), pnp.clone()),
+        (npn.clone(), ppn.clone(), ppp.clone(), npp.clone())
+    ];
+    res
+
 }
 
 fn collisions_between_puck_and_rink(puck: & mut HQMPuck, puck_vertices: &Vec<Point3<f32>>, rink: & HQMRink, old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>) {
@@ -66,7 +167,7 @@ fn collisions_between_puck_and_rink(puck: & mut HQMPuck, puck_vertices: &Vec<Poi
             temp1 -= temp2.scale(0.015625);
             if normal.dot (&temp1) > 0.0 {
                 limit_rejection(& mut temp1, & normal, 0.05);
-                update_object_stuff(& mut puck.body, &temp1, &vertex);
+                apply_acceleration_to_object(& mut puck.body, &temp1, &vertex);
             }
         }
     }
@@ -118,8 +219,8 @@ fn get_puck_vertices (pos: & Point3<f32>, rot: & Matrix3<f32>, height: f32, radi
 }
 
 fn update_player(player: & mut HQMSkater) {
-    player.body.pos += &player.body.pos_delta;
-    player.body.pos_delta[1] -= GRAVITY;
+    player.body.pos += &player.body.linear_velocity;
+    player.body.linear_velocity[1] -= GRAVITY;
     let feet_pos = &player.body.pos - player.body.rot.column(1).scale(player.height);
     if feet_pos[1] < 0.0 {
         let fwbw_from_client = player.input.fwbw;
@@ -130,29 +231,29 @@ fn update_player(player: & mut HQMSkater) {
             skate_direction[1] = 0.0;
             skate_direction.normalize_mut();
             skate_direction.scale_mut(0.05);
-            skate_direction -= &player.body.pos_delta;
-            let max_acceleration = if player.body.pos_delta.dot(&col2) > 0.0 {
+            skate_direction -= &player.body.linear_velocity;
+            let max_acceleration = if player.body.linear_velocity.dot(&col2) > 0.0 {
                 0.00055555f32
             } else {
                 0.000208f32
             };
-            player.body.pos_delta += limit_vector_length(&skate_direction, max_acceleration);
+            player.body.linear_velocity += limit_vector_length(&skate_direction, max_acceleration);
         } else if fwbw_from_client < 0.0 {
             let col2 = player.body.rot.column(2);
             let mut skate_direction = col2.clone_owned();
             skate_direction[1] = 0.0;
             skate_direction.normalize_mut();
             skate_direction.scale_mut(0.05);
-            skate_direction -= &player.body.pos_delta;
-            let vector_length_limit = if player.body.pos_delta.dot(&col2) < 0.0 {
+            skate_direction -= &player.body.linear_velocity;
+            let vector_length_limit = if player.body.linear_velocity.dot(&col2) < 0.0 {
                 0.00055555f32
             } else {
                 0.000208f32
             };
-            player.body.pos_delta += limit_vector_length(&skate_direction, vector_length_limit);
+            player.body.linear_velocity += limit_vector_length(&skate_direction, vector_length_limit);
         }
         if player.input.jump() && !player.old_input.jump() {
-            player.body.pos_delta[1] += 0.025;
+            player.body.linear_velocity[1] += 0.025;
         }
     }
 
@@ -160,11 +261,11 @@ fn update_player(player: & mut HQMSkater) {
     if turn != 0.0 {
         let mut column = player.body.rot.column(1).clone_owned();
         column.scale_mut(turn * 6.0 / 14400.0);
-        player.body.rot_axis += column;
+        player.body.angular_velocity += column;
     }
     // Turn player
-    if player.body.rot_axis.norm() > 0.00001 {
-        rotate_matrix_around_axis(& mut player.body.rot, &player.body.rot_axis.normalize(), player.body.rot_axis.norm());
+    if player.body.angular_velocity.norm() > 0.00001 {
+        rotate_matrix_around_axis(& mut player.body.rot, &player.body.angular_velocity.normalize(), player.body.angular_velocity.norm());
     }
     adjust_head_body_rot(& mut player.head_rot, player.input.head_rot);
     adjust_head_body_rot(& mut player.body_rot, player.input.body_rot);
@@ -186,7 +287,7 @@ fn update_player2 (player: & mut HQMSkater) {
         let temp1 = -feet_pos[1] * 0.125 * 0.125 * 0.25;
         let unit_y = Vector3::y();
 
-        let mut temp2 = unit_y.scale(temp1) - player.body.pos_delta.scale(0.25);
+        let mut temp2 = unit_y.scale(temp1) - player.body.linear_velocity.scale(0.25);
         if temp2.dot(&unit_y) > 0.0 {
             let mut temp_v2 = player.body.rot.column(2).clone_owned();
             temp_v2[1] = 0.0;
@@ -194,19 +295,19 @@ fn update_player2 (player: & mut HQMSkater) {
 
             temp2 -= temp_v2.scale(temp2.dot(&temp_v2));
             limit_rejection(& mut temp2, & unit_y, 1.2);
-            player.body.pos_delta += temp2;
+            player.body.linear_velocity += temp2;
             touches_ice = true;
         }
     }
-    if player.body.pos[1] < 0.5 && player.body.pos_delta.norm() < 0.025 {
-        player.body.pos_delta[1] += 0.00055555555;
+    if player.body.pos[1] < 0.5 && player.body.linear_velocity.norm() < 0.025 {
+        player.body.linear_velocity[1] += 0.00055555555;
         touches_ice = true;
     }
     if touches_ice {
         // This is where the leaning happens
-        player.body.rot_axis.scale_mut(0.975);
+        player.body.angular_velocity.scale_mut(0.975);
         let mut unit: Vector3<f32> = Vector3::y();
-        let temp = -player.body.pos_delta.dot(&player.body.rot.column(2)) / 0.05;
+        let temp = -player.body.linear_velocity.dot(&player.body.rot.column(2)) / 0.05;
         rotate_vector_around_axis(& mut unit, &player.body.rot.column(2), 0.225 * turn * temp);
 
         let mut temp2 = unit.cross(&player.body.rot.column(1));
@@ -214,10 +315,10 @@ fn update_player2 (player: & mut HQMSkater) {
         let temp2n = normal_or_zero(&temp2);
         temp2.scale_mut(0.008333333);
 
-        let temp3 = -0.25 * temp2n.dot (&player.body.rot_axis);
+        let temp3 = -0.25 * temp2n.dot (&player.body.angular_velocity);
         temp2 += temp2n.scale(temp3);
         temp2 = limit_vector_length(&temp2, 0.000347);
-        player.body.rot_axis += temp2;
+        player.body.angular_velocity += temp2;
     }
 
 }
@@ -265,18 +366,18 @@ fn update_stick(player: & mut HQMSkater, old_pos_delta: & Vector3<f32>, old_rot_
     }
 
     let momentum = momentum_stuff(& temp_pos2, & player.body.pos, old_pos_delta, old_rot_axis);
-    let stick_pos_movement = 0.125 * (temp_pos2 - &player.stick_pos) - player.stick_pos_delta.scale(0.5) + momentum.scale(0.5);
+    let stick_pos_movement = 0.125 * (temp_pos2 - &player.stick_pos) - player.stick_velocity.scale(0.5) + momentum.scale(0.5);
 
-    player.stick_pos_delta += stick_pos_movement.scale(0.996);
-    update_object_stuff(& mut player.body, & stick_pos_movement.scale(-0.004), & temp_pos2)
+    player.stick_velocity += stick_pos_movement.scale(0.996);
+    apply_acceleration_to_object(& mut player.body, & stick_pos_movement.scale(-0.004), & temp_pos2)
 
 }
 
-fn update_object_stuff (body: & mut HQMBody, change: & Vector3<f32>, point: & Point3<f32>) {
+fn apply_acceleration_to_object(body: & mut HQMBody, change: & Vector3<f32>, point: & Point3<f32>) {
     let diff1 = point - &body.pos;
-    body.pos_delta += change;
+    body.linear_velocity += change;
     let cross = change.cross(& diff1);
-    body.rot_axis += &body.rot * (body.rot.transpose() * cross).component_mul(& body.rot_mul);
+    body.angular_velocity += &body.rot * (body.rot.transpose() * cross).component_mul(& body.rot_mul);
 }
 
 fn momentum_stuff(p: & Point3<f32>, pos: & Point3<f32>, old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>) -> Vector3<f32> {

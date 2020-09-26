@@ -77,9 +77,45 @@ impl HQMGame {
         object_vec[0] = HQMGameObject::Puck(HQMPuck {
             body: HQMBody {
                 pos: Point3::new(10.0, 1.5, 10.0),
-                pos_delta: Vector3::new(0.0, 0.0, 0.0),
+                linear_velocity: Vector3::new(0.1, 0.0, 0.0),
+                rot: Rotation3::from_euler_angles(0.5, 0.5, 0.5).matrix().clone_owned(),
+                angular_velocity: Vector3::new(0.0,0.0,0.0),
+                rot_mul: Vector3::new(223.5, 128.0, 223.5)
+            },
+            radius: 0.125,
+            height: 0.0412500016391,
+        });
+
+        object_vec[1] = HQMGameObject::Puck(HQMPuck {
+            body: HQMBody {
+                pos: Point3::new(20.0, 1.5, 30.0),
+                linear_velocity: Vector3::new(0.0, 0.0, 0.0),
                 rot: Matrix3::identity(),
-                rot_axis: Vector3::identity(),
+                angular_velocity: Vector3::new(0.0,0.0,0.0),
+                rot_mul: Vector3::new(223.5, 128.0, 223.5)
+            },
+            radius: 0.125,
+            height: 0.0412500016391,
+        });
+
+        object_vec[2] = HQMGameObject::Puck(HQMPuck {
+            body: HQMBody {
+                pos: Point3::new(15.0, 1.5, 50.0),
+                linear_velocity: Vector3::new(0.0, 0.0, 0.0),
+                rot: Matrix3::identity(),
+                angular_velocity: Vector3::new(0.0,0.0,0.0),
+                rot_mul: Vector3::new(223.5, 128.0, 223.5)
+            },
+            radius: 0.125,
+            height: 0.0412500016391,
+        });
+
+        object_vec[3] = HQMGameObject::Puck(HQMPuck {
+            body: HQMBody {
+                pos: Point3::new(5.0, 1.5, 20.0),
+                linear_velocity: Vector3::new(0.0, 0.0, 0.0),
+                rot: Matrix3::identity(),
+                angular_velocity: Vector3::new(0.0,0.0,0.0),
                 rot_mul: Vector3::new(223.5, 128.0, 223.5)
             },
             radius: 0.125,
@@ -395,13 +431,13 @@ impl HQMServer {
             objects[i] = HQMGameObject::Player(HQMSkater {
                 body: HQMBody {
                     pos: Point3::new(15.0, 1.5, 15.0),
-                    pos_delta: Vector3::new (0.0,0.0,0.0),
+                    linear_velocity: Vector3::new (0.0, 0.0, 0.0),
                     rot: Matrix3::identity(),
-                    rot_axis: Vector3::new (0.0,0.0,0.0),
+                    angular_velocity: Vector3::new (0.0, 0.0, 0.0),
                     rot_mul: Vector3::new (2.75, 6.16, 2.35)
                 },
                 stick_pos: Point3::new(15.0, 1.5, 15.0),
-                stick_pos_delta: Vector3::new (0.0,0.0,0.0),
+                stick_velocity: Vector3::new (0.0, 0.0, 0.0),
                 stick_rot: Matrix3::identity(),
                 head_rot: 0.0,
                 body_rot: 0.0,
@@ -813,25 +849,25 @@ impl HQMTeam {
 }
 
 struct HQMBody {
-    pos: Point3<f32>,
-    pos_delta: Vector3<f32>,
-    rot: Matrix3<f32>,
-    rot_axis: Vector3<f32>,
+    pos: Point3<f32>,                // Measured in meters
+    linear_velocity: Vector3<f32>,   // Measured in meters per hundred of a second
+    rot: Matrix3<f32>,               // Rotation matrix
+    angular_velocity: Vector3<f32>,  // Measured in radians per hundred of a second
     rot_mul: Vector3<f32>
 }
 
 struct HQMSkater {
     body: HQMBody,
-    stick_pos: Point3<f32>,
-    stick_pos_delta: Vector3<f32>,
-    stick_rot: Matrix3<f32>,
-    head_rot: f32,
-    body_rot: f32,
+    stick_pos: Point3<f32>,        // Measured in meters
+    stick_velocity: Vector3<f32>,  // Measured in meters per hundred of a second
+    stick_rot: Matrix3<f32>,       // Rotation matrix
+    head_rot: f32,                 // Radians
+    body_rot: f32,                 // Radians
     height: f32,
     input: HQMPlayerInput,
     old_input: HQMPlayerInput,
-    stick_placement: Vector2<f32>,
-    stick_placement_delta: Vector2<f32>
+    stick_placement: Vector2<f32>,      // Azimuth and inclination in radians
+    stick_placement_delta: Vector2<f32> // Change in azimuth and inclination per hundred of a second
 }
 
 impl HQMSkater {
