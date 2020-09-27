@@ -58,7 +58,7 @@ impl HQMServer {
         for puck in pucks.iter_mut() {
             if puck.body.linear_velocity.norm () > 0.000015258789 {
 
-                let scale = puck.body.linear_velocity.norm ().powi(2) * 0.015625;
+                let scale = puck.body.linear_velocity.norm ().powi(2) * 0.125 * 0.125;
                 let scaled = puck.body.linear_velocity.normalize().scale(scale);
                 puck.body.linear_velocity -= scaled;
 
@@ -105,7 +105,8 @@ fn collision_between_vertex_and_stick(puck_pos: &Point3<f32>, vertex: &Point3<f3
                 res = Some((dot, normal));
                 overlap = o;
             }
-        } if let Some((o, normal, dot)) = col2 {
+        }
+        if let Some((o, normal, dot)) = col2 {
             if o < overlap {
                 res = Some((dot, normal));
                 overlap = o;
@@ -119,21 +120,30 @@ fn collision_between_vertex_and_stick(puck_pos: &Point3<f32>, vertex: &Point3<f3
 fn collisions_between_puck_and_stick(puck: & mut HQMPuck, player: & mut HQMSkater, puck_vertices: &Vec<Point3<f32>>,
                                      old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>, old_stick_pos_delta: & Vector3<f32>) {
     let stick_planes = get_stick_planes(player);
-
+    //let mut total_overlap = 0.0;
+    //let mut total_vertex_collisions = 0;
     for puck_vertex in puck_vertices.iter() {
         let col = collision_between_vertex_and_stick(& puck.body.pos, puck_vertex, &stick_planes);
         if let Some ((dot, normal)) = col {
-            let s = momentum_stuff(&puck_vertex, & puck.body.pos, old_pos_delta, old_rot_axis);
+            //println! ("{} {:?}", dot, normal);
+            //total_vertex_collisions += 1;
+            //total_overlap += dot;
 
-            let mut t = normal.scale(dot * 0.125 * 0.5) - s.scale(0.125) + old_stick_pos_delta.scale(0.125);
-            if t.dot(&normal) > 0.0 {
-                limit_rejection(& mut t, &normal, 0.5);
-                player.stick_velocity -= t.scale(0.25);
-                t.scale_mut(0.75);
-                apply_acceleration_to_object(& mut puck.body, & t, & puck_vertex);
+            let puck_vertex_speed = speed_of_point_including_rotation(&puck_vertex, & puck.body.pos, old_pos_delta, old_rot_axis);
+
+            let mut puck_force = (normal.scale(dot * 0.5) + (old_stick_pos_delta - puck_vertex_speed)).scale(0.125);
+            if puck_force.dot(&normal) > 0.0 {
+                limit_rejection(& mut puck_force, &normal, 0.5);
+                player.stick_velocity -= puck_force.scale(0.25);
+                puck_force.scale_mut(0.75);
+                apply_acceleration_to_object(& mut puck.body, &puck_force, & puck_vertex);
             }
         }
     }
+    //if total_vertex_collisions > 0 {
+    //    println!("{} collisions with total overlap {}", total_vertex_collisions, total_overlap);
+    //    println!("================");
+    //}
 }
 
 fn get_stick_planes (player: & HQMSkater) -> Vec<(Point3<f32>,Point3<f32>,Point3<f32>,Point3<f32>)> {
@@ -163,12 +173,12 @@ fn collisions_between_puck_and_rink(puck: & mut HQMPuck, puck_vertices: &Vec<Poi
     for vertex in puck_vertices.iter() {
         let c = collision_between_vertex_and_rink(vertex, rink);
         if let Some((projection, normal)) = c {
-            let mut temp1 = normal.scale(projection * 0.125 * 0.125 * 0.5);
-            let temp2 = momentum_stuff(&vertex, &puck.body.pos, old_pos_delta, old_rot_axis);
-            temp1 -= temp2.scale(0.015625);
-            if normal.dot (&temp1) > 0.0 {
-                limit_rejection(& mut temp1, & normal, 0.05);
-                apply_acceleration_to_object(& mut puck.body, &temp1, &vertex);
+            let vertex_velocity = speed_of_point_including_rotation(&vertex, &puck.body.pos, old_pos_delta, old_rot_axis);
+            let mut puck_force = (normal.scale(projection * 0.5) - vertex_velocity).scale(0.125 * 0.125);
+
+            if normal.dot (&puck_force) > 0.0 {
+                limit_rejection(& mut puck_force, & normal, 0.05);
+                apply_acceleration_to_object(& mut puck.body, &puck_force, &vertex);
             }
         }
     }
@@ -366,7 +376,7 @@ fn update_stick(player: & mut HQMSkater, old_pos_delta: & Vector3<f32>, old_rot_
         temp_pos2[1] = 0.0;
     }
 
-    let momentum = momentum_stuff(& temp_pos2, & player.body.pos, old_pos_delta, old_rot_axis);
+    let momentum = speed_of_point_including_rotation(& temp_pos2, & player.body.pos, old_pos_delta, old_rot_axis);
     let stick_pos_movement = 0.125 * (temp_pos2 - &player.stick_pos) - player.stick_velocity.scale(0.5) + momentum.scale(0.5);
 
     player.stick_velocity += stick_pos_movement.scale(0.996);
@@ -381,7 +391,7 @@ fn apply_acceleration_to_object(body: & mut HQMBody, change: & Vector3<f32>, poi
     body.angular_velocity += &body.rot * (body.rot.transpose() * cross).component_mul(& body.rot_mul);
 }
 
-fn momentum_stuff(p: & Point3<f32>, pos: & Point3<f32>, old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>) -> Vector3<f32> {
+fn speed_of_point_including_rotation(p: & Point3<f32>, pos: & Point3<f32>, old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>) -> Vector3<f32> {
     old_pos_delta + (p - pos).cross(old_rot_axis)
 }
 
