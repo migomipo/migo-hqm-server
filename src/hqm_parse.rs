@@ -1,5 +1,5 @@
 use std::cmp::min;
-use nalgebra::{Vector3, U1, U3, Rotation3, Matrix3};
+use nalgebra::{Vector3, U1, U3, Matrix3};
 use nalgebra::storage::Storage;
 
 pub fn convert_matrix(n: u8, v: &Matrix3<f32>) -> (u32, u32) {

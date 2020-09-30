@@ -425,14 +425,22 @@ impl HQMServer {
         }
     }
 
-    fn create_player_object (objects: & mut Vec<HQMGameObject>) -> Option<usize> {
+    fn create_player_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>) -> Option<usize> {
         let object_slot = HQMServer::find_empty_object_slot(& objects);
         if let Some(i) = object_slot {
+            let linear_velocity = Vector3::new (0.0, 0.0, 0.0);
+            let mut collision_balls = Vec::with_capacity(6);
+            collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.0, 0.0, 0.0), & start, & rot, & linear_velocity, 0.225));
+            collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.25, 0.3125, 0.0), & start, & rot, & linear_velocity, 0.25));
+            collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(-0.25, 0.3125, 0.0), & start, & rot, & linear_velocity, 0.25));
+            collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(-0.1875, -0.1875, 0.0), & start, & rot, & linear_velocity, 0.1875));
+            collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.1875, -0.1875, 0.0), & start, & rot, & linear_velocity, 0.1875));
+            collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.0, 0.5, 0.0), & start, & rot, & linear_velocity, 0.1875));
             objects[i] = HQMGameObject::Player(HQMSkater {
                 body: HQMBody {
-                    pos: Point3::new(15.0, 1.5, 15.0),
-                    linear_velocity: Vector3::new (0.0, 0.0, 0.0),
-                    rot: Matrix3::identity(),
+                    pos: start,
+                    linear_velocity,
+                    rot,
                     angular_velocity: Vector3::new (0.0, 0.0, 0.0),
                     rot_mul: Vector3::new (2.75, 6.16, 2.35)
                 },
@@ -445,7 +453,8 @@ impl HQMServer {
                 input: HQMPlayerInput::default(),
                 old_input: HQMPlayerInput::default(),
                 stick_placement: Vector2::new(0.0, 0.0),
-                stick_placement_delta: Vector2::new(0.0, 0.0)
+                stick_placement_delta: Vector2::new(0.0, 0.0),
+                collision_balls
             })
         }
         return object_slot;
@@ -464,7 +473,10 @@ impl HQMServer {
                     if player.team != new_team {
                         player.team = new_team;
                         if player.skater.is_none() {
-                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects) {
+                            let pos = Point3::new(15.0, 1.5, 15.0);
+                            let rot = Matrix3::identity();
+
+                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot) {
                                 player.skater = Some(i);
                             }
                         }
@@ -867,7 +879,8 @@ struct HQMSkater {
     input: HQMPlayerInput,
     old_input: HQMPlayerInput,
     stick_placement: Vector2<f32>,      // Azimuth and inclination in radians
-    stick_placement_delta: Vector2<f32> // Change in azimuth and inclination per hundred of a second
+    stick_placement_delta: Vector2<f32>, // Change in azimuth and inclination per hundred of a second
+    collision_balls: Vec<HQMSkaterCollisionBall>
 }
 
 impl HQMSkater {
@@ -886,6 +899,26 @@ impl HQMSkater {
             stick_rot,
             head_rot: get_position (16, (self.head_rot + 2.0) * 8192.0),
             body_rot: get_position (16, (self.head_rot + 2.0) * 8192.0)
+        }
+    }
+}
+
+struct HQMSkaterCollisionBall {
+    offset: Vector3<f32>,
+    pos: Point3<f32>,
+    velocity: Vector3<f32>,
+    radius: f32
+
+}
+
+impl HQMSkaterCollisionBall {
+    fn from_skater(offset: Vector3<f32>, skater_pos: & Point3<f32>, skater_rot: & Matrix3<f32>, velocity: & Vector3<f32>, radius: f32) -> Self {
+        let pos = skater_pos + skater_rot * offset;
+        HQMSkaterCollisionBall {
+            offset,
+            pos,
+            velocity: velocity.clone_owned(),
+            radius
         }
     }
 }

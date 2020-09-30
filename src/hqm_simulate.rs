@@ -1,6 +1,5 @@
-use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMPlayerInput};
-use nalgebra::{Vector3, Rotation3, Matrix3, U3, U1, Matrix, ComplexField, Vector2, Point3, MatrixMN};
-use std::cmp::{min, max};
+use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall};
+use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Vector2, Point3};
 use std::ops::{Sub, AddAssign};
 use nalgebra::base::storage::{Storage, StorageMut};
 
@@ -23,7 +22,7 @@ impl HQMServer {
             update_player(player);
             let pos_delta_copy = player.body.linear_velocity.clone_owned();
             let rot_axis_copy = player.body.angular_velocity.clone_owned();
-            update_player2(player);
+            update_player2(player, & self.game.rink);
             update_stick(player, & pos_delta_copy, & rot_axis_copy);
             player.old_input = player.input.clone();
         }
@@ -184,6 +183,36 @@ fn collisions_between_puck_and_rink(puck: & mut HQMPuck, puck_vertices: &Vec<Poi
     }
 }
 
+fn collision_between_collision_ball_and_rink(ball: &HQMSkaterCollisionBall, rink: & HQMRink) -> Option<(f32, Vector3<f32>)> {
+    let mut max_proj = 0f32;
+    let mut coll_normal  = None;
+    for (p, normal) in rink.planes.iter() {
+
+        let proj = (p - &ball.pos).dot (normal) + ball.radius;
+        if proj > max_proj {
+            max_proj = proj;
+            coll_normal = Some(normal.clone_owned());
+        }
+    }
+    for (p, dir, radius) in rink.corners.iter() {
+        let mut p2 = p - &ball.pos;
+        p2[1] = 0.0;
+        if p2[0]*dir[0] < 0.0 && p2[2]*dir[2] < 0.0 {
+            let diff = p2.norm() + ball.radius - radius;
+            if diff > max_proj {
+                max_proj = diff;
+                let p2n = p2.normalize();
+                coll_normal = Some(p2n);
+            }
+
+        }
+    }
+    match coll_normal {
+        Some(n) => Some((max_proj, n)),
+        None => None
+    }
+}
+
 fn collision_between_vertex_and_rink(vertex: &Point3<f32>, rink: & HQMRink) -> Option<(f32, Vector3<f32>)> {
     let mut max_proj = 0f32;
     let mut coll_normal  = None;
@@ -212,7 +241,6 @@ fn collision_between_vertex_and_rink(vertex: &Point3<f32>, rink: & HQMRink) -> O
         Some(n) => Some((max_proj, n)),
         None => None
     }
-
 }
 
 fn get_puck_vertices (pos: & Point3<f32>, rot: & Matrix3<f32>, height: f32, radius: f32) -> Vec<Point3<f32>> {
@@ -230,8 +258,16 @@ fn get_puck_vertices (pos: & Point3<f32>, rot: & Matrix3<f32>, height: f32, radi
 }
 
 fn update_player(player: & mut HQMSkater) {
+    let old_pos_delta = player.body.linear_velocity.clone_owned();
+    let old_rot_axis = player.body.angular_velocity.clone_owned();
+
     player.body.pos += &player.body.linear_velocity;
     player.body.linear_velocity[1] -= GRAVITY;
+    for collision_ball in player.collision_balls.iter_mut() {
+        collision_ball.velocity *= 0.999;
+        collision_ball.pos += &collision_ball.velocity;
+        collision_ball.velocity[1] -= GRAVITY;
+    }
     let feet_pos = &player.body.pos - player.body.rot.column(1).scale(player.height);
     if feet_pos[1] < 0.0 {
         let fwbw_from_client = player.input.fwbw;
@@ -244,9 +280,9 @@ fn update_player(player: & mut HQMSkater) {
             skate_direction.scale_mut(0.05);
             skate_direction -= &player.body.linear_velocity;
             let max_acceleration = if player.body.linear_velocity.dot(&col2) > 0.0 {
-                0.00055555f32
+                0.000555555f32
             } else {
-                0.000208f32
+                0.000208333f32
             };
             player.body.linear_velocity += limit_vector_length(&skate_direction, max_acceleration);
         } else if fwbw_from_client < 0.0 {
@@ -257,14 +293,17 @@ fn update_player(player: & mut HQMSkater) {
             skate_direction.scale_mut(0.05);
             skate_direction -= &player.body.linear_velocity;
             let vector_length_limit = if player.body.linear_velocity.dot(&col2) < 0.0 {
-                0.00055555f32
+                0.000555555f32
             } else {
-                0.000208f32
+                0.000208333f32
             };
             player.body.linear_velocity += limit_vector_length(&skate_direction, vector_length_limit);
         }
         if player.input.jump() && !player.old_input.jump() {
             player.body.linear_velocity[1] += 0.025;
+            for collision_ball in player.collision_balls.iter_mut() {
+                collision_ball.velocity[1] += 0.025;
+            }
         }
     }
 
@@ -280,11 +319,32 @@ fn update_player(player: & mut HQMSkater) {
     }
     adjust_head_body_rot(& mut player.head_rot, player.input.head_rot);
     adjust_head_body_rot(& mut player.body_rot, player.input.body_rot);
-
+    for (collision_ball_index, collision_ball) in player.collision_balls.iter_mut().enumerate() {
+        let mut new_rot = player.body.rot.clone_owned();
+        if collision_ball_index == 1 || collision_ball_index == 2 || collision_ball_index == 5 {
+            let rot_axis = new_rot.column(1).clone_owned();
+            rotate_matrix_around_axis(& mut new_rot, & rot_axis, player.head_rot * 0.5);
+            let rot_axis = new_rot.column(0).clone_owned();
+            rotate_matrix_around_axis(& mut new_rot, & rot_axis, player.body_rot);
+        }
+        let intended_collision_ball_pos = &player.body.pos + (new_rot * &collision_ball.offset);
+        let collision_pos_diff = intended_collision_ball_pos - &collision_ball.pos;
+        //println!("{:?}", collision_pos_diff);
+        let speed = speed_of_point_including_rotation(& intended_collision_ball_pos, & player.body.pos, & old_pos_delta, & old_rot_axis);
+        let force = collision_pos_diff.scale(0.125) + (speed - &collision_ball.velocity).scale(0.25);
+        collision_ball.velocity += force.scale(0.9375);
+        apply_acceleration_to_object(& mut player.body, &force.scale(0.9375 - 1.0), &intended_collision_ball_pos);
+    }
 
 }
 
-fn update_player2 (player: & mut HQMSkater) {
+fn update_player2 (player: & mut HQMSkater, rink: & HQMRink) {
+    for collision_ball in player.collision_balls.iter() {
+        let collision = collision_between_collision_ball_and_rink(collision_ball, rink);
+        if let Some((overlap, normal)) = collision {
+
+        }
+    }
     let turn = clamp(player.input.turn, -1.0, 1.0);
     if player.input.crouch() {
         player.height = (player.height - 0.015625).max(0.25)
