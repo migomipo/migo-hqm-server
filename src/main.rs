@@ -1,7 +1,6 @@
-use std::net::{UdpSocket, SocketAddr};
+use std::net::{SocketAddr};
 use nalgebra::{Vector3, Rotation3, Point3, Matrix3, Vector2};
 use std::cmp::min;
-use std::{time, io};
 use std::time::Duration;
 
 mod hqm_parse;
@@ -9,12 +8,11 @@ mod hqm_simulate;
 
 use hqm_parse::{HQMClientParser, HQMServerWriter, HQMObjectPacket};
 use hqm_parse::{HQMPuckPacket, HQMSkaterPacket};
-
+use tokio::net::UdpSocket;
 
 const GAME_HEADER: &[u8] = b"Hock";
 
 const MASTER_SERVER: &str = "66.226.72.227:27590";
-
 
 struct HQMGame {
 
@@ -32,9 +30,6 @@ struct HQMGame {
 }
 
 struct HQMRink {
-    corner_radius: f32,
-    width: f32,
-    length: f32,
     planes: Vec<(Point3<f32>, Vector3<f32>)>,
     corners: Vec<(Point3<f32>, Vector3<f32>, f32)>
 }
@@ -59,9 +54,6 @@ impl HQMRink {
             (Point3::new(r, 0.0, lr),  Vector3::new(-1.0, 0.0,  1.0), corner_radius)
         ];
         HQMRink {
-            width,
-            length,
-            corner_radius,
             planes,
             corners
         }
@@ -140,16 +132,15 @@ impl HQMGame {
 struct HQMServer {
     players: Vec<Option<HQMConnectedPlayer>>,
     server_name: Vec<u8>,
-    socket: UdpSocket,
     team_max: u32,
     game: HQMGame,
     public: bool,
     game_alloc: u32,
-    public_timer: u32
+    addr: SocketAddr
 }
 
 impl HQMServer {
-    fn handle_message(&mut self, (size, addr): (usize, SocketAddr), buf: &[u8]) {
+    async fn handle_message(&mut self, (size, addr): (usize, SocketAddr), socket: & mut UdpSocket, buf: &[u8]) {
         let mut parser = hqm_parse::HQMClientParser::new(&buf[0..size]);
         let header = parser.read_bytes_aligned(4);
         if header != GAME_HEADER {
@@ -158,16 +149,24 @@ impl HQMServer {
 
         let command = parser.read_byte_aligned();
         match command {
-            0 => self.request_info(&addr, &mut parser),
-            2 => self.player_join(&addr, &mut parser),
-            4 => self.player_update(&addr, &mut parser),
-            7 => self.player_quit(&addr),
-            _ => ()
+            0 => {
+                self.request_info(socket, &addr, &mut parser).await;
+            },
+            2 => {
+                self.player_join(&addr, &mut parser);
+            },
+            4 => {
+                self.player_update(&addr, &mut parser);
+            },
+            7 => {
+                self.player_quit(&addr);
+            },
+            _ => {}
         }
     }
 
-    fn request_info(&mut self, addr: &SocketAddr, parser: &mut HQMClientParser) {
-        let player_version = parser.read_bits(8);
+    async fn request_info<'a>(&self, socket: & mut UdpSocket, addr: &SocketAddr, parser: &mut HQMClientParser<'a>) -> std::io::Result<usize> {
+        let _player_version = parser.read_bits(8);
         let ping = parser.read_u32_aligned();
         let mut buf = [0u8; 1024];
         let mut writer = HQMServerWriter::new(&mut buf);
@@ -184,7 +183,7 @@ impl HQMServer {
         writer.write_bytes_aligned_padded(32, &*self.server_name);
 
         let bytes_written = writer.get_bytes_written();
-        self.socket.send_to(&buf[0..bytes_written], addr);
+        socket.send_to(&buf[0..bytes_written], addr).await
     }
 
     fn player_count (& self) -> u32 {
@@ -522,17 +521,7 @@ impl HQMServer {
         }
     }
 
-    fn tick(&mut self, mut buf: & mut [u8]) {
-        let player_count1 = self.player_count();
-        loop {
-            let read = self.socket.recv_from(&mut buf);
-            match read {
-                Ok(x) => self.handle_message(x, &buf),
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                Err(e) => () // Figure out what to do with this one
-            }
-        }
-
+    async fn tick(&mut self, socket: & mut UdpSocket) {
         self.remove_inactive_players ();
         let player_count2 = self.player_count();
         if player_count2 != 0 {
@@ -551,37 +540,17 @@ impl HQMServer {
             }
 
             for (i, x) in self.players.iter().enumerate() {
-                match x {
-                    Some(p) => self.send_update(p, i as u32, &packets),
-                    None => ()
+                if let Some(p) = x {
+                    self.send_update(p, i as u32, socket, &packets).await;
                 }
             }
             self.game.packet += 1;
             self.game.game_step += 1;
-        } else if player_count1 != 0 {
-            self.new_game();
-            println! ("New game {}", self.game.game_id);
-        }
-
-        if self.public  {
-            if self.public_timer == 0 {
-                HQMServer::notify_master_server(& self.socket);
-            }
-            self.public_timer += 1;
-            if self.public_timer == 100 {
-                self.public_timer = 0;
-            }
         }
 
     }
 
-    fn notify_master_server(socket: & UdpSocket) {
-        let server_addr: SocketAddr = MASTER_SERVER.parse().unwrap();
-        let msg = b"Hock\x20";
-        socket.send_to(msg, server_addr);
-    }
-
-    fn send_update(&self, player: &HQMConnectedPlayer, i: u32, packets: &[HQMObjectPacket]) {
+    async fn send_update(&self, player: &HQMConnectedPlayer, i: u32, socket: & mut UdpSocket, packets: &[HQMObjectPacket]) {
         let mut buf = [0u8; 2048];
         let mut writer = HQMServerWriter::new(&mut buf);
         if player.game_id != self.game.game_id {
@@ -695,7 +664,7 @@ impl HQMServer {
         }
 
         let bytes_written = writer.get_bytes_written();
-        self.socket.send_to(&buf[0..bytes_written], player.addr);
+        socket.send_to(&buf[0..bytes_written], player.addr).await;
     }
 
     fn new_game(&mut self) {
@@ -728,44 +697,53 @@ impl HQMServer {
 
     }
 
-    pub fn run(&mut self) -> std::io::Result<()> {
-        let mut buf = [0u8; 1024];
+    pub async fn run(&mut self) -> std::io::Result<()> {
+        let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
+        let mut public_timer = tokio::time::interval(Duration::from_secs(2));
+
+        let mut socket = tokio::net::UdpSocket::bind(& self.addr).await?;
+        let mut buf = [0u8;1024];
+
         loop {
-            let now = time::Instant::now();
-
-            self.tick(& mut buf);
-            let now2 = time::Instant::now();
-            let x = now2 - now;
-
-            if Duration::from_millis(10) >= x {
-                let wait = Duration::from_millis(10) - x;
-                std::thread::sleep(wait);
+            tokio::select! {
+                _ = tick_timer.tick() => {
+                    self.tick(& mut socket).await;
+                }
+                _ = public_timer.tick(), if self.public => {
+                    notify_master_server(& mut socket).await;
+                }
+                Ok(x) = socket.recv_from(&mut buf) => {
+                    self.handle_message(x, & mut socket, & buf).await;
+                }
             }
         }
         Ok(())
     }
 
-    pub fn new(name: Vec<u8>, port: u16, team_max: u32, public: bool) -> std::io::Result<Self> {
+    pub fn new(name: Vec<u8>, port: u16, team_max: u32, public: bool) -> Self {
         let mut player_vec = Vec::with_capacity(64);
         for _ in 0..64 {
             player_vec.push(None);
         }
 
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let socket = UdpSocket::bind(addr)?;
-        socket.set_nonblocking(true)?;
-        let server = HQMServer {
+
+        HQMServer {
             server_name: name,
-            socket,
+            addr,
             players: player_vec,
             team_max,
             game: HQMGame::new(1),
             public,
-            public_timer: 0,
             game_alloc: 1
-        };
-        Ok(server)
+        }
     }
+}
+
+async fn notify_master_server(socket: &mut UdpSocket) -> std::io::Result<usize> {
+    let server_addr: SocketAddr = MASTER_SERVER.parse().unwrap();
+    let msg = b"Hock\x20";
+    socket.send_to(msg, server_addr).await
 }
 
 struct HQMConnectedPlayer {
@@ -974,7 +952,8 @@ enum HQMMessage {
     },
 }
 
-fn main() -> std::io::Result<()> {
-    return HQMServer::new(Vec::from("MigoTest".as_bytes()), 27585, 5, true)?.run();
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    return HQMServer::new(Vec::from("MigoTest".as_bytes()), 27585, 5, true).run().await;
 }
 
