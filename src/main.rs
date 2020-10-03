@@ -1,5 +1,5 @@
 use std::net::{SocketAddr};
-use nalgebra::{Vector3, Rotation3, Point3, Matrix3, Vector2};
+use nalgebra::{Vector3, Point3, Matrix3, Vector2};
 use std::cmp::min;
 use std::time::Duration;
 
@@ -66,53 +66,24 @@ impl HQMGame {
         for _ in 0..32 {
             object_vec.push(HQMGameObject::None);
         }
-        object_vec[0] = HQMGameObject::Puck(HQMPuck {
-            body: HQMBody {
-                pos: Point3::new(10.0, 1.5, 10.0),
-                linear_velocity: Vector3::new(0.1, 0.0, 0.0),
-                rot: Rotation3::from_euler_angles(0.5, 0.5, 0.5).matrix().clone_owned(),
-                angular_velocity: Vector3::new(0.0,0.0,0.0),
-                rot_mul: Vector3::new(223.5, 128.0, 223.5)
-            },
-            radius: 0.125,
-            height: 0.0412500016391,
-        });
+        for x in 0..5 {
+            for y in 0..5 {
+                let i = 5*x + y;
+                object_vec[i as usize] = HQMGameObject::Puck(HQMPuck {
+                    body: HQMBody {
+                        pos: Point3::new(15.0 + ((x-2) as f32) * 2.0, 1.5, 30.5 + ((y-2) as f32) * 2.0),
+                        linear_velocity: Vector3::new(0.0, 0.0, 0.0),
+                        rot: Matrix3::identity(),
+                        angular_velocity: Vector3::new(0.0,0.0,0.0),
+                        rot_mul: Vector3::new(223.5, 128.0, 223.5)
+                    },
+                    radius: 0.125,
+                    height: 0.0412500016391,
+                });
+            }
+        }
 
-        object_vec[1] = HQMGameObject::Puck(HQMPuck {
-            body: HQMBody {
-                pos: Point3::new(20.0, 1.5, 30.0),
-                linear_velocity: Vector3::new(0.0, 0.0, 0.0),
-                rot: Matrix3::identity(),
-                angular_velocity: Vector3::new(0.0,0.0,0.0),
-                rot_mul: Vector3::new(223.5, 128.0, 223.5)
-            },
-            radius: 0.125,
-            height: 0.0412500016391,
-        });
 
-        object_vec[2] = HQMGameObject::Puck(HQMPuck {
-            body: HQMBody {
-                pos: Point3::new(15.0, 1.5, 50.0),
-                linear_velocity: Vector3::new(0.0, 0.0, 0.0),
-                rot: Matrix3::identity(),
-                angular_velocity: Vector3::new(0.0,0.0,0.0),
-                rot_mul: Vector3::new(223.5, 128.0, 223.5)
-            },
-            radius: 0.125,
-            height: 0.0412500016391,
-        });
-
-        object_vec[3] = HQMGameObject::Puck(HQMPuck {
-            body: HQMBody {
-                pos: Point3::new(5.0, 1.5, 20.0),
-                linear_velocity: Vector3::new(0.0, 0.0, 0.0),
-                rot: Matrix3::identity(),
-                angular_velocity: Vector3::new(0.0,0.0,0.0),
-                rot_mul: Vector3::new(223.5, 128.0, 223.5)
-            },
-            radius: 0.125,
-            height: 0.0412500016391,
-        });
         HQMGame {
             objects: object_vec,
             global_messages: vec![],
@@ -182,8 +153,8 @@ impl HQMServer {
 
         writer.write_bytes_aligned_padded(32, &*self.server_name);
 
-        let bytes_written = writer.get_bytes_written();
-        socket.send_to(&buf[0..bytes_written], addr).await
+        let slice = writer.get_slice();
+        socket.send_to(slice, addr).await
     }
 
     fn player_count (& self) -> u32 {
@@ -663,8 +634,8 @@ impl HQMServer {
             }
         }
 
-        let bytes_written = writer.get_bytes_written();
-        socket.send_to(&buf[0..bytes_written], player.addr).await;
+        let slice = writer.get_slice();
+        socket.send_to(slice, player.addr).await;
     }
 
     fn new_game(&mut self) {
