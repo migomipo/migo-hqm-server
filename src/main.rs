@@ -218,6 +218,26 @@ impl HQMServer {
         }
     }
 
+    fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
+        if let Some(player) = & mut self.players[player_index] {
+            player.hand = hand;
+            if let Some(skater_obj_index) = player.skater {
+                if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
+                    skater.hand = hand;
+                }
+            }
+        }
+    }
+
+    fn process_command (&mut self, command: &str, args: &[&str], player_index: usize) {
+        if command == "lefty" {
+            self.set_hand(HQMSkaterHand::Left, player_index);
+        } else if command == "righty" {
+            self.set_hand(HQMSkaterHand::Right, player_index);
+        }
+        println! ("{} {:?}", command, args);
+    }
+
     fn process_message(&mut self, bytes: Vec<u8>, player_index: usize) {
         let msg = match String::from_utf8(bytes) {
             Ok(s) => s,
@@ -225,7 +245,14 @@ impl HQMServer {
         };
 
         if self.players[player_index].is_some() {
-            self.add_global_chat_message(player_index as u32, msg)
+            if msg.starts_with("/") {
+                let split: Vec<&str> = msg.split_ascii_whitespace().collect();
+                let command = &split[0][1..];
+                let args = &split[1..];
+                self.process_command(command, args, player_index);
+            } else {
+                self.add_global_chat_message(player_index as u32, msg)
+            }
         }
     }
 
@@ -395,7 +422,7 @@ impl HQMServer {
         }
     }
 
-    fn create_player_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>) -> Option<usize> {
+    fn create_player_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand) -> Option<usize> {
         let object_slot = HQMServer::find_empty_object_slot(& objects);
         if let Some(i) = object_slot {
             let linear_velocity = Vector3::new (0.0, 0.0, 0.0);
@@ -424,6 +451,7 @@ impl HQMServer {
                 old_input: HQMPlayerInput::default(),
                 stick_placement: Vector2::new(0.0, 0.0),
                 stick_placement_delta: Vector2::new(0.0, 0.0),
+                hand,
                 collision_balls
             })
         }
@@ -446,7 +474,7 @@ impl HQMServer {
                             let pos = Point3::new(15.0, 1.5, 15.0);
                             let rot = Matrix3::identity();
 
-                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot) {
+                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand) {
                                 player.skater = Some(i);
                             }
                         }
@@ -728,7 +756,8 @@ struct HQMConnectedPlayer {
     msgpos: u32,
     chat_rep: u32,
     messages: Vec<HQMMessage>,
-    inactivity: u32
+    inactivity: u32,
+    hand: HQMSkaterHand
 }
 
 impl HQMConnectedPlayer {
@@ -744,8 +773,8 @@ impl HQMConnectedPlayer {
             chat_rep: 0,
             messages: global_messages,
             input: HQMPlayerInput::default(),
-            inactivity: 0
-
+            inactivity: 0,
+            hand: HQMSkaterHand::Right
         }
     }
 }
@@ -817,6 +846,11 @@ struct HQMBody {
     rot_mul: Vector3<f32>
 }
 
+#[derive(Copy, Clone)]
+enum HQMSkaterHand {
+    Left, Right
+}
+
 struct HQMSkater {
     body: HQMBody,
     stick_pos: Point3<f32>,        // Measured in meters
@@ -829,7 +863,8 @@ struct HQMSkater {
     old_input: HQMPlayerInput,
     stick_placement: Vector2<f32>,      // Azimuth and inclination in radians
     stick_placement_delta: Vector2<f32>, // Change in azimuth and inclination per hundred of a second
-    collision_balls: Vec<HQMSkaterCollisionBall>
+    collision_balls: Vec<HQMSkaterCollisionBall>,
+    hand: HQMSkaterHand
 }
 
 impl HQMSkater {

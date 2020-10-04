@@ -1,4 +1,4 @@
-use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall};
+use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand};
 use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Vector2, Point3};
 use std::ops::{Sub, AddAssign};
 use nalgebra::base::storage::{Storage, StorageMut};
@@ -37,7 +37,7 @@ impl HQMServer {
             let pos_delta_copy = player.body.linear_velocity.clone_owned();
             let rot_axis_copy = player.body.angular_velocity.clone_owned();
 
-            update_player2(player, & self.game.rink);
+            update_player2(player);
             update_stick(player, & pos_delta_copy, & rot_axis_copy, & self.game.rink);
             player.old_input = player.input.clone();
         }
@@ -389,7 +389,7 @@ fn update_player(player: & mut HQMSkater) {
 
 }
 
-fn update_player2 (player: & mut HQMSkater, rink: & HQMRink) {
+fn update_player2 (player: & mut HQMSkater) {
     let turn = clamp(player.input.turn, -1.0, 1.0);
     if player.input.crouch() {
         player.height = (player.height - 0.015625).max(0.25)
@@ -454,8 +454,13 @@ fn update_stick(player: & mut HQMSkater, old_pos_delta: & Vector3<f32>, old_rot_
     // Now that stick placement has been calculated,
     // we will use it to calculate the stick position and rotation
 
-    let pivot1_pos = &player.body.pos + (&player.body.rot * Vector3::new(-0.375, -0.5, -0.125));
-    let pivot2_pos = &player.body.pos + (&player.body.rot * Vector3::new(-0.375, 0.5, -0.125));
+    let mul = match player.hand {
+        HQMSkaterHand::Right => 1.0,
+        HQMSkaterHand::Left => -1.0
+    };
+
+    let pivot1_pos = &player.body.pos + (&player.body.rot * Vector3::new(-0.375 * mul, -0.5, -0.125));
+    let pivot2_pos = &player.body.pos + (&player.body.rot * Vector3::new(-0.375 * mul, 0.5, -0.125));
 
     let stick_pos_converted = player.body.rot.transpose() * (&player.stick_pos - pivot1_pos);
 
@@ -468,7 +473,7 @@ fn update_stick(player: & mut HQMSkater, old_pos_delta: & Vector3<f32>, old_rot_
 
     if player.stick_placement[1] > 0.0 {
         let col1 = player.stick_rot.column(1).clone_owned();
-        rotate_matrix_around_axis(& mut player.stick_rot, & col1, player.stick_placement[1] * 0.5 * std::f32::consts::PI)
+        rotate_matrix_around_axis(& mut player.stick_rot, & col1, player.stick_placement[1] * mul * 0.5 * std::f32::consts::PI)
     }
 
     // Rotate around the stick axis
@@ -481,16 +486,17 @@ fn update_stick(player: & mut HQMSkater, old_pos_delta: & Vector3<f32>, old_rot_
     let temp = stick_rotation2.column(0).clone_owned();
     rotate_matrix_around_axis(& mut stick_rotation2, & temp, 0.25 * std::f32::consts::PI);
 
-    let mut temp_pos2 = pivot2_pos + stick_rotation2.column(2).scale(-1.75);
-    if temp_pos2[1] < 0.0 {
-        temp_pos2[1] = 0.0;
+    let stick_length = 1.75;
+    let mut intended_stick_position = pivot2_pos + stick_rotation2.column(2).scale(-stick_length);
+    if intended_stick_position[1] < 0.0 {
+        intended_stick_position[1] = 0.0;
     }
 
-    let momentum = speed_of_point_including_rotation(& temp_pos2, & player.body.pos, old_pos_delta, old_rot_axis);
-    let stick_pos_movement = 0.125 * (temp_pos2 - &player.stick_pos) - player.stick_velocity.scale(0.5) + momentum.scale(0.5);
+    let speed_at_stick_pos = speed_of_point_including_rotation(&intended_stick_position, & player.body.pos, old_pos_delta, old_rot_axis);
+    let stick_pos_movement = 0.125 * (intended_stick_position - &player.stick_pos) + (speed_at_stick_pos - &player.stick_velocity).scale(0.5);
 
     player.stick_velocity += stick_pos_movement.scale(0.996);
-    apply_acceleration_to_object(& mut player.body, & stick_pos_movement.scale(-0.004), & temp_pos2);
+    apply_acceleration_to_object(& mut player.body, & stick_pos_movement.scale(-0.004), &intended_stick_position);
 
     if let Some((overlap, normal)) = collision_between_sphere_and_rink(&player.stick_pos, 0.09375, rink) {
         let mut n = normal.scale(overlap * 0.25) - player.stick_velocity.scale(0.5);
