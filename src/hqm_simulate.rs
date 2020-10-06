@@ -44,8 +44,9 @@ impl HQMServer {
 
         for i in 0..players.len() {
             for j in i+1..players.len() {
-                let p1 = & players[i];
-                let p2 = & players[j];
+                let (a,b) = players.split_at_mut(j);
+                let p1 = &mut a[i];
+                let p2 = &mut b[0];
                 for (ib, p1_collision_ball) in p1.collision_balls.iter().enumerate() {
                     for (jb, p2_collision_ball) in p2.collision_balls.iter().enumerate() {
                         let pos_diff = &p1_collision_ball.pos - &p2_collision_ball.pos;
@@ -56,6 +57,18 @@ impl HQMServer {
                             collisions.push(HQMCollision::PlayerPlayer((i, ib), (j, jb), overlap, pos_diff.normalize()));
                         }
 
+                    }
+                }
+                let stick_v = &p1.stick_pos - &p2.stick_pos;
+                let stick_distance = stick_v.norm();
+                if stick_distance < 0.25 {
+                    let stick_overlap = 0.25 - stick_distance;
+                    let normal = stick_v.normalize();
+                    let mut force = normal.scale(0.125 * stick_overlap) + (&p2.stick_velocity - &p1.stick_velocity).scale(0.25);
+                    if force.dot(&normal) > 0.0 {
+                        limit_rejection(& mut force, & normal, 0.01);
+                        p1.stick_velocity += force.scale(0.5);
+                        p2.stick_velocity -= force.scale(0.5);
                     }
                 }
             }

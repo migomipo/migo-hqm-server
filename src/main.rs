@@ -66,9 +66,9 @@ impl HQMGame {
         for _ in 0..32 {
             object_vec.push(HQMGameObject::None);
         }
-        for x in 0..5 {
-            for y in 0..5 {
-                let i = 5*x + y;
+        for x in 0..4 {
+            for y in 0..4 {
+                let i = 4*x + y;
                 object_vec[i as usize] = HQMGameObject::Puck(HQMPuck {
                     body: HQMBody {
                         pos: Point3::new(15.0 + ((x-2) as f32) * 2.0, 1.5, 30.5 + ((y-2) as f32) * 2.0),
@@ -469,14 +469,16 @@ impl HQMServer {
                         HQMTeam::Blue
                     };
                     if player.team != new_team {
-                        player.team = new_team;
                         if player.skater.is_none() {
                             let pos = Point3::new(15.0, 1.5, 15.0);
                             let rot = Matrix3::identity();
 
                             if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand) {
+                                player.team = new_team;
                                 player.skater = Some(i);
                             }
+                        } else {
+                            player.team = new_team;
                         }
                         new_messages.push(HQMMessage::PlayerUpdate {
                             player_name: player.player_name.clone().into_bytes(),
