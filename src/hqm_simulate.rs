@@ -320,12 +320,11 @@ fn update_player(player: & mut HQMSkater) {
         collision_ball.pos += &collision_ball.velocity;
         collision_ball.velocity[1] -= GRAVITY;
     }
-    let feet_pos = &player.body.pos - player.body.rot.column(1).scale(player.height);
+    let feet_pos = &player.body.pos - (&player.body.rot * Vector3::y().scale(player.height));
     if feet_pos[1] < 0.0 {
         let fwbw_from_client = player.input.fwbw;
-
+        let col2 = &player.body.rot * Vector3::z();
         if fwbw_from_client > 0.0 {
-            let col2 = player.body.rot.column(2);
             let mut skate_direction = -col2.clone_owned();
             skate_direction[1] = 0.0;
             skate_direction.normalize_mut();
@@ -338,7 +337,6 @@ fn update_player(player: & mut HQMSkater) {
             };
             player.body.linear_velocity += limit_vector_length(&skate_direction, max_acceleration);
         } else if fwbw_from_client < 0.0 {
-            let col2 = player.body.rot.column(2);
             let mut skate_direction = col2.clone_owned();
             skate_direction[1] = 0.0;
             skate_direction.normalize_mut();
@@ -361,21 +359,20 @@ fn update_player(player: & mut HQMSkater) {
 
     // Turn player
     let turn = clamp(player.input.turn, -1.0, 1.0);
+    let mut turn_change = &player.body.rot * Vector3::y();
     if player.input.shift() {
-        let mut velocity_adjustment = player.body.rot.column(0).clone_owned();
+        let mut velocity_adjustment = &player.body.rot * Vector3::x();
         velocity_adjustment[1] = 0.0;
         velocity_adjustment.normalize_mut();
         velocity_adjustment.scale_mut(0.0333333 * turn);
         velocity_adjustment -= &player.body.linear_velocity;
         player.body.linear_velocity += limit_vector_length(&velocity_adjustment, 0.00027777);
-        let mut column = player.body.rot.column(1).clone_owned();
-        column.scale_mut(-turn * 5.6 / 14400.0);
-        player.body.angular_velocity += column;
+        turn_change.scale_mut(-turn * 5.6 / 14400.0);
+        player.body.angular_velocity += turn_change;
 
     } else {
-        let mut column = player.body.rot.column(1).clone_owned();
-        column.scale_mut(turn * 6.0 / 14400.0);
-        player.body.angular_velocity += column;
+        turn_change.scale_mut(turn * 6.0 / 14400.0);
+        player.body.angular_velocity += turn_change;
     }
 
     if player.body.angular_velocity.norm() > 0.00001 {
@@ -386,9 +383,9 @@ fn update_player(player: & mut HQMSkater) {
     for (collision_ball_index, collision_ball) in player.collision_balls.iter_mut().enumerate() {
         let mut new_rot = player.body.rot.clone_owned();
         if collision_ball_index == 1 || collision_ball_index == 2 || collision_ball_index == 5 {
-            let rot_axis = new_rot.column(1).clone_owned();
+            let rot_axis = &new_rot * Vector3::y();
             rotate_matrix_around_axis(& mut new_rot, & rot_axis, player.head_rot * 0.5);
-            let rot_axis = new_rot.column(0).clone_owned();
+            let rot_axis = &new_rot * Vector3::x();
             rotate_matrix_around_axis(& mut new_rot, & rot_axis, player.body_rot);
         }
         let intended_collision_ball_pos = &player.body.pos + (new_rot * &collision_ball.offset);
@@ -409,7 +406,8 @@ fn update_player2 (player: & mut HQMSkater) {
     } else {
         player.height = (player.height + 0.125).min (0.75);
     }
-    let feet_pos = &player.body.pos - player.body.rot.column(1).scale(player.height);
+
+    let feet_pos = &player.body.pos - &player.body.rot * Vector3::y().scale(player.height);
     let mut touches_ice = false;
     if feet_pos[1] < 0.0 {
         // Makes players bounce up if their feet get below the ice
@@ -418,8 +416,8 @@ fn update_player2 (player: & mut HQMSkater) {
 
         let mut temp2 = unit_y.scale(temp1) - player.body.linear_velocity.scale(0.25);
         if temp2.dot(&unit_y) > 0.0 {
-            let (column, rejection_limit) = if player.input.shift() { (0, 0.4) } else { (2, 1.2) };
-            let mut temp_v2 = player.body.rot.column(column).clone_owned();
+            let (column, rejection_limit) = if player.input.shift() { (Vector3::x(), 0.4) } else { (Vector3::z(), 1.2) };
+            let mut temp_v2 = &player.body.rot * column;
             temp_v2[1] = 0.0;
             normal_or_zero_mut(& mut temp_v2);
 
@@ -440,11 +438,12 @@ fn update_player2 (player: & mut HQMSkater) {
         let mut unit: Vector3<f32> = Vector3::y();
 
         if !player.input.shift() {
-            let temp = -player.body.linear_velocity.dot(&player.body.rot.column(2)) / 0.05;
-            rotate_vector_around_axis(& mut unit, &player.body.rot.column(2), 0.225 * turn * temp);
+            let axis = &player.body.rot * Vector3::z();
+            let temp = -player.body.linear_velocity.dot(&axis) / 0.05;
+            rotate_vector_around_axis(& mut unit, &axis, 0.225 * turn * temp);
         }
 
-        let mut temp2 = unit.cross(&player.body.rot.column(1));
+        let mut temp2 = unit.cross(&(&player.body.rot * Vector3::y()));
 
         let temp2n = normal_or_zero(&temp2);
         temp2.scale_mut(0.008333333);
@@ -485,22 +484,23 @@ fn update_stick(player: & mut HQMSkater, old_pos_delta: & Vector3<f32>, old_rot_
     player.stick_rot = stick_rotation1;
 
     if player.stick_placement[1] > 0.0 {
-        let col1 = player.stick_rot.column(1).clone_owned();
-        rotate_matrix_around_axis(& mut player.stick_rot, & col1, player.stick_placement[1] * mul * 0.5 * std::f32::consts::PI)
+        let axis = &player.stick_rot * Vector3::y();
+        rotate_matrix_around_axis(& mut player.stick_rot, & axis, player.stick_placement[1] * mul * 0.5 * std::f32::consts::PI)
     }
 
     // Rotate around the stick axis
-    let handle = (player.stick_rot.column(2).clone_owned() + player.stick_rot.column(1).scale(0.75)).normalize();
-    rotate_matrix_around_axis(& mut player.stick_rot, & handle, -player.input.stick_angle * 0.25 * std::f32::consts::PI);
+    let handle_axis = (&player.stick_rot * Vector3::new(0.0, 0.75, 1.0)).normalize();
+    rotate_matrix_around_axis(& mut player.stick_rot, &handle_axis, -player.input.stick_angle * 0.25 * std::f32::consts::PI);
 
     let mut stick_rotation2 = player.body.rot.clone_owned();
     rotate_matrix_spherical(& mut stick_rotation2, player.stick_placement[0], player.stick_placement[1]);
 
-    let temp = stick_rotation2.column(0).clone_owned();
+    let temp = stick_rotation2 * Vector3::x();
     rotate_matrix_around_axis(& mut stick_rotation2, & temp, 0.25 * std::f32::consts::PI);
 
     let stick_length = 1.75;
-    let mut intended_stick_position = pivot2_pos + stick_rotation2.column(2).scale(-stick_length);
+
+    let mut intended_stick_position = pivot2_pos + (&stick_rotation2 * Vector3::z().scale(-stick_length));
     if intended_stick_position[1] < 0.0 {
         intended_stick_position[1] = 0.0;
     }
@@ -533,9 +533,9 @@ fn speed_of_point_including_rotation(p: & Point3<f32>, pos: & Point3<f32>, old_p
 }
 
 fn rotate_matrix_spherical(matrix: & mut Matrix3<f32>, azimuth: f32, inclination: f32) {
-    let col1 = matrix.column(1).clone_owned();
+    let col1 = &*matrix * Vector3::y();
     rotate_matrix_around_axis(matrix, &col1, azimuth);
-    let col0 = matrix.column(0).clone_owned();
+    let col0 = &*matrix * Vector3::x();
     rotate_matrix_around_axis(matrix, &col0, inclination);
 }
 
