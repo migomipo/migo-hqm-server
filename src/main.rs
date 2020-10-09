@@ -102,12 +102,9 @@ impl HQMGame {
 
 struct HQMServer {
     players: Vec<Option<HQMConnectedPlayer>>,
-    server_name: Vec<u8>,
-    team_max: u32,
+    config: HQMServerConfiguration,
     game: HQMGame,
-    public: bool,
-    game_alloc: u32,
-    addr: SocketAddr
+    game_alloc: u32
 }
 
 impl HQMServer {
@@ -149,9 +146,9 @@ impl HQMServer {
         let player_count  = self.player_count();
         writer.write_bits(8, player_count);
         writer.write_bits(4, 0);
-        writer.write_bits(4, self.team_max);
+        writer.write_bits(4, self.config.team_max);
 
-        writer.write_bytes_aligned_padded(32, &*self.server_name);
+        writer.write_bytes_aligned_padded(32, self.config.server_name.as_ref());
 
         let slice = writer.get_slice();
         socket.send_to(slice, addr).await
@@ -702,7 +699,8 @@ impl HQMServer {
         let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
         let mut public_timer = tokio::time::interval(Duration::from_secs(2));
 
-        let mut socket = tokio::net::UdpSocket::bind(& self.addr).await?;
+        let addr = SocketAddr::from(([0, 0, 0, 0], self.config.port));
+        let mut socket = tokio::net::UdpSocket::bind(& addr).await?;
         let mut buf = [0u8;1024];
 
         loop {
@@ -710,7 +708,7 @@ impl HQMServer {
                 _ = tick_timer.tick() => {
                     self.tick(& mut socket).await;
                 }
-                _ = public_timer.tick(), if self.public => {
+                _ = public_timer.tick(), if self.config.public => {
                     notify_master_server(& mut socket).await;
                 }
                 Ok(x) = socket.recv_from(&mut buf) => {
@@ -721,22 +719,17 @@ impl HQMServer {
         Ok(())
     }
 
-    pub fn new(name: Vec<u8>, port: u16, team_max: u32, public: bool) -> Self {
+    pub fn new(config: HQMServerConfiguration) -> Self {
         let mut player_vec = Vec::with_capacity(64);
         for _ in 0..64 {
             player_vec.push(None);
         }
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
-
         HQMServer {
-            server_name: name,
-            addr,
             players: player_vec,
-            team_max,
             game: HQMGame::new(1),
-            public,
-            game_alloc: 1
+            game_alloc: 1,
+            config
         }
     }
 }
@@ -960,8 +953,21 @@ enum HQMMessage {
     },
 }
 
+struct HQMServerConfiguration {
+    server_name: String,
+    port: u16,
+    team_max: u32,
+    public: bool
+}
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    return HQMServer::new(Vec::from("MigoTest".as_bytes()), 27585, 5, true).run().await;
+    let config = HQMServerConfiguration {
+        server_name: String::from("MigoTest"),
+        port: 27585,
+        team_max: 5,
+        public: true
+    };
+    return HQMServer::new(config).run().await;
 }
 
