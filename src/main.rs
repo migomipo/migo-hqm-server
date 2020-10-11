@@ -9,6 +9,7 @@ mod hqm_simulate;
 use hqm_parse::{HQMClientParser, HQMServerWriter, HQMObjectPacket};
 use hqm_parse::{HQMPuckPacket, HQMSkaterPacket};
 use tokio::net::UdpSocket;
+use std::rc::Rc;
 
 const GAME_HEADER: &[u8] = b"Hock";
 
@@ -17,7 +18,7 @@ const MASTER_SERVER: &str = "66.226.72.227:27590";
 struct HQMGame {
 
     objects: Vec<HQMGameObject>,
-    global_messages: Vec<HQMMessage>,
+    global_messages: Vec<Rc<HQMMessage>>,
     red_score: u32,
     blue_score: u32,
     period: u32,
@@ -417,11 +418,12 @@ impl HQMServer {
     }
 
     fn add_global_message(&mut self, message: HQMMessage) {
-        self.game.global_messages.push(message.clone());
+        let rc = Rc::new(message);
+        self.game.global_messages.push(rc.clone());
         for player in self.players.iter_mut() {
             match player {
                 Some(player) => {
-                    player.messages.push(message.clone());
+                    player.messages.push(rc.clone());
                 }
                 _ => ()
             }
@@ -675,7 +677,7 @@ impl HQMServer {
 
             for i in pos2..pos2 + remaining_messages {
                 let message = &player.messages[i];
-                match message {
+                match Rc::as_ref(message) {
                     HQMMessage::Chat {
                         player_index,
                         message
@@ -813,13 +815,13 @@ struct HQMConnectedPlayer {
     packet: u32,
     msgpos: u32,
     chat_rep: u32,
-    messages: Vec<HQMMessage>,
+    messages: Vec<Rc<HQMMessage>>,
     inactivity: u32,
     hand: HQMSkaterHand
 }
 
 impl HQMConnectedPlayer {
-    pub fn new(player_name: String, addr: SocketAddr, global_messages: Vec<HQMMessage>) -> Self {
+    pub fn new(player_name: String, addr: SocketAddr, global_messages: Vec<Rc<HQMMessage>>) -> Self {
         HQMConnectedPlayer {
             player_name,
             addr,
