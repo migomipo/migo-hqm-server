@@ -1,5 +1,5 @@
 use std::net::{SocketAddr};
-use nalgebra::{Vector3, Point3, Matrix3, Vector2};
+use nalgebra::{Vector3, Point3, Matrix3, Vector2, Isometry, Isometry3};
 use std::cmp::min;
 use std::time::Duration;
 
@@ -29,9 +29,70 @@ struct HQMGame {
     rink: HQMRink
 }
 
+struct HQMRinkNet {
+    posts: Vec<(Point3<f32>, Point3<f32>, f32)>,
+    surfaces: Vec<(Point3<f32>,Point3<f32>,Point3<f32>,Point3<f32>)>
+}
+
+impl HQMRinkNet {
+    fn new(team: HQMTeam, rink_width: f32, rink_length: f32) -> Self {
+        let mid_x = rink_width / 2.0;
+
+        let (pos, rot) = match team {
+            HQMTeam::Blue => (Point3::new (mid_x, 0.0, 3.5), Matrix3::identity()),
+            HQMTeam::Red => (Point3::new (mid_x, 0.0, rink_length - 3.5), Matrix3::from_columns (& [-Vector3::x(), Vector3::y(), -Vector3::z()])),
+            _ => panic!()
+        };
+        let (front_upper_left, front_upper_right, front_lower_left, front_lower_right,
+            back_upper_left, back_upper_right, back_lower_left, back_lower_right) =
+            (
+                &pos + &rot * Vector3::new(1.5, 1.0, 0.5),
+                &pos + &rot * Vector3::new(1.5, 1.0, 0.5),
+                &pos + &rot * Vector3::new(1.5, 0.0, 0.5),
+                &pos + &rot * Vector3::new(1.5, 0.0, 0.5),
+                &pos + &rot * Vector3::new(1.25, 1.0, -0.25),
+                &pos + &rot * Vector3::new(1.25, 1.0, -0.25),
+                &pos + &rot * Vector3::new(1.25, 0.0, -0.5),
+                &pos + &rot * Vector3::new(1.25, 0.0, -0.5)
+            );
+
+        HQMRinkNet {
+            posts: vec![
+                (front_lower_right.clone(), front_upper_right.clone(), 0.1875),
+                (front_lower_left.clone(), front_upper_left.clone(), 0.1875),
+                (front_upper_right.clone(), front_upper_left.clone(), 0.125),
+
+                (front_lower_left.clone(), back_lower_left.clone(), 0.125),
+                (front_lower_right.clone(), back_lower_right.clone(), 0.125),
+                (front_upper_left.clone(), back_upper_left.clone(), 0.125),
+                (back_upper_right.clone(), front_upper_right.clone(), 0.125),
+
+                (back_lower_left.clone(), back_upper_left.clone(), 0.125),
+                (back_lower_right.clone(), back_upper_right.clone(), 0.125),
+                (back_lower_left.clone(), back_lower_right.clone(), 0.125),
+                (back_upper_left.clone(), back_upper_right.clone(), 0.125),
+
+            ],
+            surfaces: vec![
+                (back_upper_left.clone(), back_upper_right.clone(),
+                 back_lower_right.clone(), back_lower_left.clone()),
+                (front_upper_left.clone(), back_upper_left.clone(),
+                 back_lower_left.clone(), front_lower_left.clone()),
+                (back_upper_right.clone(), front_upper_right.clone(),
+                 front_lower_right.clone(), back_lower_right.clone()),
+                (front_upper_left.clone(), front_upper_right.clone(),
+                 back_upper_right.clone(), back_upper_left.clone())
+            ]
+        }
+
+    }
+}
+
 struct HQMRink {
     planes: Vec<(Point3<f32>, Vector3<f32>)>,
-    corners: Vec<(Point3<f32>, Vector3<f32>, f32)>
+    corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
+    red_net: HQMRinkNet,
+    blue_net: HQMRinkNet
 }
 
 impl HQMRink {
@@ -55,7 +116,9 @@ impl HQMRink {
         ];
         HQMRink {
             planes,
-            corners
+            corners,
+            red_net: HQMRinkNet::new(HQMTeam::Red, width, length),
+            blue_net: HQMRinkNet::new(HQMTeam::Blue, width, length),
         }
     }
 }

@@ -1,6 +1,7 @@
 use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand};
 use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Vector2, Point3};
 use std::ops::{Sub, AddAssign};
+use std::f32::consts::PI;
 use nalgebra::base::storage::{Storage, StorageMut};
 use std::iter::FromIterator;
 
@@ -299,7 +300,7 @@ fn get_puck_vertices (pos: & Point3<f32>, rot: & Matrix3<f32>, height: f32, radi
     let mut res = Vec::with_capacity(48);
     for i in 0..16 {
 
-        let (sin, cos) = ((i as f32)*std::f32::consts::PI/8.0).sin_cos();
+        let (sin, cos) = ((i as f32)*PI/8.0).sin_cos();
         for j in -1..=1 {
             let point = Vector3::new(cos * radius, (j as f32)*height, sin * radius);
             let point2 = rot * point;
@@ -485,18 +486,18 @@ fn update_stick(player: & mut HQMSkater, old_pos_delta: & Vector3<f32>, old_rot_
 
     if player.stick_placement[1] > 0.0 {
         let axis = &player.stick_rot * Vector3::y();
-        rotate_matrix_around_axis(& mut player.stick_rot, & axis, player.stick_placement[1] * mul * 0.5 * std::f32::consts::PI)
+        rotate_matrix_around_axis(& mut player.stick_rot, & axis, player.stick_placement[1] * mul * 0.5 * PI)
     }
 
     // Rotate around the stick axis
     let handle_axis = (&player.stick_rot * Vector3::new(0.0, 0.75, 1.0)).normalize();
-    rotate_matrix_around_axis(& mut player.stick_rot, &handle_axis, -player.input.stick_angle * 0.25 * std::f32::consts::PI);
+    rotate_matrix_around_axis(& mut player.stick_rot, &handle_axis, -player.input.stick_angle * 0.25 * PI);
 
     let mut stick_rotation2 = player.body.rot.clone_owned();
     rotate_matrix_spherical(& mut stick_rotation2, player.stick_placement[0], player.stick_placement[1]);
 
     let temp = stick_rotation2 * Vector3::x();
-    rotate_matrix_around_axis(& mut stick_rotation2, & temp, 0.25 * std::f32::consts::PI);
+    rotate_matrix_around_axis(& mut stick_rotation2, & temp, 0.25 * PI);
 
     let stick_length = 1.75;
 
