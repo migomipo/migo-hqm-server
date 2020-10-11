@@ -1,5 +1,5 @@
 use std::net::{SocketAddr};
-use nalgebra::{Vector3, Point3, Matrix3, Vector2, Isometry, Isometry3};
+use nalgebra::{Vector3, Point3, Matrix3, Vector2};
 use std::cmp::min;
 use std::time::Duration;
 

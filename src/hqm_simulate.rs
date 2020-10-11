@@ -323,32 +323,21 @@ fn update_player(player: & mut HQMSkater) {
     }
     let feet_pos = &player.body.pos - (&player.body.rot * Vector3::y().scale(player.height));
     if feet_pos[1] < 0.0 {
-        let fwbw_from_client = player.input.fwbw;
-        let col2 = &player.body.rot * Vector3::z();
-        if fwbw_from_client > 0.0 {
-            let mut skate_direction = -col2.clone_owned();
+        let fwbw_from_client = clamp(player.input.fwbw, -1.0, 1.0);
+        if fwbw_from_client != 0.0 {
+            let mut skate_direction = &player.body.rot * fwbw_from_client * -Vector3::z();
+            let max_acceleration = if player.body.linear_velocity.dot(&skate_direction) < 0.0 {
+                0.000555555f32 // If we're accelerating against the current direction of movement
+                // we're decelerating and can do so faster
+            } else {
+                0.000208333f32
+            };
             skate_direction[1] = 0.0;
             skate_direction.normalize_mut();
             skate_direction.scale_mut(0.05);
             skate_direction -= &player.body.linear_velocity;
-            let max_acceleration = if player.body.linear_velocity.dot(&col2) > 0.0 {
-                0.000555555f32
-            } else {
-                0.000208333f32
-            };
+
             player.body.linear_velocity += limit_vector_length(&skate_direction, max_acceleration);
-        } else if fwbw_from_client < 0.0 {
-            let mut skate_direction = col2.clone_owned();
-            skate_direction[1] = 0.0;
-            skate_direction.normalize_mut();
-            skate_direction.scale_mut(0.05);
-            skate_direction -= &player.body.linear_velocity;
-            let vector_length_limit = if player.body.linear_velocity.dot(&col2) < 0.0 {
-                0.000555555f32
-            } else {
-                0.000208333f32
-            };
-            player.body.linear_velocity += limit_vector_length(&skate_direction, vector_length_limit);
         }
         if player.input.jump() && !player.old_input.jump() {
             player.body.linear_velocity[1] += 0.025;
