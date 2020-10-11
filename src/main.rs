@@ -539,10 +539,6 @@ impl HQMServer {
         match command{
             "muteplayer" => {
                 if args.len() > 0{
-
-                    
-
-
                     self.mute_player(player_index,args.join(" "));
                 }
             },
@@ -1638,9 +1634,9 @@ async fn main() -> std::io::Result<()> {
 
         password: String::from("admin"),
         
-        time_period: 300, // Codemonster TODO: implement
-        time_warmup: 300, // Codemonster TODO: implement
-        time_intermission: 10 // Codemonster TODO: implement
+        time_period: 300,
+        time_warmup: 300,
+        time_intermission: 10
     };
 
     // Init vec for roles
@@ -1696,7 +1692,7 @@ async fn main() -> std::io::Result<()> {
         let config = HQMServerConfiguration {
             server_name: server_name,
             port: server_port,
-            team_max: server_team_max,
+            team_max: server_team_max, // Codemonster TODO: implement
             player_max: server_player_max, // Codemonster TODO: implement
             public: server_public,
 
