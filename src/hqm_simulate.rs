@@ -149,26 +149,30 @@ impl HQMServer {
                 }
             }
         }
-
-
     }
 }
 
-fn collision_between_vertex_and_stick2(puck_pos: &Point3<f32>, vertex: &Point3<f32>, p1: &Point3<f32>, p2: &Point3<f32>, p3: &Point3<f32>) -> Option<(f32, Vector3<f32>, f32)> {
-    let normal = (p3 - p1).cross(&(p2 - p1)).normalize();
+fn inside_triangle(pos: &Point3<f32>, p1: &Point3<f32>, p2: &Point3<f32>, p3: &Point3<f32>, normal: &Vector3<f32>) -> bool {
+    (pos - p1).cross(&(p2 - p1)).dot(&normal) >= 0.0 &&
+        (pos - p2).cross(&(p3 - p2)).dot(&normal) >= 0.0 &&
+        (pos - p3).cross(&(p1 - p3)).dot(&normal) >= 0.0
+}
+
+fn collision_between_puck_vertex_and_stick_surface(puck_pos: &Point3<f32>, vertex: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)) -> Option<(f32, f32, Vector3<f32>)> {
+    let normal = (&surface.2 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
+    let p1 = &surface.0;
     if (p1 - vertex).dot(&normal) >= 0.0 {
-        let dot2 = (p1 - puck_pos).dot(&normal);
-        if dot2 <= 0.0 {
+        let puck_pos_projection = (p1 - puck_pos).dot(&normal);
+        if puck_pos_projection <= 0.0 {
             let diff = vertex - puck_pos;
-            let dot3 = diff.dot(&normal);
-            if dot3 != 0.0 {
-                let overlap = dot2/dot3;
+            let diff_projection = diff.dot(&normal);
+            if diff_projection != 0.0 {
+                let overlap = puck_pos_projection / diff_projection;
                 let overlap_pos = puck_pos + diff.scale(overlap);
-                if (overlap_pos - p1).cross(&(p2 - p1)).dot(&normal) >= 0.0 &&
-                    (overlap_pos - p2).cross(&(p3 - p2)).dot(&normal) >= 0.0 &&
-                    (overlap_pos - p3).cross(&(p1 - p3)).dot(&normal) >= 0.0 {
+                if inside_triangle(&overlap_pos, &surface.0, &surface.1, &surface.2, &normal) ||
+                    inside_triangle(&overlap_pos, &surface.0, &surface.2, &surface.3, &normal) {
                     let dot_res = (overlap_pos - vertex).dot(&normal);
-                    return Some((overlap, normal, dot_res));
+                    return Some((overlap, dot_res, normal));
                 }
             }
         }
@@ -176,19 +180,12 @@ fn collision_between_vertex_and_stick2(puck_pos: &Point3<f32>, vertex: &Point3<f
     None
 }
 
-fn collision_between_vertex_and_stick(puck_pos: &Point3<f32>, vertex: &Point3<f32>, stick_planes: &Vec<(Point3<f32>,Point3<f32>,Point3<f32>,Point3<f32>)>) -> Option<(f32, Vector3<f32>)> {
+fn collision_between_puck_vertex_and_stick(puck_pos: &Point3<f32>, puck_vertex: &Point3<f32>, stick_surfaces: &Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)>) -> Option<(f32, Vector3<f32>)> {
     let mut overlap = 1f32;
     let mut res = None;
-    for plane in stick_planes.iter() {
-        let col1 = collision_between_vertex_and_stick2(puck_pos, vertex, &plane.0, &plane.1, &plane.2);
-        let col2 = collision_between_vertex_and_stick2(puck_pos, vertex, &plane.0, &plane.2, &plane.3);
-        if let Some((o, normal, dot)) = col1 {
-            if o < overlap {
-                res = Some((dot, normal));
-                overlap = o;
-            }
-        }
-        if let Some((o, normal, dot)) = col2 {
+    for stick_surface in stick_surfaces.iter() {
+        let collision = collision_between_puck_vertex_and_stick_surface(puck_pos, puck_vertex, stick_surface);
+        if let Some((o, dot, normal)) = collision {
             if o < overlap {
                 res = Some((dot, normal));
                 overlap = o;
@@ -201,10 +198,10 @@ fn collision_between_vertex_and_stick(puck_pos: &Point3<f32>, vertex: &Point3<f3
 
 fn collisions_between_puck_and_stick(puck: & mut HQMPuck, player: & mut HQMSkater, puck_vertices: &Vec<Point3<f32>>,
                                      old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>, old_stick_pos_delta: & Vector3<f32>) {
-    let stick_planes = get_stick_planes(player);
+    let stick_surfaces = get_stick_surfaces(player);
 
     for puck_vertex in puck_vertices.iter() {
-        let col = collision_between_vertex_and_stick(& puck.body.pos, puck_vertex, &stick_planes);
+        let col = collision_between_puck_vertex_and_stick(& puck.body.pos, puck_vertex, &stick_surfaces);
         if let Some ((dot, normal)) = col {
             let puck_vertex_speed = speed_of_point_including_rotation(&puck_vertex, & puck.body.pos, old_pos_delta, old_rot_axis);
 
@@ -219,7 +216,7 @@ fn collisions_between_puck_and_stick(puck: & mut HQMPuck, player: & mut HQMSkate
     }
 }
 
-fn get_stick_planes (player: & HQMSkater) -> Vec<(Point3<f32>,Point3<f32>,Point3<f32>,Point3<f32>)> {
+fn get_stick_surfaces(player: & HQMSkater) -> Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)> {
     let stick_size = Vector3::new(0.0625, 0.25, 0.5);
     let nnn = &player.stick_pos + &player.stick_rot * Vector3::new(-0.5, -0.5, -0.5).component_mul(&stick_size);
     let nnp = &player.stick_pos + &player.stick_rot * Vector3::new(-0.5, -0.5,  0.5).component_mul(&stick_size);
