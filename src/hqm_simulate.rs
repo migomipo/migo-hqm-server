@@ -195,7 +195,6 @@ fn collision_between_puck_vertex_and_stick(puck_pos: &Point3<f32>, puck_vertex: 
     res
 }
 
-
 fn collisions_between_puck_and_stick(puck: & mut HQMPuck, player: & mut HQMSkater, puck_vertices: &Vec<Point3<f32>>,
                                      old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>, old_stick_pos_delta: & Vector3<f32>) {
     let stick_surfaces = get_stick_surfaces(player);

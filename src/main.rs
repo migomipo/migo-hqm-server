@@ -107,19 +107,19 @@ struct HQMRink {
 }
 
 impl HQMRink {
-    fn new(in_width: f32, in_length: f32, corner_radius: f32) -> Self {
+    fn new(width: f32, length: f32, corner_radius: f32) -> Self {
 
         let zero = Point3::new(0.0,0.0,0.0);
         let planes = vec![
             (zero.clone(), Vector3::y()),
-            (Point3::new(0.0, 0.0, in_length), -Vector3::z()),
+            (Point3::new(0.0, 0.0, length), -Vector3::z()),
             (zero.clone(), Vector3::z()),
-            (Point3::new(in_width, 0.0, 0.0), -Vector3::x()),
+            (Point3::new(width, 0.0, 0.0), -Vector3::x()),
             (zero.clone(), Vector3::x()),
         ];
         let r = corner_radius;
-        let wr = in_width - corner_radius;
-        let lr = in_length - corner_radius;
+        let wr = width - corner_radius;
+        let lr = length - corner_radius;
         let corners = vec![
             (Point3::new(r, 0.0, r),   Vector3::new(-1.0, 0.0, -1.0), corner_radius),
             (Point3::new(wr, 0.0, r),  Vector3::new( 1.0, 0.0, -1.0), corner_radius),
@@ -129,10 +129,10 @@ impl HQMRink {
         HQMRink {
             planes,
             corners,
-            red_net: HQMRinkNet::new(HQMTeam::Red, in_width, in_length),
-            blue_net: HQMRinkNet::new(HQMTeam::Blue, in_width, in_length),
-            width:in_width,
-            length:in_length
+            red_net: HQMRinkNet::new(HQMTeam::Red, width, length),
+            blue_net: HQMRinkNet::new(HQMTeam::Blue, width, length),
+            width,
+            length
         }
     }
 }
