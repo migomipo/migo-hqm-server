@@ -1,7 +1,14 @@
 use std::net::{SocketAddr};
-use nalgebra::{Vector3, Point3, Matrix3, Vector2};
+
+use nalgebra::{Vector3, Point3, Matrix3, Vector2, Rotation3};
+
 use std::cmp::min;
 use std::time::Duration;
+use std::path::Path;
+
+// INI Crate For configuration
+extern crate ini;
+use ini::Ini;
 
 mod hqm_parse;
 mod hqm_simulate;
@@ -23,6 +30,7 @@ struct HQMGame {
     blue_score: u32,
     period: u32,
     time: u32,
+    paused: bool,
     timeout: u32,
     game_id: u32,
     game_step: u32,
@@ -93,22 +101,25 @@ struct HQMRink {
     planes: Vec<(Point3<f32>, Vector3<f32>)>,
     corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
     red_net: HQMRinkNet,
-    blue_net: HQMRinkNet
+    blue_net: HQMRinkNet,
+    width:f32,
+    length:f32
 }
 
 impl HQMRink {
-    fn new(width: f32, length: f32, corner_radius: f32) -> Self {
+    fn new(in_width: f32, in_length: f32, corner_radius: f32) -> Self {
+
         let zero = Point3::new(0.0,0.0,0.0);
         let planes = vec![
             (zero.clone(), Vector3::y()),
-            (Point3::new(0.0, 0.0, length), -Vector3::z()),
+            (Point3::new(0.0, 0.0, in_length), -Vector3::z()),
             (zero.clone(), Vector3::z()),
-            (Point3::new(width, 0.0, 0.0), -Vector3::x()),
+            (Point3::new(in_width, 0.0, 0.0), -Vector3::x()),
             (zero.clone(), Vector3::x()),
         ];
         let r = corner_radius;
-        let wr = width - corner_radius;
-        let lr = length - corner_radius;
+        let wr = in_width - corner_radius;
+        let lr = in_length - corner_radius;
         let corners = vec![
             (Point3::new(r, 0.0, r),   Vector3::new(-1.0, 0.0, -1.0), corner_radius),
             (Point3::new(wr, 0.0, r),  Vector3::new( 1.0, 0.0, -1.0), corner_radius),
@@ -118,8 +129,10 @@ impl HQMRink {
         HQMRink {
             planes,
             corners,
-            red_net: HQMRinkNet::new(HQMTeam::Red, width, length),
-            blue_net: HQMRinkNet::new(HQMTeam::Blue, width, length),
+            red_net: HQMRinkNet::new(HQMTeam::Red, in_width, in_length),
+            blue_net: HQMRinkNet::new(HQMTeam::Blue, in_width, in_length),
+            width:in_width,
+            length:in_length
         }
     }
 }
@@ -155,6 +168,7 @@ impl HQMGame {
             blue_score: 0,
             period: 0,
             time: 30000,
+            paused: false,
             timeout: 0,
             game_id,
             game_step: 0,
@@ -166,9 +180,11 @@ impl HQMGame {
 
 struct HQMServer {
     players: Vec<Option<HQMConnectedPlayer>>,
+    roles: Vec<HQMRole>,
     config: HQMServerConfiguration,
     game: HQMGame,
-    game_alloc: u32
+    game_alloc: u32,
+    is_muted:bool,
 }
 
 impl HQMServer {
@@ -279,6 +295,238 @@ impl HQMServer {
         }
     }
 
+    fn mute_player (& mut self, player_index: usize, mute_player: String) {
+
+        let mut do_action:bool = false;
+        let mut admin_player_name:String = String::from("");
+
+        if let Some(player) = & mut self.players[player_index] {
+            if player.is_admin{
+                
+                do_action=true;
+                admin_player_name.push_str(&mute_player);
+                
+            }
+        }
+
+
+        if do_action{
+
+            let mut player_found:bool = false;
+
+            for (search_player_index, p) in self.players.iter_mut().enumerate() {
+                if let Some(player) = p {
+                    if player.player_name == mute_player{
+                        player.is_muted=true;
+                        player_found=true;
+                    }
+                }
+            }
+
+            if player_found{
+                let msg = format!("{} muted by {}",mute_player,admin_player_name);
+                self.add_global_chat_message(u32::MAX, msg);
+            }
+            
+        }
+
+    }
+
+    fn unmute_player (& mut self, player_index: usize, mute_player: String) {
+
+        let mut do_action:bool = false;
+        let mut admin_player_name:String = String::from("");
+
+        if let Some(player) = & mut self.players[player_index] {
+            if player.is_admin{
+                
+                do_action=true;
+                admin_player_name.push_str(&mute_player);
+                
+            }
+        }
+
+
+        if do_action{
+
+            let mut player_found:bool = false;
+
+            for (search_player_index, p) in self.players.iter_mut().enumerate() {
+                if let Some(player) = p {
+                    if player.player_name == mute_player{
+                        player.is_muted=false;
+                        player_found=true;
+                    }
+                }
+            }
+
+            if player_found{
+                let msg = format!("{} unmuted by {}",mute_player,admin_player_name);
+                self.add_global_chat_message(u32::MAX, msg);
+            }
+            
+        }
+        
+    }
+    
+    fn mute_chat (& mut self, player_index: usize) {
+        if let Some(player) = & mut self.players[player_index] {
+            if player.is_admin{
+                self.is_muted=true;
+
+                let msg = format!("Chat muted by {}",player.player_name);
+                self.add_global_chat_message(u32::MAX, msg);
+            }
+        }
+    }
+
+    fn unmute_chat (& mut self, player_index: usize) {
+        if let Some(player) = & mut self.players[player_index] {
+            if player.is_admin{
+                self.is_muted=false;
+
+                let msg = format!("Chat unmuted by {}",player.player_name);
+                self.add_global_chat_message(u32::MAX, msg);
+            }
+        }
+    }
+
+    fn set_role (& mut self, player_index: usize, input_position:&str) {
+
+        let mut found_role:i32 = -1;
+
+        // Check for valid role
+        for (role_index, this_role) in self.roles.iter_mut().enumerate() {
+            if this_role.abbreviation.to_lowercase() == input_position.to_lowercase(){
+                found_role = role_index as i32;
+            }
+        }
+
+        // Role found, set player's role
+        if found_role >= 0{
+
+            if let Some(player) = & mut self.players[player_index] {
+
+                player.role_index = found_role as usize;
+
+                let msg = format!("{} position {}", player.player_name, input_position.to_uppercase());
+                self.add_global_chat_message(u32::MAX, msg);
+
+            }
+            
+        }
+            
+    }
+
+    fn admin_login (& mut self, player_index: usize, password:&str) {
+
+        if let Some(player) = & mut self.players[player_index] {
+   
+            if self.config.password == password{
+                player.is_admin = true;
+
+                let msg = format!("{} admin", player.player_name);
+                self.add_global_chat_message(u32::MAX, msg);
+            }
+        }
+    }
+
+    fn set_clock (& mut self, input_minutes: u32, input_seconds: u32,player_index: usize) {
+
+        if let Some(player) = & mut self.players[player_index] {
+            if player.is_admin{
+                self.game.time = (input_minutes * 60 * 100)+ (input_seconds * 100);
+
+                let msg = format!("Clock set by {}", player.player_name);
+                self.add_global_chat_message(u32::MAX, msg);
+            }
+        }
+        
+
+    }
+
+    fn set_score (& mut self, input_team: HQMTeam, input_score: u32,player_index: usize) {
+        if let Some(player) = & mut self.players[player_index] {
+            if player.is_admin{
+
+                match input_team {
+
+                    HQMTeam::Red =>{
+                        self.game.red_score = input_score;
+
+                        let msg = format!("Red score changed by {}",player.player_name);
+                        self.add_global_chat_message(u32::MAX, msg);
+                    },
+                    HQMTeam::Blue =>{
+                        self.game.blue_score = input_score;
+
+                        let msg = format!("Blue score changed by {}",player.player_name);
+                        self.add_global_chat_message(u32::MAX, msg);
+                    },
+                    _=>{}
+
+                }
+
+            }
+        }
+    }
+
+    fn faceoff (& mut self, player_index: usize) {
+        if let Some(player) = & mut self.players[player_index] {
+            if player.is_admin{
+                self.game.timeout = 5*100;
+
+                let msg = format!("Faceoff initiated by {}",player.player_name);
+                self.add_global_chat_message(u32::MAX, msg);
+            }
+        }
+    }
+
+    fn reset_game (& mut self, player_index: usize) {
+
+        let mut do_new_game:bool = false;
+
+        if let Some(player) = & mut self.players[player_index] {
+            if player.is_admin{
+                
+
+                do_new_game=true;
+
+                let msg = format!("Game reset by {}",player.player_name);
+                self.add_global_chat_message(u32::MAX, msg);
+            }
+        }
+
+        if do_new_game{
+            self.new_game();
+        }
+    }
+
+    fn pause (& mut self, player_index: usize) {
+        if let Some(player) = & mut self.players[player_index] {
+            if player.is_admin{
+                self.game.paused=true;
+
+                let msg = format!("Game paused by {}",player.player_name);
+                self.add_global_chat_message(u32::MAX, msg);
+            }
+        }
+    }
+
+    fn unpause (& mut self, player_index: usize) {
+        if let Some(player) = & mut self.players[player_index] {
+            if player.is_admin{
+                self.game.paused=false;
+
+                let msg = format!("Game resumed by {}",player.player_name);
+                self.add_global_chat_message(u32::MAX, msg);
+            }
+            
+        }
+    }
+
+    
+
     fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
         if let Some(player) = & mut self.players[player_index] {
             player.hand = hand;
@@ -290,12 +538,143 @@ impl HQMServer {
         }
     }
 
+    
+
     fn process_command (&mut self, command: &str, args: &[&str], player_index: usize) {
-        if command == "lefty" {
-            self.set_hand(HQMSkaterHand::Left, player_index);
-        } else if command == "righty" {
-            self.set_hand(HQMSkaterHand::Right, player_index);
+
+        match command{
+            "muteplayer" => {
+                if args.len() > 0{
+                    self.mute_player(player_index,args.join(" "));
+                }
+            },
+            "unmuteplayer" => {
+                if args.len() > 0{
+                    self.unmute_player(player_index,args.join(" "));
+                }
+            },
+            "mutechat" => {
+                self.mute_chat(player_index);
+            },
+            "unmute" => {
+                self.unmute_chat(player_index);
+            },
+            "set" => {
+
+                if args.len() > 1{
+
+                    match args[0]{
+                        "redscore" =>{
+
+                            let input_score = match args[1].parse::<i32>() {
+                                Ok(input_score) => input_score,
+                                Err(e) => -1
+                            };
+
+                            if input_score >= 0{
+                                self.set_score(HQMTeam::Red,input_score as u32,player_index)
+                            }
+
+                        },
+                        "bluescore" =>{
+
+                            let input_score = match args[1].parse::<i32>() {
+                                Ok(input_score) => input_score,
+                                Err(e) => -1
+                            };
+
+                            if input_score >= 0{
+                                self.set_score(HQMTeam::Blue,input_score as u32,player_index)
+                            }
+
+                        },
+                        "clock" =>{
+
+                            let time_part_string = match args[1].parse::<String>(){
+                                Ok(time_part_string) => time_part_string,
+                                Err(e) => {return;}
+                            };
+
+                            let time_parts: Vec<&str> = time_part_string.split(':').collect();
+
+                            if time_parts.len() >= 2{
+                                let time_minutes = match time_parts[0].parse::<i32>() {
+                                    Ok(time_minutes) => time_minutes,
+                                    Err(e) => -1
+                                };
+                                
+                                let time_seconds = match time_parts[1].parse::<i32>() {
+                                    Ok(time_seconds) => time_seconds,
+                                    Err(e) => -1
+                                };
+
+                                if time_minutes < 0 || time_seconds < 0{
+                                    return;
+                                }
+
+                                self.set_clock(time_minutes as u32,time_seconds as u32, player_index);
+
+                            }
+
+                        },
+                        "hand" =>{
+
+                            match args[1]{
+                                "left" =>{
+                                    self.set_hand(HQMSkaterHand::Left, player_index);
+                                },
+                                "right" =>{
+                                    self.set_hand(HQMSkaterHand::Right, player_index);
+                                },
+                                _=>{
+
+                                }
+                            }
+
+                        },
+                        _ => {
+                    
+                        }
+                    }
+                }
+
+            },
+            "sp" => {
+                if args.len() == 1{
+                    self.set_role(player_index,args[0]);
+                }
+            },
+            "setposition" => {
+                if args.len() == 1{
+                    self.set_role(player_index,args[0]);
+                }
+            },
+            "admin" => {
+                if args.len() == 1{
+                    self.admin_login(player_index,args[0]);
+                }
+            },
+            "faceoff" => {
+                self.faceoff(player_index);
+            },
+            "resetgame" => {
+                self.reset_game(player_index);
+            },
+            "pause" => {
+                self.pause(player_index);
+            },
+            "unpause" => {
+                self.unpause(player_index);
+            },
+            "lefty" => {
+                self.set_hand(HQMSkaterHand::Left, player_index);
+            },
+            "righty" => {
+                self.set_hand(HQMSkaterHand::Right, player_index);
+            },
+            _ => {}, // matches have to be exhaustive 
         }
+
         println! ("{} {:?}", command, args);
     }
 
@@ -312,7 +691,16 @@ impl HQMServer {
                 let args = &split[1..];
                 self.process_command(command, args, player_index);
             } else {
-                self.add_global_chat_message(player_index as u32, msg)
+
+                match &self.players[player_index as usize] {
+                    Some(player) => {
+                        if (player.is_muted != true && self.is_muted != true){
+                            self.add_global_chat_message(player_index as u32, msg)
+                        }
+                    },
+                    _=>{return;}
+                }
+
             }
         }
     }
@@ -484,6 +872,31 @@ impl HQMServer {
         }
     }
 
+    fn get_free_role(& self,input_team: HQMTeam ) -> usize{
+
+        for this_role_index in 0..self.roles.len(){
+
+            let mut found:bool=false;
+
+            for (player_index, p) in self.players.iter().enumerate() {
+                if let Some(player) = p {
+                    if player.team == input_team{
+                        if player.role_index == this_role_index{
+                            found=true;
+                        }
+                    }
+                }
+
+                if !found{
+                    return this_role_index;
+                }
+            }
+
+        }
+
+        return 0;
+    }
+
     fn create_player_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand) -> Option<usize> {
         let object_slot = HQMServer::find_empty_object_slot(& objects);
         if let Some(i) = object_slot {
@@ -503,7 +916,7 @@ impl HQMServer {
                     angular_velocity: Vector3::new (0.0, 0.0, 0.0),
                     rot_mul: Vector3::new (2.75, 6.16, 2.35)
                 },
-                stick_pos: Point3::new(15.0, 1.5, 15.0),
+                stick_pos: start,
                 stick_velocity: Vector3::new (0.0, 0.0, 0.0),
                 stick_rot: Matrix3::identity(),
                 head_rot: 0.0,
@@ -532,7 +945,7 @@ impl HQMServer {
                     };
                     if player.team != new_team {
                         if player.skater.is_none() {
-                            let pos = Point3::new(15.0, 1.5, 15.0);
+                            let pos = Point3::new(15.0, 2.5, 30.5);
                             let rot = Matrix3::identity();
 
                             if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand) {
@@ -542,6 +955,9 @@ impl HQMServer {
                         } else {
                             player.team = new_team;
                         }
+
+                        //player.role_index = self.get_free_role(new_team); // TODO; proper get role; this function should return a free role
+
                         new_messages.push(HQMMessage::PlayerUpdate {
                             player_name: player.player_name.clone().into_bytes(),
                             team: player.team,
@@ -757,12 +1173,170 @@ impl HQMServer {
             self.add_global_message(message);
         }
 
+        self.game.time = self.config.time_warmup * 100;
 
     }
 
+    fn do_faceoff(&mut self, faceoff_position_index: usize){
+
+        // For making sure teams have centers
+        let mut red_default_role_found = false;
+        let mut blue_default_role_found = false;
+
+        // Make sure each team has a center
+        for (player_index, p) in self.players.iter_mut().enumerate() {
+            if let Some(player) = p {
+                if let Some(skater_obj_index) = player.skater {
+                    if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
+                        if(player.team == HQMTeam::Red){
+                            
+                            if player.role_index == 0{
+                                red_default_role_found=true;
+                            }
+                        }else{
+
+                            if player.role_index == 0{
+                                blue_default_role_found=true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // One or more do not have a role
+        if !red_default_role_found || !blue_default_role_found {
+
+            for (player_index, p) in self.players.iter_mut().enumerate() {
+                if let Some(player) = p {
+                    if let Some(skater_obj_index) = player.skater {
+                        if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
+
+                            match player.team{
+                                HQMTeam::Red => {
+                                    if !red_default_role_found{
+                                        player.role_index = 0;
+                                        break;
+                                    }
+                                },
+                                HQMTeam::Blue =>{
+                                    if !blue_default_role_found{
+                                        player.role_index = 0;
+                                        break;
+                                    }
+                                },
+                                _=>{
+
+                                }
+                            }
+                        }
+
+                        if red_default_role_found && blue_default_role_found{
+                            break;
+                        }
+
+                    }
+                }
+            }
+
+        }
+
+        // Set faceoff positions
+        for (player_index, p) in self.players.iter_mut().enumerate() {
+            if let Some(player) = p {
+                if let Some(skater_obj_index) = player.skater {
+                    if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
+
+                        match player.team{
+                            HQMTeam::Red=>{
+
+                                let player_position = Point3::new(
+                                    (self.game.rink.width / 2.0)+(self.roles[player.role_index].faceoff_offsets[faceoff_position_index].x),
+                                    self.roles[player.role_index].faceoff_offsets[faceoff_position_index].y,
+                                    (self.game.rink.length / 2.0)+(self.roles[player.role_index].faceoff_offsets[faceoff_position_index].z)
+                                );
+
+                                let player_rotation = Rotation3::from_euler_angles(0.0,0.0,0.0);
+
+                                skater.set_orientation(player_position, player_rotation);
+                            },
+                            HQMTeam::Blue=>{
+
+                                let player_position = Point3::new(
+                                    (self.game.rink.width / 2.0)+(self.roles[player.role_index].faceoff_offsets[faceoff_position_index].x*-1.0),
+                                    self.roles[player.role_index].faceoff_offsets[faceoff_position_index].y,
+                                    (self.game.rink.length / 2.0)+(self.roles[player.role_index].faceoff_offsets[faceoff_position_index].z*-1.0)
+                                );
+
+                                let player_rotation = Rotation3::from_euler_angles(0.0,std::f32::consts::PI,0.0);
+
+                                skater.set_orientation(player_position, player_rotation);
+
+                            },
+                            _=>{
+                                skater.set_orientation(Point3::new(0.0,4.0,0.0), Rotation3::from_euler_angles(0.0,0.0,0.0));
+                            }
+                        }
+
+                    }
+                }
+            }
+        }
+
+    }
+
+    fn clock_second(&mut self) {
+
+        if self.game.paused != true{
+            // Intermission
+            if self.game.timeout > 0{
+                self.game.timeout = self.game.timeout -100;
+
+                // Intermission Over?
+                if self.game.timeout <= 0{
+                    self.game.time = self.config.time_period*100;
+                    self.game.timeout = 0;
+                    self.game.period = self.game.period+1;
+                    
+                    // Faceoff
+                    self.do_faceoff(0);
+                }
+
+            // Normal game time
+            }else if self.game.time > 0{
+                self.game.time = self.game.time -100;
+
+            // Game time <= 0; Switch to intermission
+            } else {
+                self.game.time = 0;
+                self.game.timeout = self.config.time_intermission*100;
+            }
+        } else {
+
+            if self.game.timeout > 0{
+                self.game.timeout = self.game.timeout -100;
+
+                // Intermission Over?
+                if self.game.timeout <= 0{
+
+                    // Faceoff
+                    self.do_faceoff(0);
+
+                }
+            }
+
+        }
+    }
+
     pub async fn run(&mut self) -> std::io::Result<()> {
+
+        // Start new game
+        self.new_game();
+
+        // Set up timers
         let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
         let mut public_timer = tokio::time::interval(Duration::from_secs(2));
+        let mut seconds_timer = tokio::time::interval(Duration::from_secs(1));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.port));
         let mut socket = tokio::net::UdpSocket::bind(& addr).await?;
@@ -776,6 +1350,9 @@ impl HQMServer {
                 _ = public_timer.tick(), if self.config.public => {
                     notify_master_server(& mut socket).await;
                 }
+                _ = seconds_timer.tick() => {
+                    self.clock_second();
+                }
                 Ok(x) = socket.recv_from(&mut buf) => {
                     self.handle_message(x, & mut socket, & buf).await;
                 }
@@ -784,16 +1361,20 @@ impl HQMServer {
         Ok(())
     }
 
-    pub fn new(config: HQMServerConfiguration) -> Self {
+    pub fn new(config: HQMServerConfiguration, roles: Vec<HQMRole>) -> Self {
         let mut player_vec = Vec::with_capacity(64);
         for _ in 0..64 {
             player_vec.push(None);
         }
 
+        
+
         HQMServer {
             players: player_vec,
+            roles: roles,
             game: HQMGame::new(1),
             game_alloc: 1,
+            is_muted:false,
             config
         }
     }
@@ -809,6 +1390,7 @@ struct HQMConnectedPlayer {
     player_name: String,
     addr: SocketAddr,
     team: HQMTeam,
+    role_index: usize,
     skater: Option<usize>,
     game_id: u32,
     input: HQMPlayerInput,
@@ -817,6 +1399,8 @@ struct HQMConnectedPlayer {
     chat_rep: u32,
     messages: Vec<Rc<HQMMessage>>,
     inactivity: u32,
+    is_admin: bool,
+    is_muted:bool,
     hand: HQMSkaterHand
 }
 
@@ -826,6 +1410,7 @@ impl HQMConnectedPlayer {
             player_name,
             addr,
             team: HQMTeam::Spec,
+            role_index: 0,
             skater: None,
             game_id: u32::MAX,
             packet: u32::MAX,
@@ -834,6 +1419,8 @@ impl HQMConnectedPlayer {
             messages: global_messages,
             input: HQMPlayerInput::default(),
             inactivity: 0,
+            is_admin: false,
+            is_muted:false,
             hand: HQMSkaterHand::Right
         }
     }
@@ -879,6 +1466,11 @@ enum HQMGameObject {
     None,
     Player(HQMSkater),
     Puck(HQMPuck),
+}
+
+struct HQMRole {
+    abbreviation: String,
+    faceoff_offsets: Vec<Point3<f32>> // To store multiple faceoff positions as needed
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -945,6 +1537,28 @@ impl HQMSkater {
             body_rot: get_position (16, (self.head_rot + 2.0) * 8192.0)
         }
     }
+
+    fn set_orientation(&mut self,in_position: Point3<f32>,in_rotation: Rotation3<f32>){
+
+        let in_velocity = Vector3::new(0.0,0.0,0.0);
+
+        self.body.pos = in_position;
+        self.body.linear_velocity = in_velocity;
+        self.body.angular_velocity = in_velocity;
+        self.body.rot_mul = Vector3::new(2.75, 6.16, 2.35);
+        self.body.rot = Matrix3::from(in_rotation);
+        self.stick_pos =  in_position;
+        self.stick_rot = Matrix3::from(in_rotation);
+        self.stick_velocity = in_velocity;
+
+        for i in 0..self.collision_balls.len() {
+            self.collision_balls[i].pos =in_position;
+            self.collision_balls[i].velocity =in_velocity;
+
+        }
+
+    }
+
 }
 
 struct HQMSkaterCollisionBall {
@@ -1021,18 +1635,141 @@ enum HQMMessage {
 struct HQMServerConfiguration {
     server_name: String,
     port: u16,
+    public: bool,
+    player_max: u32,
     team_max: u32,
-    public: bool
+    
+    password: String,
+
+    time_period: u32,
+    time_warmup: u32,
+    time_intermission: u32,
 }
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+
+    // Default values
     let config = HQMServerConfiguration {
         server_name: String::from("MigoTest"),
         port: 27585,
+        public: true,
+
         team_max: 5,
-        public: true
+        player_max: 15, // Codemonster TODO: implement
+
+        password: String::from("admin"),
+        
+        time_period: 300,
+        time_warmup: 300,
+        time_intermission: 10
     };
-    return HQMServer::new(config).run().await;
+
+    // Init vec for roles
+    let mut rolevec:Vec<HQMRole>=Vec::new();
+
+    // Load configuration (if exists)
+    if Path::new("config.ini").exists(){
+        
+        // Load configuration file
+        let conf = Ini::load_from_file("config.ini").unwrap();
+
+        // Server information
+        let server_section = conf.section(Some("Server")).unwrap();
+        let server_name = server_section.get("name").unwrap().parse::<String>().unwrap();
+        let server_port = server_section.get("port").unwrap().parse::<u16>().unwrap();
+        let server_public = server_section.get("public").unwrap().parse::<bool>().unwrap();
+        let server_player_max = server_section.get("player_max").unwrap().parse::<u32>().unwrap(); // Codemonster Todo: enforce player max
+        let server_team_max = server_section.get("team_max").unwrap().parse::<u32>().unwrap(); // Codemonster Todo: enforce player max
+        let server_password = server_section.get("password").unwrap().parse::<String>().unwrap();
+
+        // Rules
+        let rules_section = conf.section(Some("Rules")).unwrap();
+        let rules_time_period = rules_section.get("time_period").unwrap().parse::<u32>().unwrap();
+        let rules_time_warmup = rules_section.get("time_warmup").unwrap().parse::<u32>().unwrap();
+        let rules_time_intermission = rules_section.get("time_intermission").unwrap().parse::<u32>().unwrap();
+
+        // Roles
+        let roles_section = conf.section(Some("Roles")).unwrap();
+        for (k, v) in roles_section.iter() {
+
+            let string_abbreviation = k.parse::<String>().unwrap();
+            let string_offsets = v.parse::<String>().unwrap();
+
+            let mut offsets:Vec<Point3<f32>>=Vec::new();
+
+            let offset_parts: Vec<&str> = string_offsets.split('|').collect();
+            for this_offset in offset_parts{
+                let offset_parts: Vec<&str> = this_offset.split(',').collect();
+
+
+                offsets.push(Point3::new(offset_parts[0].parse::<f32>().unwrap(),offset_parts[1].parse::<f32>().unwrap(),offset_parts[2].parse::<f32>().unwrap()));
+                
+            }
+
+            rolevec.push(HQMRole {
+                abbreviation:string_abbreviation,
+                faceoff_offsets:offsets
+            });
+
+            
+        }
+
+        let config = HQMServerConfiguration {
+            server_name: server_name,
+            port: server_port,
+            team_max: server_team_max, // Codemonster TODO: implement
+            player_max: server_player_max, // Codemonster TODO: implement
+            public: server_public,
+
+            password: server_password,
+
+            time_period: rules_time_period, 
+            time_warmup: rules_time_warmup, 
+            time_intermission: rules_time_intermission 
+        };
+
+        return HQMServer::new(config, rolevec).run().await;
+
+    }else{
+
+        // No config file: set defaults
+
+        // Default roles
+        rolevec.push(HQMRole{
+            abbreviation: String::from("C"),
+            faceoff_offsets:vec![Point3::new(0.0,1.5,0.75)]
+        });
+
+        rolevec.push(HQMRole{
+            abbreviation: String::from("LD"),
+            faceoff_offsets:vec![Point3::new(-2.0,1.5,8.0)]
+        });
+
+        rolevec.push(HQMRole{
+            abbreviation: String::from("RD"),
+            faceoff_offsets:vec![Point3::new(2.0,1.5,8.0)]
+        });
+
+        rolevec.push(HQMRole{
+            abbreviation: String::from("LW"),
+            faceoff_offsets:vec![Point3::new(-5.0,1.5,2.0)]
+        });
+
+        rolevec.push(HQMRole{
+            abbreviation: String::from("RW"),
+            faceoff_offsets:vec![Point3::new(5.0,1.5,2.0)]
+        });
+
+        rolevec.push(HQMRole{
+            abbreviation: String::from("G"),
+            faceoff_offsets:vec![Point3::new(0.0,1.5,22.0)]
+        });
+
+    }   
+
+    // Config file didn't exist; use defaults as described
+    return HQMServer::new(config, rolevec).run().await;
+
 }
 

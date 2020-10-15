@@ -5,8 +5,10 @@ authors = ["John Eriksson <john.eriksson.16@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+
 nalgebra = "0.22"
 tokio = { version = "0.2.22", features = ["udp", "time", "macros", "rt-core"] }
+rust-ini = "0.15" # INI For configuration
 
 [profile.dev]
 opt-level = 2
