@@ -38,6 +38,7 @@ struct HQMGame {
     rink: HQMRink
 }
 
+#[derive(Debug, Clone)]
 struct HQMRinkNet {
     posts: Vec<(Point3<f32>, Point3<f32>, f32)>,
     surfaces: Vec<(Point3<f32>,Point3<f32>,Point3<f32>,Point3<f32>)>
@@ -55,13 +56,13 @@ impl HQMRinkNet {
         let (front_upper_left, front_upper_right, front_lower_left, front_lower_right,
             back_upper_left, back_upper_right, back_lower_left, back_lower_right) =
             (
+                &pos + &rot * Vector3::new(-1.5, 1.0, 0.5),
                 &pos + &rot * Vector3::new(1.5, 1.0, 0.5),
-                &pos + &rot * Vector3::new(1.5, 1.0, 0.5),
+                &pos + &rot * Vector3::new(-1.5, 0.0, 0.5),
                 &pos + &rot * Vector3::new(1.5, 0.0, 0.5),
-                &pos + &rot * Vector3::new(1.5, 0.0, 0.5),
+                &pos + &rot * Vector3::new(-1.25, 1.0, -0.25),
                 &pos + &rot * Vector3::new(1.25, 1.0, -0.25),
-                &pos + &rot * Vector3::new(1.25, 1.0, -0.25),
-                &pos + &rot * Vector3::new(1.25, 0.0, -0.5),
+                &pos + &rot * Vector3::new(-1.25, 0.0, -0.5),
                 &pos + &rot * Vector3::new(1.25, 0.0, -0.5)
             );
 
@@ -97,6 +98,7 @@ impl HQMRinkNet {
     }
 }
 
+#[derive(Debug, Clone)]
 struct HQMRink {
     planes: Vec<(Point3<f32>, Vector3<f32>)>,
     corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
@@ -296,20 +298,6 @@ impl HQMServer {
     }
 
     fn mute_player (& mut self, player_index: usize, mute_player: String) {
-
-        let mut do_action:bool = false;
-        let mut admin_player_name:String = String::from("");
-
-        if let Some(player) = & mut self.players[player_index] {
-            if player.is_admin{
-                
-                do_action=true;
-                admin_player_name.push_str(&mute_player);
-                
-            }
-        }
-
-
         if let Some(player) = & self.players[player_index]{
             if player.is_admin {
                 let admin_player_name = player.player_name.clone();
@@ -355,7 +343,7 @@ impl HQMServer {
             }
         }
     }
-    
+
     fn mute_chat (& mut self, player_index: usize) {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{

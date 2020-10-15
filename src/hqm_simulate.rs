@@ -152,13 +152,15 @@ impl HQMServer {
     }
 }
 
-fn inside_triangle(pos: &Point3<f32>, p1: &Point3<f32>, p2: &Point3<f32>, p3: &Point3<f32>, normal: &Vector3<f32>) -> bool {
+fn inside_surface(pos: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>), normal: &Vector3<f32>) -> bool {
+    let (p1, p2, p3, p4) = surface;
     (pos - p1).cross(&(p2 - p1)).dot(&normal) >= 0.0 &&
         (pos - p2).cross(&(p3 - p2)).dot(&normal) >= 0.0 &&
-        (pos - p3).cross(&(p1 - p3)).dot(&normal) >= 0.0
+        (pos - p3).cross(&(p4 - p3)).dot(&normal) >= 0.0 &&
+        (pos - p4).cross(&(p1 - p4)).dot(&normal) >= 0.0
 }
 
-fn collision_between_puck_vertex_and_stick_surface(puck_pos: &Point3<f32>, vertex: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)) -> Option<(f32, f32, Vector3<f32>)> {
+fn collision_between_puck_vertex_and_surface(puck_pos: &Point3<f32>, vertex: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)) -> Option<(f32, Point3<f32>, Vector3<f32>)> {
     let normal = (&surface.2 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
     let p1 = &surface.0;
     if (p1 - vertex).dot(&normal) >= 0.0 {
@@ -169,10 +171,8 @@ fn collision_between_puck_vertex_and_stick_surface(puck_pos: &Point3<f32>, verte
             if diff_projection != 0.0 {
                 let overlap = puck_pos_projection / diff_projection;
                 let overlap_pos = puck_pos + diff.scale(overlap);
-                if inside_triangle(&overlap_pos, &surface.0, &surface.1, &surface.2, &normal) ||
-                    inside_triangle(&overlap_pos, &surface.0, &surface.2, &surface.3, &normal) {
-                    let dot_res = (overlap_pos - vertex).dot(&normal);
-                    return Some((overlap, dot_res, normal));
+                if inside_surface(&overlap_pos, surface, &normal) {
+                    return Some((overlap, overlap_pos, normal));
                 }
             }
         }
@@ -181,14 +181,15 @@ fn collision_between_puck_vertex_and_stick_surface(puck_pos: &Point3<f32>, verte
 }
 
 fn collision_between_puck_vertex_and_stick(puck_pos: &Point3<f32>, puck_vertex: &Point3<f32>, stick_surfaces: &Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)>) -> Option<(f32, Vector3<f32>)> {
-    let mut overlap = 1f32;
+    let mut min_overlap = 1f32;
     let mut res = None;
     for stick_surface in stick_surfaces.iter() {
-        let collision = collision_between_puck_vertex_and_stick_surface(puck_pos, puck_vertex, stick_surface);
-        if let Some((o, dot, normal)) = collision {
-            if o < overlap {
+        let collision = collision_between_puck_vertex_and_surface(puck_pos, puck_vertex, stick_surface);
+        if let Some((overlap, overlap_pos, normal)) = collision {
+            if overlap < min_overlap {
+                let dot = (overlap_pos - puck_vertex).dot(&normal);
                 res = Some((dot, normal));
-                overlap = o;
+                min_overlap = overlap;
             }
         }
     }
