@@ -310,67 +310,54 @@ impl HQMServer {
         }
 
 
-        if do_action{
+        if let Some(player) = & self.players[player_index]{
+            if player.is_admin {
+                let admin_player_name = player.player_name.clone();
+                let mut player_found:bool = false;
 
-            let mut player_found:bool = false;
-
-            for (search_player_index, p) in self.players.iter_mut().enumerate() {
-                if let Some(player) = p {
-                    if player.player_name == mute_player{
-                        player.is_muted=true;
-                        player_found=true;
+                for p in self.players.iter_mut() {
+                    if let Some(player) = p {
+                        if player.player_name == mute_player{
+                            player.is_muted=true;
+                            player_found=true;
+                        }
                     }
                 }
-            }
 
-            if player_found{
-                let msg = format!("{} muted by {}",mute_player,admin_player_name);
-                self.add_global_chat_message(u32::MAX, msg);
+                if player_found{
+                    let msg = format!("{} muted by {}",mute_player,admin_player_name);
+                    self.add_global_chat_message(u32::MAX, msg);
+                }
             }
-            
         }
 
     }
 
     fn unmute_player (& mut self, player_index: usize, mute_player: String) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin {
+                let admin_player_name = player.player_name.clone();
+                let mut player_found:bool = false;
 
-        let mut do_action:bool = false;
-        let mut admin_player_name:String = String::from("");
-
-        if let Some(player) = & mut self.players[player_index] {
-            if player.is_admin{
-                
-                do_action=true;
-                admin_player_name.push_str(&mute_player);
-                
-            }
-        }
-
-
-        if do_action{
-
-            let mut player_found:bool = false;
-
-            for (search_player_index, p) in self.players.iter_mut().enumerate() {
-                if let Some(player) = p {
-                    if player.player_name == mute_player{
-                        player.is_muted=false;
-                        player_found=true;
+                for p in self.players.iter_mut() {
+                    if let Some(player) = p {
+                        if player.player_name == mute_player{
+                            player.is_muted=false;
+                            player_found=true;
+                        }
                     }
                 }
-            }
 
-            if player_found{
-                let msg = format!("{} unmuted by {}",mute_player,admin_player_name);
-                self.add_global_chat_message(u32::MAX, msg);
+                if player_found{
+                    let msg = format!("{} unmuted by {}",mute_player,admin_player_name);
+                    self.add_global_chat_message(u32::MAX, msg);
+                }
             }
-            
         }
-        
     }
     
     fn mute_chat (& mut self, player_index: usize) {
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 self.is_muted=true;
 
@@ -381,7 +368,7 @@ impl HQMServer {
     }
 
     fn unmute_chat (& mut self, player_index: usize) {
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 self.is_muted=false;
 
@@ -396,7 +383,7 @@ impl HQMServer {
         let mut found_role:i32 = -1;
 
         // Check for valid role
-        for (role_index, this_role) in self.roles.iter_mut().enumerate() {
+        for (role_index, this_role) in self.roles.iter().enumerate() {
             if this_role.abbreviation.to_lowercase() == input_position.to_lowercase(){
                 found_role = role_index as i32;
             }
@@ -404,22 +391,16 @@ impl HQMServer {
 
         // Role found, set player's role
         if found_role >= 0{
-
             if let Some(player) = & mut self.players[player_index] {
-
                 player.role_index = found_role as usize;
 
                 let msg = format!("{} position {}", player.player_name, input_position.to_uppercase());
                 self.add_global_chat_message(u32::MAX, msg);
-
             }
-            
         }
-            
     }
 
     fn admin_login (& mut self, player_index: usize, password:&str) {
-
         if let Some(player) = & mut self.players[player_index] {
    
             if self.config.password == password{
@@ -432,8 +413,7 @@ impl HQMServer {
     }
 
     fn set_clock (& mut self, input_minutes: u32, input_seconds: u32,player_index: usize) {
-
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 self.game.time = (input_minutes * 60 * 100)+ (input_seconds * 100);
 
@@ -441,16 +421,13 @@ impl HQMServer {
                 self.add_global_chat_message(u32::MAX, msg);
             }
         }
-        
 
     }
 
     fn set_score (& mut self, input_team: HQMTeam, input_score: u32,player_index: usize) {
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = & self.players[player_index] {
             if player.is_admin{
-
                 match input_team {
-
                     HQMTeam::Red =>{
                         self.game.red_score = input_score;
 
@@ -464,15 +441,13 @@ impl HQMServer {
                         self.add_global_chat_message(u32::MAX, msg);
                     },
                     _=>{}
-
                 }
-
             }
         }
     }
 
     fn faceoff (& mut self, player_index: usize) {
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 self.game.timeout = 5*100;
 
@@ -486,10 +461,8 @@ impl HQMServer {
 
         let mut do_new_game:bool = false;
 
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = & self.players[player_index] {
             if player.is_admin{
-                
-
                 do_new_game=true;
 
                 let msg = format!("Game reset by {}",player.player_name);
@@ -503,7 +476,7 @@ impl HQMServer {
     }
 
     fn pause (& mut self, player_index: usize) {
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 self.game.paused=true;
 
@@ -514,18 +487,15 @@ impl HQMServer {
     }
 
     fn unpause (& mut self, player_index: usize) {
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 self.game.paused=false;
 
                 let msg = format!("Game resumed by {}",player.player_name);
                 self.add_global_chat_message(u32::MAX, msg);
             }
-            
         }
     }
-
-    
 
     fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
         if let Some(player) = & mut self.players[player_index] {
@@ -537,8 +507,6 @@ impl HQMServer {
             }
         }
     }
-
-    
 
     fn process_command (&mut self, command: &str, args: &[&str], player_index: usize) {
 
@@ -568,7 +536,7 @@ impl HQMServer {
 
                             let input_score = match args[1].parse::<i32>() {
                                 Ok(input_score) => input_score,
-                                Err(e) => -1
+                                Err(_) => -1
                             };
 
                             if input_score >= 0{
@@ -577,22 +545,20 @@ impl HQMServer {
 
                         },
                         "bluescore" =>{
-
                             let input_score = match args[1].parse::<i32>() {
                                 Ok(input_score) => input_score,
-                                Err(e) => -1
+                                Err(_) => -1
                             };
 
                             if input_score >= 0{
                                 self.set_score(HQMTeam::Blue,input_score as u32,player_index)
                             }
-
                         },
                         "clock" =>{
 
                             let time_part_string = match args[1].parse::<String>(){
                                 Ok(time_part_string) => time_part_string,
-                                Err(e) => {return;}
+                                Err(_) => {return;}
                             };
 
                             let time_parts: Vec<&str> = time_part_string.split(':').collect();
@@ -600,12 +566,12 @@ impl HQMServer {
                             if time_parts.len() >= 2{
                                 let time_minutes = match time_parts[0].parse::<i32>() {
                                     Ok(time_minutes) => time_minutes,
-                                    Err(e) => -1
+                                    Err(_) => -1
                                 };
                                 
                                 let time_seconds = match time_parts[1].parse::<i32>() {
                                     Ok(time_seconds) => time_seconds,
-                                    Err(e) => -1
+                                    Err(_) => -1
                                 };
 
                                 if time_minutes < 0 || time_seconds < 0{
@@ -691,10 +657,9 @@ impl HQMServer {
                 let args = &split[1..];
                 self.process_command(command, args, player_index);
             } else {
-
                 match &self.players[player_index as usize] {
                     Some(player) => {
-                        if (player.is_muted != true && self.is_muted != true){
+                        if !player.is_muted && !self.is_muted {
                             self.add_global_chat_message(player_index as u32, msg)
                         }
                     },
@@ -878,7 +843,7 @@ impl HQMServer {
 
             let mut found:bool=false;
 
-            for (player_index, p) in self.players.iter().enumerate() {
+            for p in self.players.iter() {
                 if let Some(player) = p {
                     if player.team == input_team{
                         if player.role_index == this_role_index{
@@ -945,7 +910,8 @@ impl HQMServer {
                     };
                     if player.team != new_team {
                         if player.skater.is_none() {
-                            let pos = Point3::new(15.0, 2.5, 30.5);
+                            let (mid_x, mid_z) = (self.game.rink.width / 2.0, self.game.rink.length / 2.0);
+                            let pos = Point3::new(mid_x, 2.5, mid_z);
                             let rot = Matrix3::identity();
 
                             if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand) {
@@ -1007,6 +973,7 @@ impl HQMServer {
             self.move_players_between_teams();
             self.copy_player_input_to_object();
             self.simulate_step();
+            self.update_clock();
 
             let mut packets: Vec<HQMObjectPacket> = Vec::with_capacity(32);
             for i in 0usize..32 {
@@ -1184,19 +1151,19 @@ impl HQMServer {
         let mut blue_default_role_found = false;
 
         // Make sure each team has a center
-        for (player_index, p) in self.players.iter_mut().enumerate() {
+        for p in self.players.iter() {
             if let Some(player) = p {
                 if let Some(skater_obj_index) = player.skater {
-                    if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
-                        if(player.team == HQMTeam::Red){
-                            
-                            if player.role_index == 0{
-                                red_default_role_found=true;
-                            }
-                        }else{
-
-                            if player.role_index == 0{
-                                blue_default_role_found=true;
+                    if let HQMGameObject::Player(_) = & self.game.objects[skater_obj_index] {
+                        if player.role_index == 0 {
+                            match player.team {
+                                HQMTeam::Red => {
+                                    red_default_role_found=true;
+                                },
+                                HQMTeam::Blue => {
+                                    blue_default_role_found=true;
+                                },
+                                _ => {}
                             }
                         }
                     }
@@ -1206,11 +1173,10 @@ impl HQMServer {
 
         // One or more do not have a role
         if !red_default_role_found || !blue_default_role_found {
-
-            for (player_index, p) in self.players.iter_mut().enumerate() {
+            for p in self.players.iter_mut() {
                 if let Some(player) = p {
                     if let Some(skater_obj_index) = player.skater {
-                        if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
+                        if let HQMGameObject::Player(_) = & self.game.objects[skater_obj_index] {
 
                             match player.team{
                                 HQMTeam::Red => {
@@ -1234,15 +1200,13 @@ impl HQMServer {
                         if red_default_role_found && blue_default_role_found{
                             break;
                         }
-
                     }
                 }
             }
-
         }
 
         // Set faceoff positions
-        for (player_index, p) in self.players.iter_mut().enumerate() {
+        for p in self.players.iter() {
             if let Some(player) = p {
                 if let Some(skater_obj_index) = player.skater {
                     if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
@@ -1285,15 +1249,15 @@ impl HQMServer {
 
     }
 
-    fn clock_second(&mut self) {
+    fn update_clock(&mut self) {
 
         if self.game.paused != true{
             // Intermission
             if self.game.timeout > 0{
-                self.game.timeout = self.game.timeout -100;
+                self.game.timeout -= 1;
 
                 // Intermission Over?
-                if self.game.timeout <= 0{
+                if self.game.timeout <= 0 {
                     self.game.time = self.config.time_period*100;
                     self.game.timeout = 0;
                     self.game.period = self.game.period+1;
@@ -1303,8 +1267,8 @@ impl HQMServer {
                 }
 
             // Normal game time
-            }else if self.game.time > 0{
-                self.game.time = self.game.time -100;
+            } else if self.game.time > 0{
+                self.game.time -= 1;
 
             // Game time <= 0; Switch to intermission
             } else {
@@ -1312,16 +1276,13 @@ impl HQMServer {
                 self.game.timeout = self.config.time_intermission*100;
             }
         } else {
-
             if self.game.timeout > 0{
-                self.game.timeout = self.game.timeout -100;
+                self.game.timeout -= 1;
 
                 // Intermission Over?
                 if self.game.timeout <= 0{
-
                     // Faceoff
                     self.do_faceoff(0);
-
                 }
             }
 
@@ -1336,7 +1297,6 @@ impl HQMServer {
         // Set up timers
         let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
         let mut public_timer = tokio::time::interval(Duration::from_secs(2));
-        let mut seconds_timer = tokio::time::interval(Duration::from_secs(1));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.port));
         let mut socket = tokio::net::UdpSocket::bind(& addr).await?;
@@ -1349,9 +1309,6 @@ impl HQMServer {
                 }
                 _ = public_timer.tick(), if self.config.public => {
                     notify_master_server(& mut socket).await;
-                }
-                _ = seconds_timer.tick() => {
-                    self.clock_second();
                 }
                 Ok(x) = socket.recv_from(&mut buf) => {
                     self.handle_message(x, & mut socket, & buf).await;
@@ -1547,12 +1504,12 @@ impl HQMSkater {
         self.body.angular_velocity = in_velocity;
         self.body.rot_mul = Vector3::new(2.75, 6.16, 2.35);
         self.body.rot = Matrix3::from(in_rotation);
-        self.stick_pos =  in_position;
+        self.stick_pos = in_position;
         self.stick_rot = Matrix3::from(in_rotation);
         self.stick_velocity = in_velocity;
 
         for i in 0..self.collision_balls.len() {
-            self.collision_balls[i].pos =in_position;
+            self.collision_balls[i].pos = in_position;
             self.collision_balls[i].velocity =in_velocity;
 
         }
