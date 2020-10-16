@@ -17,6 +17,7 @@ use hqm_parse::{HQMClientParser, HQMServerWriter, HQMObjectPacket};
 use hqm_parse::{HQMPuckPacket, HQMSkaterPacket};
 use tokio::net::UdpSocket;
 use std::rc::Rc;
+use std::env;
 
 const GAME_HEADER: &[u8] = b"Hock";
 
@@ -182,7 +183,6 @@ impl HQMGame {
 
 struct HQMServer {
     players: Vec<Option<HQMConnectedPlayer>>,
-    roles: Vec<HQMRole>,
     config: HQMServerConfiguration,
     game: HQMGame,
     game_alloc: u32,
@@ -190,8 +190,8 @@ struct HQMServer {
 }
 
 impl HQMServer {
-    async fn handle_message(&mut self, (size, addr): (usize, SocketAddr), socket: & mut UdpSocket, buf: &[u8]) {
-        let mut parser = hqm_parse::HQMClientParser::new(&buf[0..size]);
+    async fn handle_message(&mut self, addr: SocketAddr, socket: & mut UdpSocket, msg: &[u8], write_buf: & mut [u8]) {
+        let mut parser = hqm_parse::HQMClientParser::new(&msg);
         let header = parser.read_bytes_aligned(4);
         if header != GAME_HEADER {
             return;
@@ -200,7 +200,7 @@ impl HQMServer {
         let command = parser.read_byte_aligned();
         match command {
             0 => {
-                self.request_info(socket, &addr, &mut parser).await;
+                self.request_info(socket, &addr, &mut parser, write_buf).await;
             },
             2 => {
                 self.player_join(&addr, &mut parser);
@@ -215,11 +215,11 @@ impl HQMServer {
         }
     }
 
-    async fn request_info<'a>(&self, socket: & mut UdpSocket, addr: &SocketAddr, parser: &mut HQMClientParser<'a>) -> std::io::Result<usize> {
+    async fn request_info<'a>(&self, socket: & mut UdpSocket, addr: &SocketAddr, parser: &mut HQMClientParser<'a>, write_buf: & mut [u8]) -> std::io::Result<usize> {
         let _player_version = parser.read_bits(8);
         let ping = parser.read_u32_aligned();
-        let mut buf = [0u8; 1024];
-        let mut writer = HQMServerWriter::new(&mut buf);
+
+        let mut writer = HQMServerWriter::new(write_buf);
         writer.write_bytes_aligned(GAME_HEADER);
         writer.write_byte_aligned(1);
         writer.write_bits(8, 55);
@@ -371,7 +371,7 @@ impl HQMServer {
         let mut found_role:i32 = -1;
 
         // Check for valid role
-        for (role_index, this_role) in self.roles.iter().enumerate() {
+        for (role_index, this_role) in self.config.roles.iter().enumerate() {
             if this_role.abbreviation.to_lowercase() == input_position.to_lowercase(){
                 found_role = role_index as i32;
             }
@@ -827,7 +827,7 @@ impl HQMServer {
 
     fn get_free_role(& self,input_team: HQMTeam ) -> usize{
 
-        for this_role_index in 0..self.roles.len(){
+        for this_role_index in 0..self.config.roles.len(){
 
             let mut found:bool=false;
 
@@ -954,7 +954,7 @@ impl HQMServer {
         }
     }
 
-    async fn tick(&mut self, socket: & mut UdpSocket) {
+    async fn tick(&mut self, socket: & mut UdpSocket, write_buf: & mut [u8]) {
         self.remove_inactive_players ();
         let player_count2 = self.player_count();
         if player_count2 != 0 {
@@ -975,7 +975,7 @@ impl HQMServer {
 
             for (i, x) in self.players.iter().enumerate() {
                 if let Some(p) = x {
-                    self.send_update(p, i as u32, socket, &packets).await;
+                    self.send_update(p, i as u32, socket, &packets, write_buf).await;
                 }
             }
             self.game.packet += 1;
@@ -984,9 +984,8 @@ impl HQMServer {
 
     }
 
-    async fn send_update(&self, player: &HQMConnectedPlayer, i: u32, socket: & mut UdpSocket, packets: &[HQMObjectPacket]) {
-        let mut buf = [0u8; 2048];
-        let mut writer = HQMServerWriter::new(&mut buf);
+    async fn send_update(&self, player: &HQMConnectedPlayer, i: u32, socket: & mut UdpSocket, packets: &[HQMObjectPacket], write_buf: & mut [u8]) {
+        let mut writer = HQMServerWriter::new(write_buf);
         if player.game_id != self.game.game_id {
             writer.write_bytes_aligned(GAME_HEADER);
             writer.write_byte_aligned(6);
@@ -1198,29 +1197,18 @@ impl HQMServer {
             if let Some(player) = p {
                 if let Some(skater_obj_index) = player.skater {
                     if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
-
+                        let p = &self.config.roles[player.role_index].faceoff_offsets[faceoff_position_index];
+                        let mid = Point3::new (self.game.rink.width / 2.0, 0.0, self.game.rink.length / 2.0);
                         match player.team{
                             HQMTeam::Red=>{
-
-                                let player_position = Point3::new(
-                                    (self.game.rink.width / 2.0)+(self.roles[player.role_index].faceoff_offsets[faceoff_position_index].x),
-                                    self.roles[player.role_index].faceoff_offsets[faceoff_position_index].y,
-                                    (self.game.rink.length / 2.0)+(self.roles[player.role_index].faceoff_offsets[faceoff_position_index].z)
-                                );
-
                                 let player_rotation = Rotation3::from_euler_angles(0.0,0.0,0.0);
+                                let player_position = mid + p;
 
                                 skater.set_orientation(player_position, player_rotation);
                             },
                             HQMTeam::Blue=>{
-
-                                let player_position = Point3::new(
-                                    (self.game.rink.width / 2.0)+(self.roles[player.role_index].faceoff_offsets[faceoff_position_index].x*-1.0),
-                                    self.roles[player.role_index].faceoff_offsets[faceoff_position_index].y,
-                                    (self.game.rink.length / 2.0)+(self.roles[player.role_index].faceoff_offsets[faceoff_position_index].z*-1.0)
-                                );
-
                                 let player_rotation = Rotation3::from_euler_angles(0.0,std::f32::consts::PI,0.0);
+                                let player_position = mid + &player_rotation * p;
 
                                 skater.set_orientation(player_position, player_rotation);
 
@@ -1288,35 +1276,32 @@ impl HQMServer {
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.port));
         let mut socket = tokio::net::UdpSocket::bind(& addr).await?;
-        let mut buf = [0u8;1024];
-
+        let mut read_buf = [0u8;1024];
+        let mut write_buf = [0u8;4096];
         loop {
             tokio::select! {
                 _ = tick_timer.tick() => {
-                    self.tick(& mut socket).await;
+                    self.tick(& mut socket, & mut write_buf).await;
                 }
                 _ = public_timer.tick(), if self.config.public => {
                     notify_master_server(& mut socket).await;
                 }
-                Ok(x) = socket.recv_from(&mut buf) => {
-                    self.handle_message(x, & mut socket, & buf).await;
+                Ok((size, addr)) = socket.recv_from(&mut read_buf) => {
+                    self.handle_message(addr, & mut socket, & read_buf[0..size], & mut write_buf).await;
                 }
             }
         }
         Ok(())
     }
 
-    pub fn new(config: HQMServerConfiguration, roles: Vec<HQMRole>) -> Self {
+    pub fn new(config: HQMServerConfiguration) -> Self {
         let mut player_vec = Vec::with_capacity(64);
         for _ in 0..64 {
             player_vec.push(None);
         }
 
-        
-
         HQMServer {
             players: player_vec,
-            roles: roles,
             game: HQMGame::new(1),
             game_alloc: 1,
             is_muted:false,
@@ -1415,7 +1400,7 @@ enum HQMGameObject {
 
 struct HQMRole {
     abbreviation: String,
-    faceoff_offsets: Vec<Point3<f32>> // To store multiple faceoff positions as needed
+    faceoff_offsets: Vec<Vector3<f32>> // To store multiple faceoff positions as needed
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -1589,35 +1574,27 @@ struct HQMServerConfiguration {
     time_period: u32,
     time_warmup: u32,
     time_intermission: u32,
+
+    roles: Vec<HQMRole>,
 }
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-
-    // Default values
-    let config = HQMServerConfiguration {
-        server_name: String::from("MigoTest"),
-        port: 27585,
-        public: true,
-
-        team_max: 5,
-        player_max: 15, // Codemonster TODO: implement
-
-        password: String::from("admin"),
-        
-        time_period: 300,
-        time_warmup: 300,
-        time_intermission: 10
+    let args: Vec<String> = env::args().collect();
+    println!("{:?}", args);
+    let config_path = if args.len() > 2 {
+        &args[1]
+    } else {
+        "config.ini"
     };
-
     // Init vec for roles
     let mut rolevec:Vec<HQMRole>=Vec::new();
 
     // Load configuration (if exists)
-    if Path::new("config.ini").exists(){
-        
+    let config = if Path::new(config_path).exists(){
+
         // Load configuration file
-        let conf = Ini::load_from_file("config.ini").unwrap();
+        let conf = Ini::load_from_file(config_path).unwrap();
 
         // Server information
         let server_section = conf.section(Some("Server")).unwrap();
@@ -1637,31 +1614,28 @@ async fn main() -> std::io::Result<()> {
         // Roles
         let roles_section = conf.section(Some("Roles")).unwrap();
         for (k, v) in roles_section.iter() {
-
             let string_abbreviation = k.parse::<String>().unwrap();
             let string_offsets = v.parse::<String>().unwrap();
 
-            let mut offsets:Vec<Point3<f32>>=Vec::new();
+            let mut offsets:Vec<Vector3<f32>>=Vec::new();
 
             let offset_parts: Vec<&str> = string_offsets.split('|').collect();
             for this_offset in offset_parts{
                 let offset_parts: Vec<&str> = this_offset.split(',').collect();
 
-
-                offsets.push(Point3::new(offset_parts[0].parse::<f32>().unwrap(),offset_parts[1].parse::<f32>().unwrap(),offset_parts[2].parse::<f32>().unwrap()));
-                
+                offsets.push(Vector3::new(offset_parts[0].parse::<f32>().unwrap(),
+                                         offset_parts[1].parse::<f32>().unwrap(),
+                                         offset_parts[2].parse::<f32>().unwrap()));
             }
 
             rolevec.push(HQMRole {
                 abbreviation:string_abbreviation,
                 faceoff_offsets:offsets
             });
-
-            
         }
 
-        let config = HQMServerConfiguration {
-            server_name: server_name,
+        HQMServerConfiguration {
+            server_name,
             port: server_port,
             team_max: server_team_max, // Codemonster TODO: implement
             player_max: server_player_max, // Codemonster TODO: implement
@@ -1671,50 +1645,67 @@ async fn main() -> std::io::Result<()> {
 
             time_period: rules_time_period, 
             time_warmup: rules_time_warmup, 
-            time_intermission: rules_time_intermission 
-        };
+            time_intermission: rules_time_intermission,
 
-        return HQMServer::new(config, rolevec).run().await;
-
-    }else{
+            roles: rolevec
+        }
+    } else{
 
         // No config file: set defaults
 
         // Default roles
         rolevec.push(HQMRole{
             abbreviation: String::from("C"),
-            faceoff_offsets:vec![Point3::new(0.0,1.5,0.75)]
+            faceoff_offsets:vec![Vector3::new(0.0,1.5,0.75)]
         });
 
         rolevec.push(HQMRole{
             abbreviation: String::from("LD"),
-            faceoff_offsets:vec![Point3::new(-2.0,1.5,8.0)]
+            faceoff_offsets:vec![Vector3::new(-2.0,1.5,8.0)]
         });
 
         rolevec.push(HQMRole{
             abbreviation: String::from("RD"),
-            faceoff_offsets:vec![Point3::new(2.0,1.5,8.0)]
+            faceoff_offsets:vec![Vector3::new(2.0,1.5,8.0)]
         });
 
         rolevec.push(HQMRole{
             abbreviation: String::from("LW"),
-            faceoff_offsets:vec![Point3::new(-5.0,1.5,2.0)]
+            faceoff_offsets:vec![Vector3::new(-5.0,1.5,2.0)]
         });
 
         rolevec.push(HQMRole{
             abbreviation: String::from("RW"),
-            faceoff_offsets:vec![Point3::new(5.0,1.5,2.0)]
+            faceoff_offsets:vec![Vector3::new(5.0,1.5,2.0)]
         });
 
         rolevec.push(HQMRole{
             abbreviation: String::from("G"),
-            faceoff_offsets:vec![Point3::new(0.0,1.5,22.0)]
+            faceoff_offsets:vec![Vector3::new(0.0,1.5,22.0)]
         });
 
-    }   
+        // Default values
+        HQMServerConfiguration {
+            server_name: String::from("MigoTest"),
+            port: 27585,
+            public: true,
+
+            team_max: 5,
+            player_max: 15, // Codemonster TODO: implement
+
+            password: String::from("admin"),
+
+            time_period: 300,
+            time_warmup: 300,
+            time_intermission: 10,
+
+            roles: rolevec
+        }
+
+    };
 
     // Config file didn't exist; use defaults as described
-    return HQMServer::new(config, rolevec).run().await;
+    return HQMServer::new(config).run().await;
 
 }
 

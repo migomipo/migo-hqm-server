@@ -133,9 +133,11 @@ impl<'a> HQMServerWriter<'a> {
         self.align();
         let m = min(n, v.len());
         self.write_bytes_aligned(&v[0..m]);
-        for _ in 0..(n - m) {
-            self.buf[self.pos] = 0;
-            self.pos += 1;
+        if n > m {
+            for _ in 0..(n - m) {
+                self.buf[self.pos] = 0;
+                self.pos += 1;
+            }
         }
     }
 
@@ -164,10 +166,14 @@ impl<'a> HQMServerWriter<'a> {
         while bits_remaining > 0 {
             let bits_possible_to_write = 8 - self.bit_pos;
             let bits = min(bits_remaining, bits_possible_to_write);
-            let mask = !(!0 << bits);
-            let a = (((to_write >> p) & mask) << self.bit_pos) as u8;
+            let mask = !(u32::MAX << bits);
+            let a = ((to_write >> p) & mask) as u8;
 
-            self.buf[self.pos] |= a;
+            if self.bit_pos == 0 {
+                self.buf[self.pos] = a;
+            } else {
+                self.buf[self.pos] |= a << self.bit_pos;
+            }
 
             if bits_remaining >= bits_possible_to_write {
                 bits_remaining -= bits_possible_to_write;
