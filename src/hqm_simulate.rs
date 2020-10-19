@@ -101,37 +101,18 @@ impl HQMServer {
                         collisions_between_puck_and_stick(puck, player, & puck_vertices, &old_pos_delta, &old_rot_axis, &old_stick_pos_delta);
                     }
                 }
-                for net in vec![&self.game.rink.blue_net, &self.game.rink.red_net] {
-                    for (p1, p2, radius) in net.posts.iter() {
-                        let a = radius + puck.radius;
-                        let diff = &puck.body.pos - p1;
+                if let Some((overlap, normal)) = collision_between_sphere_and_posts(&puck.body.pos, puck.radius, &self.game.rink) {
+                    let p = &puck.body.pos - puck.radius*normal;
+                    let vertex_velocity = speed_of_point_including_rotation(&p, &puck.body.pos, &puck.body.linear_velocity, &puck.body.angular_velocity);
+                    let mut puck_force = (normal.scale(overlap * 0.5) - vertex_velocity).scale(0.125);
 
-                        let direction_vector = p2 - p1;
-
-                        let t0 = diff.dot(&direction_vector) / direction_vector.norm_squared();
-                        let dot = clamp(t0, 0.0, 1.0);
-
-                        let projection = dot * &direction_vector;
-                        let rejection = diff - projection;
-                        let rejection_norm = rejection.norm();
-                        let overlap = a - rejection_norm;
-                        if overlap > 0.0 {
-                            let normal = rejection.normalize();
-
-                            let p = &puck.body.pos - puck.radius*normal;
-                            let vertex_velocity = speed_of_point_including_rotation(&p, &puck.body.pos, &puck.body.linear_velocity, &puck.body.angular_velocity);
-                            let mut puck_force = (normal.scale(overlap * 0.5) - vertex_velocity).scale(0.125);
-
-                            if normal.dot (&puck_force) > 0.0 {
-                                limit_rejection(&mut puck_force, &normal, 0.2);
-                                apply_acceleration_to_object(&mut puck.body, &puck_force, &p);
-                            }
-                        }
-
+                    if normal.dot (&puck_force) > 0.0 {
+                        limit_rejection(&mut puck_force, &normal, 0.2);
+                        apply_acceleration_to_object(&mut puck.body, &puck_force, &p);
                     }
                 }
-            }
 
+            }
         }
 
         for (puck, old_puck_pos) in pucks.iter_mut().zip(pucks_old_pos.iter()) {
@@ -183,50 +164,6 @@ impl HQMServer {
             }
         }
     }
-}
-
-fn inside_surface(pos: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>), normal: &Vector3<f32>) -> bool {
-    let (p1, p2, p3, p4) = surface;
-    (pos - p1).cross(&(p2 - p1)).dot(&normal) >= 0.0 &&
-        (pos - p2).cross(&(p3 - p2)).dot(&normal) >= 0.0 &&
-        (pos - p3).cross(&(p4 - p3)).dot(&normal) >= 0.0 &&
-        (pos - p4).cross(&(p1 - p4)).dot(&normal) >= 0.0
-}
-
-fn collision_between_puck_and_surface(puck_pos: &Point3<f32>, puck_pos2: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)) -> Option<(f32, Point3<f32>, f32, Vector3<f32>)> {
-    let normal = (&surface.2 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
-    let p1 = &surface.0;
-    let puck_pos2_projection = (p1 - puck_pos2).dot(&normal);
-    let puck_pos_projection = (p1 - puck_pos).dot(&normal);
-    let diff = puck_pos2 - puck_pos;
-    let diff_projection = diff.dot(&normal);
-    if puck_pos2_projection >= 0.0 && puck_pos_projection <= 0.0 && diff_projection != 0.0 {
-        // puck_pos2 is inside the plane but puck_pos is not inside the plane
-        let intersection = puck_pos_projection / diff_projection;
-        let intersection_pos = puck_pos + diff.scale(intersection);
-        let overlap = (&intersection_pos - puck_pos2).dot(&normal);
-
-        if inside_surface(&intersection_pos, surface, &normal) {
-            return Some((intersection, intersection_pos, overlap, normal));
-        }
-
-    }
-    None
-}
-
-fn collision_between_puck_vertex_and_stick(puck_pos: &Point3<f32>, puck_vertex: &Point3<f32>, stick_surfaces: &Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)>) -> Option<(f32, Vector3<f32>)> {
-    let mut min_intersection = 1f32;
-    let mut res = None;
-    for stick_surface in stick_surfaces.iter() {
-        let collision = collision_between_puck_and_surface(puck_pos, puck_vertex, stick_surface);
-        if let Some((intersection, _intersection_pos, overlap, normal)) = collision {
-            if intersection < min_intersection {
-                res = Some((overlap, normal));
-                min_intersection = intersection;
-            }
-        }
-    }
-    res
 }
 
 fn puck_net_interaction(puck: & mut HQMPuck, old_puck_pos: &Point3<f32>, rink: & HQMRink) {
@@ -308,6 +245,79 @@ fn collisions_between_puck_and_rink(puck: & mut HQMPuck, puck_vertices: &Vec<Poi
             }
         }
     }
+}
+
+fn inside_surface(pos: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>), normal: &Vector3<f32>) -> bool {
+    let (p1, p2, p3, p4) = surface;
+    (pos - p1).cross(&(p2 - p1)).dot(&normal) >= 0.0 &&
+        (pos - p2).cross(&(p3 - p2)).dot(&normal) >= 0.0 &&
+        (pos - p3).cross(&(p4 - p3)).dot(&normal) >= 0.0 &&
+        (pos - p4).cross(&(p1 - p4)).dot(&normal) >= 0.0
+}
+
+fn collision_between_sphere_and_posts(pos: &Point3<f32>, radius: f32, rink: & HQMRink) -> Option<(f32, Vector3<f32>)> {
+    let mut max_overlap = 0f32;
+    let mut coll_normal  = None;
+    for net in vec![&rink.blue_net, &rink.red_net] {
+        for (p1, p2, post_radius) in net.posts.iter() {
+            let a = post_radius + radius;
+            let diff = pos - p1;
+
+            let direction_vector = p2 - p1;
+
+            let t0 = diff.dot(&direction_vector) / direction_vector.norm_squared();
+            let dot = clamp(t0, 0.0, 1.0);
+
+            let projection = dot * &direction_vector;
+            let rejection = diff - projection;
+            let rejection_norm = rejection.norm();
+            let overlap = a - rejection_norm;
+            if overlap > max_overlap {
+                coll_normal = Some(rejection.normalize());
+                max_overlap = overlap;
+            }
+        }
+    }
+    match coll_normal {
+        Some(n) => Some((max_overlap, n)),
+        None => None
+    }
+}
+
+fn collision_between_puck_and_surface(puck_pos: &Point3<f32>, puck_pos2: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)) -> Option<(f32, Point3<f32>, f32, Vector3<f32>)> {
+    let normal = (&surface.2 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
+    let p1 = &surface.0;
+    let puck_pos2_projection = (p1 - puck_pos2).dot(&normal);
+    let puck_pos_projection = (p1 - puck_pos).dot(&normal);
+    let diff = puck_pos2 - puck_pos;
+    let diff_projection = diff.dot(&normal);
+    if puck_pos2_projection >= 0.0 && puck_pos_projection <= 0.0 && diff_projection != 0.0 {
+        // puck_pos2 is inside the plane but puck_pos is not inside the plane
+        let intersection = puck_pos_projection / diff_projection;
+        let intersection_pos = puck_pos + diff.scale(intersection);
+        let overlap = (&intersection_pos - puck_pos2).dot(&normal);
+
+        if inside_surface(&intersection_pos, surface, &normal) {
+            return Some((intersection, intersection_pos, overlap, normal));
+        }
+
+    }
+    None
+}
+
+fn collision_between_puck_vertex_and_stick(puck_pos: &Point3<f32>, puck_vertex: &Point3<f32>, stick_surfaces: &Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)>) -> Option<(f32, Vector3<f32>)> {
+    let mut min_intersection = 1f32;
+    let mut res = None;
+    for stick_surface in stick_surfaces.iter() {
+        let collision = collision_between_puck_and_surface(puck_pos, puck_vertex, stick_surface);
+        if let Some((intersection, _intersection_pos, overlap, normal)) = collision {
+            if intersection < min_intersection {
+                res = Some((overlap, normal));
+                min_intersection = intersection;
+            }
+        }
+    }
+    res
 }
 
 fn collision_between_sphere_and_rink(pos: &Point3<f32>, radius: f32, rink: & HQMRink) -> Option<(f32, Vector3<f32>)> {
