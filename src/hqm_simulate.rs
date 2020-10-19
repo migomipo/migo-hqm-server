@@ -442,7 +442,7 @@ fn update_player(player: & mut HQMSkater) {
         }
         let intended_collision_ball_pos = &player.body.pos + (new_rot * &collision_ball.offset);
         let collision_pos_diff = intended_collision_ball_pos - &collision_ball.pos;
-        //println!("{:?}", collision_pos_diff);
+
         let speed = speed_of_point_including_rotation(& intended_collision_ball_pos, & player.body.pos, & old_pos_delta, & old_rot_axis);
         let force = collision_pos_diff.scale(0.125) + (speed - &collision_ball.velocity).scale(0.25);
         collision_ball.velocity += force.scale(0.9375);

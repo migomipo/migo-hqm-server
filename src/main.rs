@@ -201,7 +201,7 @@ struct HQMServer {
 }
 
 impl HQMServer {
-    async fn handle_message(&mut self, addr: SocketAddr, socket: & mut UdpSocket, msg: &[u8], write_buf: & mut [u8]) {
+    async fn handle_message(&mut self, addr: SocketAddr, socket: & UdpSocket, msg: &[u8], write_buf: & mut [u8]) {
         let mut parser = hqm_parse::HQMClientParser::new(&msg);
         let header = parser.read_bytes_aligned(4);
         if header != GAME_HEADER {
@@ -226,7 +226,7 @@ impl HQMServer {
         }
     }
 
-    async fn request_info<'a>(&self, socket: & mut UdpSocket, addr: &SocketAddr, parser: &mut HQMClientParser<'a>, write_buf: & mut [u8]) -> std::io::Result<usize> {
+    async fn request_info<'a>(&self, socket: & UdpSocket, addr: &SocketAddr, parser: &mut HQMClientParser<'a>, write_buf: & mut [u8]) -> std::io::Result<usize> {
         let _player_version = parser.read_bits(8);
         let ping = parser.read_u32_aligned();
 
@@ -965,7 +965,7 @@ impl HQMServer {
         }
     }
 
-    async fn tick(&mut self, socket: & mut UdpSocket, write_buf: & mut [u8]) {
+    async fn tick(&mut self, socket: & UdpSocket, write_buf: & mut [u8]) {
         self.remove_inactive_players ();
         let player_count2 = self.player_count();
         if player_count2 != 0 {
@@ -995,7 +995,7 @@ impl HQMServer {
 
     }
 
-    async fn send_update(&self, player: &HQMConnectedPlayer, i: u32, socket: & mut UdpSocket, packets: &[HQMObjectPacket], write_buf: & mut [u8]) {
+    async fn send_update(&self, player: &HQMConnectedPlayer, i: u32, socket: & UdpSocket, packets: &[HQMObjectPacket], write_buf: & mut [u8]) {
         let mut writer = HQMServerWriter::new(write_buf);
         if player.game_id != self.game.game_id {
             writer.write_bytes_aligned(GAME_HEADER);
@@ -1286,19 +1286,19 @@ impl HQMServer {
         let mut public_timer = tokio::time::interval(Duration::from_secs(2));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.port));
-        let mut socket = tokio::net::UdpSocket::bind(& addr).await?;
+        let socket = tokio::net::UdpSocket::bind(& addr).await?;
         let mut read_buf = [0u8;1024];
         let mut write_buf = [0u8;4096];
         loop {
             tokio::select! {
                 _ = tick_timer.tick() => {
-                    self.tick(& mut socket, & mut write_buf).await;
+                    self.tick(& socket, & mut write_buf).await;
                 }
                 _ = public_timer.tick(), if self.config.public => {
-                    notify_master_server(& mut socket).await;
+                    notify_master_server(& socket).await;
                 }
                 Ok((size, addr)) = socket.recv_from(&mut read_buf) => {
-                    self.handle_message(addr, & mut socket, & read_buf[0..size], & mut write_buf).await;
+                    self.handle_message(addr, & socket, & read_buf[0..size], & mut write_buf).await;
                 }
             }
         }
@@ -1321,7 +1321,7 @@ impl HQMServer {
     }
 }
 
-async fn notify_master_server(socket: &mut UdpSocket) -> std::io::Result<usize> {
+async fn notify_master_server(socket: & UdpSocket) -> std::io::Result<usize> {
     let server_addr: SocketAddr = MASTER_SERVER.parse().unwrap();
     let msg = b"Hock\x20";
     socket.send_to(msg, server_addr).await
@@ -1593,7 +1593,7 @@ struct HQMServerConfiguration {
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
-    println!("{:?}", args);
+
     let config_path = if args.len() > 2 {
         &args[1]
     } else {
