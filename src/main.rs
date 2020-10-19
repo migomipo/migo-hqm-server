@@ -42,7 +42,12 @@ struct HQMGame {
 #[derive(Debug, Clone)]
 struct HQMRinkNet {
     posts: Vec<(Point3<f32>, Point3<f32>, f32)>,
-    surfaces: Vec<(Point3<f32>,Point3<f32>,Point3<f32>,Point3<f32>)>
+    surfaces: Vec<(Point3<f32>,Point3<f32>,Point3<f32>,Point3<f32>)>,
+    left_post: Point3<f32>,
+    right_post: Point3<f32>,
+    normal: Vector3<f32>,
+    left_post_inside: Vector3<f32>,
+    right_post_inside: Vector3<f32>
 }
 
 impl HQMRinkNet {
@@ -93,7 +98,12 @@ impl HQMRinkNet {
                  front_lower_right.clone(), back_lower_right.clone()),
                 (front_upper_left.clone(), front_upper_right.clone(),
                  back_upper_right.clone(), back_upper_left.clone())
-            ]
+            ],
+            left_post: front_lower_left.clone(),
+            right_post: front_lower_right.clone(),
+            normal: rot * Vector3::z(),
+            left_post_inside: rot * Vector3::x(),
+            right_post_inside: rot * -Vector3::x()
         }
 
     }
@@ -159,6 +169,7 @@ impl HQMGame {
                     },
                     radius: 0.125,
                     height: 0.0412500016391,
+                    in_net: false
                 });
             }
         }
@@ -1515,6 +1526,7 @@ struct HQMPuck {
     body: HQMBody,
     radius: f32,
     height: f32,
+    in_net: bool // A bit of a ugly hack
 }
 
 fn get_position (bits: u32, v: f32) -> u32 {
