@@ -94,8 +94,8 @@ impl HQMRinkNet {
                  back_lower_right.clone(), back_lower_left.clone()),
                 (front_upper_left.clone(), back_upper_left.clone(),
                  back_lower_left.clone(), front_lower_left.clone()),
-                (back_upper_right.clone(), front_upper_right.clone(),
-                 front_lower_right.clone(), back_lower_right.clone()),
+                (front_upper_right, front_lower_right.clone(),
+                 back_lower_right.clone(), back_upper_right.clone()),
                 (front_upper_left.clone(), front_upper_right.clone(),
                  back_upper_right.clone(), back_upper_left.clone())
             ],
@@ -169,7 +169,6 @@ impl HQMGame {
                     },
                     radius: 0.125,
                     height: 0.0412500016391,
-                    in_net: false
                 });
             }
         }
@@ -1526,7 +1525,6 @@ struct HQMPuck {
     body: HQMBody,
     radius: f32,
     height: f32,
-    in_net: bool // A bit of a ugly hack
 }
 
 fn get_position (bits: u32, v: f32) -> u32 {

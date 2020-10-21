@@ -104,11 +104,22 @@ impl HQMServer {
                 if let Some((overlap, normal)) = collision_between_sphere_and_posts(&puck.body.pos, puck.radius, &self.game.rink) {
                     let p = &puck.body.pos - puck.radius*normal;
                     let vertex_velocity = speed_of_point_including_rotation(&p, &puck.body.pos, &puck.body.linear_velocity, &puck.body.angular_velocity);
-                    let mut puck_force = (normal.scale(overlap * 0.5) - vertex_velocity).scale(0.125);
+                    let mut puck_force = normal.scale(overlap * 0.125) - vertex_velocity;
 
                     if normal.dot (&puck_force) > 0.0 {
                         limit_rejection(&mut puck_force, &normal, 0.2);
                         apply_acceleration_to_object(&mut puck.body, &puck_force, &p);
+                    }
+                }
+                if let Some((overlap_pos, overlap, normal)) = collision_between_sphere_and_nets(&puck.body.pos, puck.radius, &self.game.rink) {
+                    let vertex_velocity = speed_of_point_including_rotation(&overlap_pos, &puck.body.pos, &puck.body.linear_velocity, &puck.body.angular_velocity);
+                    let mut puck_force = normal.scale(overlap * 0.5 * 0.25) - vertex_velocity.scale(0.25);
+
+                    if normal.dot (&puck_force) > 0.0 {
+                        limit_rejection(& mut puck_force, & normal, 0.5);
+                        apply_acceleration_to_object(& mut puck.body, &puck_force, &overlap_pos);
+                        puck.body.linear_velocity *= 0.9875;
+                        puck.body.angular_velocity *= 0.95;
                     }
                 }
 
@@ -124,7 +135,7 @@ impl HQMServer {
             if puck.body.angular_velocity.norm() > 0.000015258789 {
                 rotate_matrix_around_axis(& mut puck.body.rot, &puck.body.angular_velocity.normalize(), puck.body.angular_velocity.norm())
             }
-            puck_net_interaction(puck, &old_puck_pos, & self.game.rink);
+            puck_goal_detection(puck, &old_puck_pos, & self.game.rink);
         }
         for _ in 0..16 {
             let original_ball_velocities = Vec::from_iter(players.iter().map(|y| {
@@ -166,9 +177,7 @@ impl HQMServer {
     }
 }
 
-fn puck_net_interaction(puck: & mut HQMPuck, old_puck_pos: &Point3<f32>, rink: & HQMRink) {
-
-
+fn puck_goal_detection(puck: & mut HQMPuck, old_puck_pos: &Point3<f32>, rink: & HQMRink) {
     for net in vec![&rink.blue_net, &rink.red_net] {
         if (&net.left_post - &puck.body.pos).dot(&net.normal) >= 0.0 {
             if (&net.left_post - old_puck_pos).dot(&net.normal) < 0.0 {
@@ -176,14 +185,12 @@ fn puck_net_interaction(puck: & mut HQMPuck, old_puck_pos: &Point3<f32>, rink: &
                     (&net.right_post - &puck.body.pos).dot(&net.right_post_inside) < 0.0
                     && puck.body.pos.y < 1.0 {
                     println! ("Puck entered net");
-                    puck.in_net = true;
                 } else {
                     println! ("Puck passed behind goal plane");
                 }
             }
         } else if (&net.left_post - old_puck_pos).dot(&net.normal) >= 0.0 {
-                println! ("Puck passed in front of goal plane");
-                puck.in_net = false;
+            println! ("Puck passed in front of goal plane");
         }
 
     }
@@ -255,6 +262,40 @@ fn inside_surface(pos: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3
         (pos - p4).cross(&(p1 - p4)).dot(&normal) >= 0.0
 }
 
+fn collision_between_sphere_and_nets(pos: &Point3<f32>, radius: f32, rink: & HQMRink) -> Option<(Point3<f32>, f32, Vector3<f32>)> {
+    let mut max_overlap = 0.0;
+    let mut res: Option<(Point3<f32>, f32, Vector3<f32>)> = None;
+    for net in vec![&rink.blue_net, &rink.red_net] {
+        for surface in net.surfaces.iter() {
+            let normal = (&surface.3 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
+
+            let diff = &surface.0 - pos;
+            let dot = diff.dot(&normal);
+            let overlap = dot + radius;
+            let overlap2 = -dot + radius;
+
+            if overlap > 0.0 && overlap < radius {
+                let overlap_pos = pos + (radius-overlap)*normal;
+                if inside_surface(&overlap_pos, surface, &normal) {
+                    if overlap > max_overlap {
+                        max_overlap = overlap;
+                        res = Some((overlap_pos, overlap, normal));
+                    }
+                }
+            } else if overlap2 > 0.0 && overlap2 < radius {
+                let overlap_pos = pos + (radius-overlap)*normal;
+                if inside_surface(&overlap_pos, surface, &normal) {
+                    if overlap2 > max_overlap {
+                        max_overlap = overlap2;
+                        res = Some((overlap_pos, overlap2, -normal));
+                    }
+                }
+            }
+        }
+    }
+    res
+}
+
 fn collision_between_sphere_and_posts(pos: &Point3<f32>, radius: f32, rink: & HQMRink) -> Option<(f32, Vector3<f32>)> {
     let mut max_overlap = 0f32;
     let mut coll_normal  = None;
@@ -285,7 +326,7 @@ fn collision_between_sphere_and_posts(pos: &Point3<f32>, radius: f32, rink: & HQ
 }
 
 fn collision_between_puck_and_surface(puck_pos: &Point3<f32>, puck_pos2: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)) -> Option<(f32, Point3<f32>, f32, Vector3<f32>)> {
-    let normal = (&surface.2 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
+    let normal = (&surface.3 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
     let p1 = &surface.0;
     let puck_pos2_projection = (p1 - puck_pos2).dot(&normal);
     let puck_pos_projection = (p1 - puck_pos).dot(&normal);
