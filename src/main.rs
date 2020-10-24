@@ -872,7 +872,7 @@ impl HQMServer {
             if let Some(player) = p {
                 if player.team == HQMTeam::Red {
                     red_player_count += 1;
-                } else if player.team == HQMTeam::Red {
+                } else if player.team == HQMTeam::Blue {
                     blue_player_count += 1;
                 }
             }

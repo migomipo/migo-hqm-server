@@ -710,13 +710,13 @@ fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     let projection = normal.scale(projection_length);
     let rejection = &*v - &projection;
     let rejection_length = rejection.norm();
-    v.copy_from(&projection);
+    *v = projection.clone_owned();
 
     if rejection_length > 1.0/65536.0 {
         let rejection_norm = rejection.normalize();
 
         let rejection_length2 = rejection_length.min(projection.norm() * d);
-        v.add_assign(rejection_norm.scale(rejection_length2));
+        *v += rejection_norm.scale(rejection_length2);
     }
 }
 
