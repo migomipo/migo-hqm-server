@@ -18,6 +18,9 @@ use hqm_parse::{HQMPuckPacket, HQMSkaterPacket};
 use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::env;
+use crate::hqm_simulate::HQMSimulationEvent;
+use std::fmt::{Display, Formatter};
+use core::fmt;
 
 const GAME_HEADER: &[u8] = b"Hock";
 
@@ -44,6 +47,7 @@ struct HQMGame {
 
 #[derive(Debug, Clone)]
 struct HQMRinkNet {
+    team: HQMTeam,
     posts: Vec<(Point3<f32>, Point3<f32>, f32)>,
     surfaces: Vec<(Point3<f32>,Point3<f32>,Point3<f32>,Point3<f32>)>,
     left_post: Point3<f32>,
@@ -76,6 +80,7 @@ impl HQMRinkNet {
             );
 
         HQMRinkNet {
+            team,
             posts: vec![
                 (front_lower_right.clone(), front_upper_right.clone(), 0.1875),
                 (front_lower_left.clone(), front_upper_left.clone(), 0.1875),
@@ -116,8 +121,7 @@ impl HQMRinkNet {
 struct HQMRink {
     planes: Vec<(Point3<f32>, Vector3<f32>)>,
     corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
-    red_net: HQMRinkNet,
-    blue_net: HQMRinkNet,
+    nets: Vec<HQMRinkNet>,
     width:f32,
     length:f32
 }
@@ -142,11 +146,12 @@ impl HQMRink {
             (Point3::new(wr, 0.0, lr), Vector3::new( 1.0, 0.0,  1.0), corner_radius),
             (Point3::new(r, 0.0, lr),  Vector3::new(-1.0, 0.0,  1.0), corner_radius)
         ];
+        let red_net = HQMRinkNet::new(HQMTeam::Red, width, length);
+        let blue_net = HQMRinkNet::new(HQMTeam::Blue, width, length);
         HQMRink {
             planes,
             corners,
-            red_net: HQMRinkNet::new(HQMTeam::Red, width, length),
-            blue_net: HQMRinkNet::new(HQMTeam::Blue, width, length),
+            nets: vec![red_net, blue_net],
             width,
             length
         }
@@ -934,7 +939,21 @@ impl HQMServer {
             self.game.active = true;
             self.move_players_between_teams();
             self.copy_player_input_to_object();
-            self.simulate_step();
+            let events = self.simulate_step();
+            /*for event in events {
+                match event {
+                    HQMSimulationEvent::EnteredNet {
+                        team, net, puck
+                    } => {
+                        println! ("Entered net, team {}, net {}, puck {}", team, net, puck);
+                    },
+                    HQMSimulationEvent::Touch {
+                        player, puck
+                    } => {
+                        println! ("Touched puck, player {}, puck {}", player, puck);
+                    }
+                }
+            }*/
             self.update_clock();
 
             let mut packets: Vec<HQMObjectPacket> = Vec::with_capacity(32);
@@ -1413,7 +1432,7 @@ struct HQMFaceoffPosition {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum HQMTeam {
+pub enum HQMTeam {
     Spec,
     Red,
     Blue,
@@ -1425,6 +1444,16 @@ impl HQMTeam {
             HQMTeam::Red => 0,
             HQMTeam::Blue => 1,
             HQMTeam::Spec => u32::MAX
+        }
+    }
+}
+
+impl Display for HQMTeam {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            HQMTeam::Red => write!(f, "Red"),
+            HQMTeam::Blue => write!(f, "Blue"),
+            HQMTeam::Spec => write!(f, "Spec")
         }
     }
 }
