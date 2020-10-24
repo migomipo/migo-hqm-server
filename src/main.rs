@@ -214,7 +214,7 @@ impl HQMServer {
                 self.player_update(&addr, &mut parser);
             },
             7 => {
-                self.player_quit(&addr);
+                self.player_exit(&addr);
             },
             _ => {}
         }
@@ -652,7 +652,7 @@ impl HQMServer {
         }
     }
 
-    fn player_quit(&mut self, addr: &SocketAddr) {
+    fn player_exit(&mut self, addr: &SocketAddr) {
         let current_slot = HQMServer::find_player_slot(self, addr);
         match current_slot {
             Some(x) => {
@@ -661,11 +661,11 @@ impl HQMServer {
                     player.player_name.clone()
                 };
                 self.remove_player(x);
-                let msg = format!("{} quit", player_name);
+                let msg = format!("{} exited", player_name);
                 self.add_server_chat_message(msg);
             }
             None => {
-                println!("Player has already quit");
+                println!("Player has already exited");
             }
         }
     }
@@ -689,7 +689,7 @@ impl HQMServer {
                 self.players[player_index as usize] = None;
             }
             None => {
-                println!("Player has already quit");
+                println!("Player has already exited");
             }
         }
     }
