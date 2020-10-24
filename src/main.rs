@@ -940,20 +940,44 @@ impl HQMServer {
             self.move_players_between_teams();
             self.copy_player_input_to_object();
             let events = self.simulate_step();
-            /*for event in events {
+            for event in events {
                 match event {
                     HQMSimulationEvent::EnteredNet {
                         team, net, puck
                     } => {
-                        println! ("Entered net, team {}, net {}, puck {}", team, net, puck);
+                        if self.game.period > 0 &&
+                            self.game.time > 0 &&
+                            self.game.timeout == 0 {
+                            let scoring_team = if team == HQMTeam::Red {
+                                self.game.blue_score += 1;
+                                HQMTeam::Blue
+                            } else if team == HQMTeam::Blue {
+                                self.game.red_score += 1;
+                                HQMTeam::Red
+                            } else {
+                                panic!();
+                            };
+                            self.game.timeout = 700;
+                            if self.game.period > 3 {
+                                self.game.intermission = 2000;
+                                self.game.game_over = true;
+                            }
+                            let message = HQMMessage::Goal {
+                                team: scoring_team,
+                                goal_player_index: None,
+                                assist_player_index: None
+                            };
+                            self.add_global_message(message);
+
+                        }
                     },
                     HQMSimulationEvent::Touch {
                         player, puck
                     } => {
-                        println! ("Touched puck, player {}, puck {}", player, puck);
+                        // TODO: Use this event to get correct goal/assist data
                     }
                 }
-            }*/
+            }
             self.update_clock();
 
             let mut packets: Vec<HQMObjectPacket> = Vec::with_capacity(32);
@@ -1068,8 +1092,14 @@ impl HQMServer {
                     } => {
                         writer.write_bits(6, 1);
                         writer.write_bits(2, team.get_num());
-                        writer.write_bits(6, *goal_player_index as u32);
-                        writer.write_bits(6, *assist_player_index as u32);
+                        writer.write_bits(6, match *goal_player_index {
+                            Some (x) => x as u32,
+                            None => u32::MAX
+                        });
+                        writer.write_bits(6, match *assist_player_index {
+                            Some (x) => x as u32,
+                            None => u32::MAX
+                        });
                     }
                     HQMMessage::PlayerUpdate {
                         player_name,
@@ -1267,7 +1297,7 @@ impl HQMServer {
                     self.new_game();
                 }
             } else if self.game.timeout > 0 {
-                self.game.timeout -= 0;
+                self.game.timeout -= 1;
                 if self.game.timeout == 0 && !self.game.game_over {
                     self.do_faceoff(0);
                 }
@@ -1636,8 +1666,8 @@ enum HQMMessage {
     },
     Goal {
         team: HQMTeam,
-        goal_player_index: usize,
-        assist_player_index: usize,
+        goal_player_index: Option<usize>,
+        assist_player_index: Option<usize>,
     },
     Chat {
         player_index: Option<usize>,
