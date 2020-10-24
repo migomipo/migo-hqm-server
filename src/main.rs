@@ -939,7 +939,7 @@ impl HQMServer {
             self.game.active = true;
             self.move_players_between_teams();
             self.copy_player_input_to_object();
-            let events = self.simulate_step();
+            let events = self.game.simulate_step();
             for event in events {
                 match event {
                     HQMSimulationEvent::EnteredNet {

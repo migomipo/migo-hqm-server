@@ -1,4 +1,4 @@
-use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam};
+use crate::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGame};
 use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Vector2, Point3};
 use std::ops::{Sub, AddAssign};
 use std::f32::consts::PI;
@@ -23,13 +23,13 @@ pub enum HQMSimulationEvent {
 }
 
 const GRAVITY: f32 = 0.000680;
-impl HQMServer {
+impl HQMGame {
 
     pub(crate) fn simulate_step (&mut self) -> Vec<HQMSimulationEvent> {
         let mut events = Vec::new();
         let mut players = Vec::new();
         let mut pucks = Vec::new();
-        for (i, o) in self.game.objects.iter_mut().enumerate() {
+        for (i, o) in self.objects.iter_mut().enumerate() {
             match o {
                 HQMGameObject::Player(player) => players.push((i, player)),
                 HQMGameObject::Puck(puck) => pucks.push((i, puck)),
@@ -42,7 +42,7 @@ impl HQMServer {
             update_player(player);
 
             for (ib, collision_ball) in player.collision_balls.iter().enumerate() {
-                let collision = collision_between_collision_ball_and_rink(collision_ball, & self.game.rink);
+                let collision = collision_between_collision_ball_and_rink(collision_ball, & self.rink);
                 if let Some((overlap, normal)) = collision {
                     collisions.push(HQMCollision::PlayerRink((i, ib), overlap, normal));
                 }
@@ -51,7 +51,7 @@ impl HQMServer {
             let rot_axis_copy = player.body.angular_velocity.clone_owned();
 
             update_player2(player);
-            update_stick(player, & pos_delta_copy, & rot_axis_copy, & self.game.rink);
+            update_stick(player, & pos_delta_copy, & rot_axis_copy, & self.rink);
             player.old_input = player.input.clone();
         }
 
@@ -105,7 +105,7 @@ impl HQMServer {
                 let old_rot_axis = puck.body.angular_velocity.clone_owned();
                 let puck_vertices = get_puck_vertices(&puck.body.pos, &puck.body.rot, puck.height, puck.radius);
                 if i == 0 {
-                    collisions_between_puck_and_rink(puck, & puck_vertices, & self.game.rink, &old_pos_delta, &old_rot_axis);
+                    collisions_between_puck_and_rink(puck, & puck_vertices, & self.rink, &old_pos_delta, &old_rot_axis);
                 }
                 for (player_index,player) in players.iter_mut() {
                     let old_stick_pos_delta = player.stick_velocity.clone_owned();
@@ -119,7 +119,7 @@ impl HQMServer {
                         }
                     }
                 }
-                if let Some((overlap, normal)) = collision_between_sphere_and_posts(&puck.body.pos, puck.radius, &self.game.rink) {
+                if let Some((overlap, normal)) = collision_between_sphere_and_posts(&puck.body.pos, puck.radius, &self.rink) {
                     let p = &puck.body.pos - puck.radius*normal;
                     let vertex_velocity = speed_of_point_including_rotation(&p, &puck.body.pos, &puck.body.linear_velocity, &puck.body.angular_velocity);
                     let mut puck_force = normal.scale(overlap * 0.125) - vertex_velocity;
@@ -129,7 +129,7 @@ impl HQMServer {
                         apply_acceleration_to_object(&mut puck.body, &puck_force, &p);
                     }
                 }
-                if let Some((overlap_pos, overlap, normal)) = collision_between_sphere_and_nets(&puck.body.pos, puck.radius, &self.game.rink) {
+                if let Some((overlap_pos, overlap, normal)) = collision_between_sphere_and_nets(&puck.body.pos, puck.radius, &self.rink) {
                     let vertex_velocity = speed_of_point_including_rotation(&overlap_pos, &puck.body.pos, &puck.body.linear_velocity, &puck.body.angular_velocity);
                     let mut puck_force = normal.scale(overlap * 0.5 * 0.25) - vertex_velocity.scale(0.25);
 
@@ -153,7 +153,7 @@ impl HQMServer {
             if puck.body.angular_velocity.norm() > 0.000015258789 {
                 rotate_matrix_around_axis(& mut puck.body.rot, &puck.body.angular_velocity.normalize(), puck.body.angular_velocity.norm())
             }
-            puck_goal_detection(puck, *puck_index, &old_puck_pos, & self.game.rink, & mut events);
+            puck_goal_detection(puck, *puck_index, &old_puck_pos, & self.rink, & mut events);
         }
         for _ in 0..16 {
             let original_ball_velocities = Vec::from_iter(players.iter().map(|y| {
