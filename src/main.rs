@@ -866,16 +866,30 @@ impl HQMServer {
     }
 
     fn move_players_between_teams(&mut self) {
+        let mut red_player_count = 0;
+        let mut blue_player_count = 0;
+        for p in self.players.iter() {
+            if let Some(player) = p {
+                if player.team == HQMTeam::Red {
+                    red_player_count += 1;
+                } else if player.team == HQMTeam::Red {
+                    blue_player_count += 1;
+                }
+            }
+        }
         let mut new_messages = Vec::new();
         for (player_index, p) in self.players.iter_mut().enumerate() {
             if let Some(player) = p {
-                if player.input.join_red() || player.input.join_blue() {
-                    let new_team = if player.input.join_red() {
-                        HQMTeam::Red
+                player.team_switch_timer = player.team_switch_timer.saturating_sub(1);
+                if (player.input.join_red() || player.input.join_blue())
+                    && player.team == HQMTeam::Spec
+                    && player.team_switch_timer == 0 {
+                    let (new_team, new_team_count) = if player.input.join_red() {
+                        (HQMTeam::Red, & mut red_player_count)
                     } else {
-                        HQMTeam::Blue
+                        (HQMTeam::Blue, & mut blue_player_count)
                     };
-                    if player.team != new_team {
+                    if new_team != player.team && *new_team_count + 1 < self.config.team_max {
                         if player.skater.is_none() {
                             let (mid_x, mid_z) = (self.game.rink.width / 2.0, self.game.rink.length / 2.0);
                             let pos = Point3::new(mid_x, 2.5, mid_z);
@@ -884,6 +898,7 @@ impl HQMServer {
                             if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand) {
                                 player.team = new_team;
                                 player.skater = Some(i);
+                                *new_team_count += 1;
                             }
                         } else {
                             player.team = new_team;
@@ -901,6 +916,7 @@ impl HQMServer {
                     }
                 } else if player.input.spectate() && player.team != HQMTeam::Spec {
                     player.team = HQMTeam::Spec;
+                    player.team_switch_timer = 500; // 500 ticks, 5 seconds
                     if let Some (i) = player.skater {
                         self.game.objects[i] = HQMGameObject::None;
                         player.skater = None;
@@ -908,7 +924,7 @@ impl HQMServer {
                     new_messages.push(HQMMessage::PlayerUpdate {
                         player_name: player.player_name.clone().into_bytes(),
                         team: player.team,
-                        player_index: player_index,
+                        player_index,
                         object_index: None,
                         in_server: true
                     });
@@ -1389,6 +1405,7 @@ struct HQMConnectedPlayer {
     inactivity: u32,
     is_admin: bool,
     is_muted:bool,
+    team_switch_timer: u32,
     hand: HQMSkaterHand
 }
 
@@ -1409,7 +1426,8 @@ impl HQMConnectedPlayer {
             inactivity: 0,
             is_admin: false,
             is_muted:false,
-            hand: HQMSkaterHand::Right
+            hand: HQMSkaterHand::Right,
+            team_switch_timer: 0
         }
     }
 }
