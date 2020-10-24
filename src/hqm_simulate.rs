@@ -1,6 +1,6 @@
 use crate::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGame};
 use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Vector2, Point3};
-use std::ops::{Sub, AddAssign};
+use std::ops::{AddAssign};
 use std::f32::consts::PI;
 use nalgebra::base::storage::{Storage, StorageMut};
 use std::iter::FromIterator;
@@ -145,12 +145,12 @@ impl HQMGame {
         }
 
         for ((puck_index,puck), old_puck_pos) in pucks.iter_mut().zip(pucks_old_pos.iter()) {
-            if puck.body.linear_velocity.norm () > 0.000015258789 {
+            if puck.body.linear_velocity.norm () > 1.0/65536.0 {
                 let scale = puck.body.linear_velocity.norm ().powi(2) * 0.125 * 0.125;
                 let scaled = puck.body.linear_velocity.normalize().scale(scale);
                 puck.body.linear_velocity -= scaled;
             }
-            if puck.body.angular_velocity.norm() > 0.000015258789 {
+            if puck.body.angular_velocity.norm() > 1.0/65536.0 {
                 rotate_matrix_around_axis(& mut puck.body.rot, &puck.body.angular_velocity.normalize(), puck.body.angular_velocity.norm())
             }
             puck_goal_detection(puck, *puck_index, &old_puck_pos, & self.rink, & mut events);
@@ -495,7 +495,7 @@ fn update_player(player: & mut HQMSkater) {
         player.body.angular_velocity += turn_change;
     }
 
-    if player.body.angular_velocity.norm() > 0.00001 {
+    if player.body.angular_velocity.norm() > 1.0/65536.0 {
         rotate_matrix_around_axis(& mut player.body.rot, &player.body.angular_velocity.normalize(), player.body.angular_velocity.norm());
     }
     adjust_head_body_rot(& mut player.head_rot, player.input.head_rot);
@@ -708,14 +708,14 @@ fn limit_vector_length_mut2 (v: & mut Vector2<f32>, max_len: f32) {
 fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     let projection_length = v.dot(&normal);
     let projection = normal.scale(projection_length);
-    let rejection = v.sub(&projection);
+    let rejection = &*v - &projection;
     let rejection_length = rejection.norm();
+    v.copy_from(&projection);
 
-    if rejection_length > 0.000015258789 {
+    if rejection_length > 1.0/65536.0 {
         let rejection_norm = rejection.normalize();
 
         let rejection_length2 = rejection_length.min(projection.norm() * d);
-        v.copy_from(&projection);
         v.add_assign(rejection_norm.scale(rejection_length2));
     }
 }
