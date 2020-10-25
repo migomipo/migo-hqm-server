@@ -434,6 +434,19 @@ impl HQMServer {
         }
     }
 
+    fn set_period (& mut self, input_period: u32,player_index: usize) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+
+                self.game.period = input_period;
+                
+                let msg = format!("Period set by {}",player.player_name);
+                self.add_server_chat_message(msg);
+
+            }
+        }
+    }
+
     fn faceoff (& mut self, player_index: usize) {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{
@@ -535,6 +548,17 @@ impl HQMServer {
                             if input_score >= 0{
                                 self.set_score(HQMTeam::Blue,input_score as u32,player_index)
                             }
+                        },
+                        "period" =>{
+                            let input_period = match args[1].parse::<i32>() {
+                                Ok(input_period) => input_period,
+                                Err(_) => -1
+                            };
+
+                            if input_period >= 0{
+                                self.set_period(input_period as u32,player_index)
+                            }
+
                         },
                         "clock" =>{
 
@@ -752,7 +776,13 @@ impl HQMServer {
 
                 let new_player = HQMConnectedPlayer::new(player_name, *addr,
                                                          self.game.global_messages.clone());
+
+
                 self.players[x] = Some(new_player);
+
+                // Store index for quick reference
+                self.players[x].as_mut().unwrap()._index = x as i32;
+
                 true
             }
             _ => false
@@ -849,10 +879,10 @@ impl HQMServer {
         return 0;
     }
 
-    fn create_player_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand) -> Option<usize> {
+    fn create_player_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: i32) -> Option<usize> {
         let object_slot = HQMServer::find_empty_object_slot(& objects);
         if let Some(i) = object_slot {
-            objects[i] = HQMGameObject::Player(HQMSkater::new(start, rot, hand));
+            objects[i] = HQMGameObject::Player(HQMSkater::new(i as i32, start, rot, hand, connected_player_index));
         }
         return object_slot;
     }
@@ -860,7 +890,7 @@ impl HQMServer {
     fn create_puck_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>) -> Option<usize> {
         let object_slot = HQMServer::find_empty_object_slot(& objects);
         if let Some(i) = object_slot {
-            objects[i] = HQMGameObject::Puck(HQMPuck::new(start, rot));
+            objects[i] = HQMGameObject::Puck(HQMPuck::new(i as i32, start, rot));
         }
         return object_slot;
     }
@@ -889,13 +919,13 @@ impl HQMServer {
                     } else {
                         (HQMTeam::Blue, & mut blue_player_count)
                     };
-                    if new_team != player.team && *new_team_count + 1 < self.config.team_max {
+                    if new_team != player.team && *new_team_count + 1 <= self.config.team_max {
                         if player.skater.is_none() {
                             let (mid_x, mid_z) = (self.game.rink.width / 2.0, self.game.rink.length / 2.0);
                             let pos = Point3::new(mid_x, 2.5, mid_z);
                             let rot = Matrix3::identity();
 
-                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand) {
+                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand, player._index) {
                                 player.team = new_team;
                                 player.skater = Some(i);
                                 *new_team_count += 1;
@@ -1391,6 +1421,7 @@ async fn notify_master_server(socket: & UdpSocket) -> std::io::Result<usize> {
 }
 
 struct HQMConnectedPlayer {
+    _index: i32,
     player_name: String,
     addr: SocketAddr,
     team: HQMTeam,
@@ -1412,6 +1443,7 @@ struct HQMConnectedPlayer {
 impl HQMConnectedPlayer {
     pub fn new(player_name: String, addr: SocketAddr, global_messages: Vec<Rc<HQMMessage>>) -> Self {
         HQMConnectedPlayer {
+            _index:-1,
             player_name,
             addr,
             team: HQMTeam::Spec,
@@ -1520,6 +1552,8 @@ enum HQMSkaterHand {
 }
 
 struct HQMSkater {
+    _index: i32,
+    _connected_player_index: i32,
     body: HQMBody,
     stick_pos: Point3<f32>,        // Measured in meters
     stick_velocity: Vector3<f32>,  // Measured in meters per hundred of a second
@@ -1548,10 +1582,12 @@ impl HQMSkater {
         collision_balls
     }
 
-    fn new(pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand) -> Self {
+    fn new(object_index: i32, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: i32) -> Self {
         let linear_velocity = Vector3::new (0.0, 0.0, 0.0);
         let mut collision_balls = HQMSkater::get_collision_balls(&pos, &rot, &linear_velocity);
         HQMSkater {
+            _index:object_index,
+            _connected_player_index:connected_player_index,
             body: HQMBody {
                 pos: pos.clone(),
                 linear_velocity,
@@ -1629,9 +1665,13 @@ impl HQMSkaterCollisionBall {
 }
 
 struct HQMPuck {
+    _index: i32,
     body: HQMBody,
     radius: f32,
     height: f32,
+    last_player_index_1: i32,
+    last_player_index_2: i32,
+    last_player_index_3: i32,
 }
 
 fn get_position (bits: u32, v: f32) -> u32 {
@@ -1646,8 +1686,9 @@ fn get_position (bits: u32, v: f32) -> u32 {
 }
 
 impl HQMPuck {
-    fn new(pos: Point3<f32>, rot: Matrix3<f32>) -> Self {
+    fn new(object_index:i32,pos: Point3<f32>, rot: Matrix3<f32>) -> Self {
         HQMPuck {
+            _index:object_index,
             body: HQMBody {
                 pos,
                 linear_velocity: Vector3::new(0.0, 0.0, 0.0),
@@ -1657,6 +1698,9 @@ impl HQMPuck {
             },
             radius: 0.125,
             height: 0.0412500016391,
+            last_player_index_1:-1,
+            last_player_index_2:-1,
+            last_player_index_3:-1,
         }
     }
 
