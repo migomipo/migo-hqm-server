@@ -1,6 +1,6 @@
-use crate::{HQMServer, HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand};
+use crate::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGame};
 use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Vector2, Point3};
-use std::ops::{Sub, AddAssign};
+use std::ops::{AddAssign};
 use std::f32::consts::PI;
 use nalgebra::base::storage::{Storage, StorageMut};
 use std::iter::FromIterator;
@@ -10,27 +10,39 @@ enum HQMCollision {
     PlayerPlayer((usize, usize), (usize, usize), f32, Vector3<f32>)
 }
 
+pub enum HQMSimulationEvent {
+    EnteredNet {
+        team: HQMTeam,
+        net: usize,
+        puck: usize
+    },
+    Touch {
+        player: usize,
+        puck: usize
+    }
+}
+
 const GRAVITY: f32 = 0.000680;
-impl HQMServer {
+impl HQMGame {
 
-
-    pub(crate) fn simulate_step (&mut self) {
+    pub(crate) fn simulate_step (&mut self) -> Vec<HQMSimulationEvent> {
+        let mut events = Vec::new();
         let mut players = Vec::new();
         let mut pucks = Vec::new();
-        for o in self.game.objects.iter_mut() {
+        for (i, o) in self.objects.iter_mut().enumerate() {
             match o {
-                HQMGameObject::Player(player) => players.push(player),
-                HQMGameObject::Puck(puck) => pucks.push(puck),
+                HQMGameObject::Player(player) => players.push((i, player)),
+                HQMGameObject::Puck(puck) => pucks.push((i, puck)),
                 _ => {}
             }
         }
 
         let mut collisions = vec![];
-        for (i, player) in players.iter_mut().enumerate() {
+        for (i, (_,player)) in players.iter_mut().enumerate() {
             update_player(player);
 
             for (ib, collision_ball) in player.collision_balls.iter().enumerate() {
-                let collision = collision_between_collision_ball_and_rink(collision_ball, & self.game.rink);
+                let collision = collision_between_collision_ball_and_rink(collision_ball, & self.rink);
                 if let Some((overlap, normal)) = collision {
                     collisions.push(HQMCollision::PlayerRink((i, ib), overlap, normal));
                 }
@@ -39,15 +51,15 @@ impl HQMServer {
             let rot_axis_copy = player.body.angular_velocity.clone_owned();
 
             update_player2(player);
-            update_stick(player, & pos_delta_copy, & rot_axis_copy, & self.game.rink);
+            update_stick(player, & pos_delta_copy, & rot_axis_copy, & self.rink);
             player.old_input = player.input.clone();
         }
 
         for i in 0..players.len() {
             for j in i+1..players.len() {
                 let (a,b) = players.split_at_mut(j);
-                let p1 = &mut a[i];
-                let p2 = &mut b[0];
+                let (_,p1) = &mut a[i];
+                let (_,p2) = &mut b[0];
                 for (ib, p1_collision_ball) in p1.collision_balls.iter().enumerate() {
                     for (jb, p2_collision_ball) in p2.collision_balls.iter().enumerate() {
                         let pos_diff = &p1_collision_ball.pos - &p2_collision_ball.pos;
@@ -75,33 +87,39 @@ impl HQMServer {
             }
         }
 
-        let pucks_old_pos: Vec<Point3<f32>> = pucks.iter().map(|x| x.body.pos.clone()).collect();
+        let pucks_old_pos: Vec<Point3<f32>> = pucks.iter().map(|x| x.1.body.pos.clone()).collect();
 
-        for puck in pucks.iter_mut() {
+        for (_,puck) in pucks.iter_mut() {
             puck.body.linear_velocity[1] -= GRAVITY;
         }
 
         for i in 0..10 {
 
-            for player in players.iter_mut() {
+            for (_,player) in players.iter_mut() {
                 player.stick_pos += player.stick_velocity.scale(0.1);
             }
-            for puck in pucks.iter_mut() {
+            for (puck_index,puck) in pucks.iter_mut() {
                 puck.body.pos += puck.body.linear_velocity.scale(0.1);
 
                 let old_pos_delta = puck.body.linear_velocity.clone_owned();
                 let old_rot_axis = puck.body.angular_velocity.clone_owned();
                 let puck_vertices = get_puck_vertices(&puck.body.pos, &puck.body.rot, puck.height, puck.radius);
                 if i == 0 {
-                    collisions_between_puck_and_rink(puck, & puck_vertices, & self.game.rink, &old_pos_delta, &old_rot_axis);
+                    collisions_between_puck_and_rink(puck, & puck_vertices, & self.rink, &old_pos_delta, &old_rot_axis);
                 }
-                for player in players.iter_mut() {
+                for (player_index,player) in players.iter_mut() {
                     let old_stick_pos_delta = player.stick_velocity.clone_owned();
                     if (&puck.body.pos - &player.stick_pos).norm() < 1.0 {
-                        collisions_between_puck_and_stick(puck, player, & puck_vertices, &old_pos_delta, &old_rot_axis, &old_stick_pos_delta);
+                        let has_touched = collisions_between_puck_and_stick(puck, player, & puck_vertices, &old_pos_delta, &old_rot_axis, &old_stick_pos_delta);
+                        if has_touched {
+                            events.push(HQMSimulationEvent::Touch {
+                                puck: *puck_index,
+                                player: *player_index,
+                            })
+                        }
                     }
                 }
-                if let Some((overlap, normal)) = collision_between_sphere_and_posts(&puck.body.pos, puck.radius, &self.game.rink) {
+                if let Some((overlap, normal)) = collision_between_sphere_and_posts(&puck.body.pos, puck.radius, &self.rink) {
                     let p = &puck.body.pos - puck.radius*normal;
                     let vertex_velocity = speed_of_point_including_rotation(&p, &puck.body.pos, &puck.body.linear_velocity, &puck.body.angular_velocity);
                     let mut puck_force = normal.scale(overlap * 0.125) - vertex_velocity;
@@ -111,7 +129,7 @@ impl HQMServer {
                         apply_acceleration_to_object(&mut puck.body, &puck_force, &p);
                     }
                 }
-                if let Some((overlap_pos, overlap, normal)) = collision_between_sphere_and_nets(&puck.body.pos, puck.radius, &self.game.rink) {
+                if let Some((overlap_pos, overlap, normal)) = collision_between_sphere_and_nets(&puck.body.pos, puck.radius, &self.rink) {
                     let vertex_velocity = speed_of_point_including_rotation(&overlap_pos, &puck.body.pos, &puck.body.linear_velocity, &puck.body.angular_velocity);
                     let mut puck_force = normal.scale(overlap * 0.5 * 0.25) - vertex_velocity.scale(0.25);
 
@@ -126,20 +144,20 @@ impl HQMServer {
             }
         }
 
-        for (puck, old_puck_pos) in pucks.iter_mut().zip(pucks_old_pos.iter()) {
-            if puck.body.linear_velocity.norm () > 0.000015258789 {
+        for ((puck_index,puck), old_puck_pos) in pucks.iter_mut().zip(pucks_old_pos.iter()) {
+            if puck.body.linear_velocity.norm () > 1.0/65536.0 {
                 let scale = puck.body.linear_velocity.norm ().powi(2) * 0.125 * 0.125;
                 let scaled = puck.body.linear_velocity.normalize().scale(scale);
                 puck.body.linear_velocity -= scaled;
             }
-            if puck.body.angular_velocity.norm() > 0.000015258789 {
+            if puck.body.angular_velocity.norm() > 1.0/65536.0 {
                 rotate_matrix_around_axis(& mut puck.body.rot, &puck.body.angular_velocity.normalize(), puck.body.angular_velocity.norm())
             }
-            puck_goal_detection(puck, &old_puck_pos, & self.game.rink);
+            puck_goal_detection(puck, *puck_index, &old_puck_pos, & self.rink, & mut events);
         }
         for _ in 0..16 {
             let original_ball_velocities = Vec::from_iter(players.iter().map(|y| {
-                let m = y.collision_balls.iter().map(|x| x.velocity.clone_owned());
+                let m = y.1.collision_balls.iter().map(|x| x.velocity.clone_owned());
                 Vec::from_iter(m)
             }));
 
@@ -152,7 +170,7 @@ impl HQMServer {
                         let mut new = normal.scale(overlap * 0.03125) - original_velocity.scale(0.25);
                         if new.dot(&normal) > 0.0 {
                             limit_rejection(& mut new, &normal, 0.01);
-                            let ball = & mut players[i].collision_balls[ib];
+                            let ball = & mut players[i].1.collision_balls[ib];
                             ball.velocity += new;
                         }
                     }
@@ -165,44 +183,52 @@ impl HQMServer {
                         let mut new = normal.scale(overlap * 0.125) + (original_velocity2 - original_velocity1).scale(0.25);
                         if new.dot(&normal) > 0.0 {
                             limit_rejection(& mut new, &normal, 0.01);
-                            let ball1 = & mut players[i].collision_balls[ib];
+                            let ball1 = & mut players[i].1.collision_balls[ib];
                             ball1.velocity += new.scale(0.5);
-                            let ball2 = & mut players[j].collision_balls[jb];
+                            let ball2 = & mut players[j].1.collision_balls[jb];
                             ball2.velocity -= new.scale(0.5);
                         }
                     }
                 }
             }
         }
+        events
     }
 }
 
-fn puck_goal_detection(puck: & mut HQMPuck, old_puck_pos: &Point3<f32>, rink: & HQMRink) {
-    for net in vec![&rink.blue_net, &rink.red_net] {
+fn puck_goal_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<f32>, rink: & HQMRink, events: & mut Vec<HQMSimulationEvent>) {
+    for (net_index, net) in rink.nets.iter().enumerate() {
         if (&net.left_post - &puck.body.pos).dot(&net.normal) >= 0.0 {
             if (&net.left_post - old_puck_pos).dot(&net.normal) < 0.0 {
                 if (&net.left_post - &puck.body.pos).dot(&net.left_post_inside) < 0.0 &&
                     (&net.right_post - &puck.body.pos).dot(&net.right_post_inside) < 0.0
                     && puck.body.pos.y < 1.0 {
-                    println! ("Puck entered net");
-                } else {
+                    let event = HQMSimulationEvent::EnteredNet {
+                        team: net.team,
+                        net: net_index,
+                        puck: puck_index
+                    };
+                    events.push(event);
+                    //println! ("Puck entered net");
+                } /*else {
                     println! ("Puck passed behind goal plane");
-                }
+                } */
             }
-        } else if (&net.left_post - old_puck_pos).dot(&net.normal) >= 0.0 {
+        } /*else if (&net.left_post - old_puck_pos).dot(&net.normal) >= 0.0 {
             println! ("Puck passed in front of goal plane");
-        }
+        }*/
 
     }
 }
 
 fn collisions_between_puck_and_stick(puck: & mut HQMPuck, player: & mut HQMSkater, puck_vertices: &Vec<Point3<f32>>,
-                                     old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>, old_stick_pos_delta: & Vector3<f32>) {
+                                     old_pos_delta: & Vector3<f32>, old_rot_axis: & Vector3<f32>, old_stick_pos_delta: & Vector3<f32>) -> bool {
     let stick_surfaces = get_stick_surfaces(player);
-
+    let mut res = false;
     for puck_vertex in puck_vertices.iter() {
         let col = collision_between_puck_vertex_and_stick(& puck.body.pos, puck_vertex, &stick_surfaces);
         if let Some ((dot, normal)) = col {
+            res = true;
             let puck_vertex_speed = speed_of_point_including_rotation(&puck_vertex, & puck.body.pos, old_pos_delta, old_rot_axis);
 
             let mut puck_force = (normal.scale(dot * 0.5) + (old_stick_pos_delta - puck_vertex_speed)).scale(0.125);
@@ -221,6 +247,7 @@ fn collisions_between_puck_and_stick(puck: & mut HQMPuck, player: & mut HQMSkate
             }
         }
     }
+    res
 }
 
 fn get_stick_surfaces(player: & HQMSkater) -> Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)> {
@@ -272,7 +299,7 @@ fn inside_surface(pos: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3
 fn collision_between_sphere_and_nets(pos: &Point3<f32>, radius: f32, rink: & HQMRink) -> Option<(Point3<f32>, f32, Vector3<f32>)> {
     let mut max_overlap = 0.0;
     let mut res: Option<(Point3<f32>, f32, Vector3<f32>)> = None;
-    for net in vec![&rink.blue_net, &rink.red_net] {
+    for net in rink.nets.iter() {
         for surface in net.surfaces.iter() {
             let normal = (&surface.3 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
 
@@ -306,7 +333,7 @@ fn collision_between_sphere_and_nets(pos: &Point3<f32>, radius: f32, rink: & HQM
 fn collision_between_sphere_and_posts(pos: &Point3<f32>, radius: f32, rink: & HQMRink) -> Option<(f32, Vector3<f32>)> {
     let mut max_overlap = 0f32;
     let mut coll_normal  = None;
-    for net in vec![&rink.blue_net, &rink.red_net] {
+    for net in rink.nets.iter() {
         for (p1, p2, post_radius) in net.posts.iter() {
             let a = post_radius + radius;
             let diff = pos - p1;
@@ -475,7 +502,7 @@ fn update_player(player: & mut HQMSkater) {
         player.body.angular_velocity += turn_change;
     }
 
-    if player.body.angular_velocity.norm() > 0.00001 {
+    if player.body.angular_velocity.norm() > 1.0/65536.0 {
         rotate_matrix_around_axis(& mut player.body.rot, &player.body.angular_velocity.normalize(), player.body.angular_velocity.norm());
     }
     adjust_head_body_rot(& mut player.head_rot, player.input.head_rot);
@@ -688,15 +715,15 @@ fn limit_vector_length_mut2 (v: & mut Vector2<f32>, max_len: f32) {
 fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     let projection_length = v.dot(&normal);
     let projection = normal.scale(projection_length);
-    let rejection = v.sub(&projection);
+    let rejection = &*v - &projection;
     let rejection_length = rejection.norm();
+    *v = projection.clone_owned();
 
-    if rejection_length > 0.000015258789 {
+    if rejection_length > 1.0/65536.0 {
         let rejection_norm = rejection.normalize();
 
         let rejection_length2 = rejection_length.min(projection.norm() * d);
-        v.copy_from(&projection);
-        v.add_assign(rejection_norm.scale(rejection_length2));
+        *v += rejection_norm.scale(rejection_length2);
     }
 }
 
