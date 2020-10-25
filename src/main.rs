@@ -434,6 +434,19 @@ impl HQMServer {
         }
     }
 
+    fn set_period (& mut self, input_period: u32,player_index: usize) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+
+                self.game.period = input_period;
+                
+                let msg = format!("Period set by {}",player.player_name);
+                self.add_server_chat_message(msg);
+
+            }
+        }
+    }
+
     fn faceoff (& mut self, player_index: usize) {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{
@@ -535,6 +548,17 @@ impl HQMServer {
                             if input_score >= 0{
                                 self.set_score(HQMTeam::Blue,input_score as u32,player_index)
                             }
+                        },
+                        "period" =>{
+                            let input_period = match args[1].parse::<i32>() {
+                                Ok(input_period) => input_period,
+                                Err(_) => -1
+                            };
+
+                            if input_period >= 0{
+                                self.set_period(input_period as u32,player_index)
+                            }
+
                         },
                         "clock" =>{
 
