@@ -160,6 +160,7 @@ impl HQMGame {
             for y in 0..4 {
                 let i = 4*x + y;
                 object_vec[i as usize] = HQMGameObject::Puck(HQMPuck {
+                    _index: i,
                     body: HQMBody {
                         pos: Point3::new(15.0 + ((x-2) as f32) * 2.0, 1.5, 30.5 + ((y-2) as f32) * 2.0),
                         linear_velocity: Vector3::new(0.0, 0.0, 0.0),
@@ -169,6 +170,9 @@ impl HQMGame {
                     },
                     radius: 0.125,
                     height: 0.0412500016391,
+                    last_player_index_1: -1,
+                    last_player_index_2: -1,
+                    last_player_index_3: -1,
                 });
             }
         }
@@ -761,7 +765,13 @@ impl HQMServer {
 
                 let new_player = HQMConnectedPlayer::new(player_name, *addr,
                                                          self.game.global_messages.clone());
+
+
                 self.players[x] = Some(new_player);
+
+                // Store index for quick reference
+                self.players[x].as_mut().unwrap()._index = x as i32;
+
                 true
             }
             _ => false
@@ -860,7 +870,7 @@ impl HQMServer {
         return 0;
     }
 
-    fn create_player_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand) -> Option<usize> {
+    fn create_player_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: i32) -> Option<usize> {
         let object_slot = HQMServer::find_empty_object_slot(& objects);
         if let Some(i) = object_slot {
             let linear_velocity = Vector3::new (0.0, 0.0, 0.0);
@@ -872,6 +882,8 @@ impl HQMServer {
             collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.1875, -0.1875, 0.0), & start, & rot, & linear_velocity, 0.1875));
             collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.0, 0.5, 0.0), & start, & rot, & linear_velocity, 0.1875));
             objects[i] = HQMGameObject::Player(HQMSkater {
+                _index:i as i32, // Store index for quick reference
+                _connected_player_index:connected_player_index, // Store connected player for quick reference
                 body: HQMBody {
                     pos: start,
                     linear_velocity,
@@ -912,7 +924,7 @@ impl HQMServer {
                             let pos = Point3::new(mid_x, 2.5, mid_z);
                             let rot = Matrix3::identity();
 
-                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand) {
+                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand, player._index) {
                                 player.team = new_team;
                                 player.skater = Some(i);
                             }
@@ -1327,6 +1339,7 @@ async fn notify_master_server(socket: & UdpSocket) -> std::io::Result<usize> {
 }
 
 struct HQMConnectedPlayer {
+    _index: i32,
     player_name: String,
     addr: SocketAddr,
     team: HQMTeam,
@@ -1347,6 +1360,7 @@ struct HQMConnectedPlayer {
 impl HQMConnectedPlayer {
     pub fn new(player_name: String, addr: SocketAddr, global_messages: Vec<Rc<HQMMessage>>) -> Self {
         HQMConnectedPlayer {
+            _index:-1,
             player_name,
             addr,
             team: HQMTeam::Spec,
@@ -1444,6 +1458,8 @@ enum HQMSkaterHand {
 }
 
 struct HQMSkater {
+    _index: i32,
+    _connected_player_index: i32,
     body: HQMBody,
     stick_pos: Point3<f32>,        // Measured in meters
     stick_velocity: Vector3<f32>,  // Measured in meters per hundred of a second
@@ -1522,9 +1538,13 @@ impl HQMSkaterCollisionBall {
 }
 
 struct HQMPuck {
+    _index: i32,
     body: HQMBody,
     radius: f32,
     height: f32,
+    last_player_index_1: i32,
+    last_player_index_2: i32,
+    last_player_index_3: i32,
 }
 
 fn get_position (bits: u32, v: f32) -> u32 {
