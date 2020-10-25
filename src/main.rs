@@ -895,7 +895,7 @@ impl HQMServer {
                     } else {
                         (HQMTeam::Blue, & mut blue_player_count)
                     };
-                    if new_team != player.team && *new_team_count + 1 < self.config.team_max {
+                    if new_team != player.team && *new_team_count + 1 <= self.config.team_max {
                         if player.skater.is_none() {
                             let (mid_x, mid_z) = (self.game.rink.width / 2.0, self.game.rink.length / 2.0);
                             let pos = Point3::new(mid_x, 2.5, mid_z);

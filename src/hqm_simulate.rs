@@ -234,12 +234,10 @@ fn collisions_between_puck_and_stick(puck: & mut HQMPuck, player: & mut HQMSkate
             let mut puck_force = (normal.scale(dot * 0.5) + (old_stick_pos_delta - puck_vertex_speed)).scale(0.125);
             if puck_force.dot(&normal) > 0.0 {
 
-                if(player._index != puck.last_player_index_1){
+                if(player._connected_player_index != puck.last_player_index_1){
                     puck.last_player_index_3= puck.last_player_index_2;
                     puck.last_player_index_2= puck.last_player_index_1;
                     puck.last_player_index_1= player._connected_player_index;
-
-                    println! ("Player {} touched puck {}",player._connected_player_index,puck._index);
                 }
 
                 limit_rejection(& mut puck_force, &normal, 0.5);
