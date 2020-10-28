@@ -42,7 +42,9 @@ struct HQMGame {
     game_over: bool,
     packet: u32,
     rink: HQMRink,
-    active: bool
+    active: bool,
+    last_touch_player_index_blue:  u32,
+    last_touch_player_index_red: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -181,7 +183,9 @@ impl HQMGame {
             game_step: 0,
             packet: 0,
             rink: HQMRink::new(30.0, 61.0, 8.5),
-            active: false
+            active: false,
+            last_touch_player_index_blue:u32::MAX,
+            last_touch_player_index_red:u32::MAX
         }
     }
 }
@@ -934,8 +938,10 @@ impl HQMServer {
                             player.team = new_team;
                         }
 
-                        //player.role_index = self.get_free_role(new_team); // TODO; proper get role; this function should return a free role
+                        
+                        player.faceoff_position_index = 1;//HQMServer::get_free_role(new_team); // TODO; proper get role; this function should return a free role
 
+                        // Message for new player
                         new_messages.push(HQMMessage::PlayerUpdate {
                             player_name: player.player_name.clone().into_bytes(),
                             team: player.team,
@@ -1008,10 +1014,75 @@ impl HQMServer {
                                 self.game.intermission = 2000;
                                 self.game.game_over = true;
                             }
+
+                            let mut goal_scorer_index = u32::MAX;
+                            let mut assist_index = u32::MAX;
+
+                            let mut player_index_1 = u32::MAX;
+                            let mut player_index_2 = u32::MAX;
+                            let mut player_index_3 = u32::MAX;
+                            if let HQMGameObject::Puck(this_puck) = & mut self.game.objects[puck] {
+                                player_index_1 = this_puck.last_player_index_1;
+                                player_index_2 = this_puck.last_player_index_2;
+                                player_index_3 = this_puck.last_player_index_3;
+                            }
+
+                            let mut find_assist:bool = false;
+
+                            // Was it an own goal? If not award the goal and find the assister
+                            // but if so award goal to last player on the team
+                            if player_index_1 != u32::MAX{
+                                if let Some(player_1) = & self.players[player_index_1 as usize] {
+                                    if scoring_team==HQMTeam::Red {
+                                        if player_1.team == HQMTeam::Red{
+                                            find_assist=true;
+                                            goal_scorer_index=player_index_1;
+                                        }else{
+                                            goal_scorer_index=self.game.last_touch_player_index_red;
+                                        }
+                                    } else {
+                                        if player_1.team == HQMTeam::Blue{
+                                            find_assist=true;
+                                            goal_scorer_index=player_index_1;
+                                        }else{
+                                            goal_scorer_index=self.game.last_touch_player_index_blue;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // It was not an own goal; find the assist
+                            if find_assist{
+
+                                if player_index_2 != u32::MAX{
+                                    if let Some(player_2) = & self.players[player_index_2 as usize] {
+                                        if player_2.team == scoring_team {
+                                            assist_index = player_index_2;
+                                        }
+                                    }
+                                }
+
+                                // If no assist still check the 3rd last player to touch the puck
+                                // and if it's not the same player that scored give them the assist
+                                if assist_index == u32::MAX {
+                                    if player_index_3 != u32::MAX{
+                                        if let Some(player_3) = & self.players[player_index_3 as usize] {
+                                            if player_3.team == scoring_team && player_3._index as u32 != goal_scorer_index {
+                                                assist_index = player_index_3;
+                                            }
+                                        }
+                                    }
+                                }
+
+                            }
+
+                            let this_goal: Option<usize> = Some(goal_scorer_index as usize);
+                            let this_assist_index: Option<usize> = Some(assist_index as usize);
+
                             let message = HQMMessage::Goal {
                                 team: scoring_team,
-                                goal_player_index: None,
-                                assist_player_index: None
+                                goal_player_index: this_goal,
+                                assist_player_index: this_assist_index
                             };
                             self.add_global_message(message);
 
@@ -1020,7 +1091,37 @@ impl HQMServer {
                     HQMSimulationEvent::Touch {
                         player, puck
                     } => {
-                        // TODO: Use this event to get correct goal/assist data
+
+                        let mut this_connected_player_index:u32 = u32::MAX;
+
+                        // Get connected player index from skater
+                        if let HQMGameObject::Player(this_skater) = & mut self.game.objects[player] {
+                            this_connected_player_index = this_skater._connected_player_index as u32;
+                        }
+
+                        // If a connected player was found,
+                        if this_connected_player_index != u32::MAX {
+
+                            // Store last person on team to touch puck
+                            if let Some(player) = & self.players[this_connected_player_index as usize] {
+                                if player.team==HQMTeam::Red {
+                                    self.game.last_touch_player_index_red = this_connected_player_index;
+                                } else {
+                                    self.game.last_touch_player_index_blue = this_connected_player_index;
+                                }
+                            }
+
+                            // Store player index in queue for awarding goals/assists
+                            if let HQMGameObject::Puck(this_puck) = & mut self.game.objects[puck] {
+                                if this_connected_player_index != this_puck.last_player_index_1 {
+                                    this_puck.last_player_index_3= this_puck.last_player_index_2;
+                                    this_puck.last_player_index_2= this_puck.last_player_index_1;
+                                    this_puck.last_player_index_1= this_connected_player_index;
+                                }
+                            }
+                            
+                        }
+                        
                     }
                 }
             }
@@ -1281,11 +1382,16 @@ impl HQMServer {
             }
         }
 
+        let mut fulfilled_role_vec = vec![vec![0; 2]; self.config.faceoff_positions.len()];
+
         // Set faceoff positions
         for p in self.players.iter() {
             if let Some(player) = p {
                 if let Some(skater_obj_index) = player.skater {
                     if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
+
+                        
+
                         let p = &self.config.faceoff_positions[player.faceoff_position_index].faceoff_offsets[faceoff_position_index];
                         let mid = Point3::new (self.game.rink.width / 2.0, 0.0, self.game.rink.length / 2.0);
                         match player.team{
@@ -1669,9 +1775,9 @@ struct HQMPuck {
     body: HQMBody,
     radius: f32,
     height: f32,
-    last_player_index_1: i32,
-    last_player_index_2: i32,
-    last_player_index_3: i32,
+    last_player_index_1: u32,
+    last_player_index_2: u32,
+    last_player_index_3: u32,
 }
 
 fn get_position (bits: u32, v: f32) -> u32 {
@@ -1698,9 +1804,9 @@ impl HQMPuck {
             },
             radius: 0.125,
             height: 0.0412500016391,
-            last_player_index_1:-1,
-            last_player_index_2:-1,
-            last_player_index_3:-1,
+            last_player_index_1:u32::MAX,
+            last_player_index_2:u32::MAX,
+            last_player_index_3:u32::MAX,
         }
     }
 
