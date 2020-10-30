@@ -694,6 +694,31 @@ impl HQMServer {
         }
     }
 
+    fn add_player(&mut self, player_name: String, addr: &SocketAddr) -> bool {
+        let player_index = HQMServer::find_empty_player_slot(self);
+        match player_index {
+            Some(x) => {
+                let update = HQMMessage::PlayerUpdate {
+                    player_name: player_name.clone().into_bytes(),
+                    team: HQMTeam::Spec,
+                    player_index: x,
+                    object_index: None,
+                    in_server: true,
+                };
+
+                self.add_global_message(update);
+
+                let new_player = HQMConnectedPlayer::new(player_name, *addr,
+                                                         self.game.global_messages.clone());
+
+                self.players[x] = Some(new_player);
+
+                true
+            }
+            _ => false
+        }
+    }
+
     fn remove_player(&mut self, player_index: usize) {
         match &self.players[player_index as usize] {
             Some(player) => {
@@ -759,31 +784,6 @@ impl HQMServer {
             }
             _ => {}
         };
-    }
-
-    fn add_player(&mut self, player_name: String, addr: &SocketAddr) -> bool {
-        let player_index = HQMServer::find_empty_player_slot(self);
-        match player_index {
-            Some(x) => {
-                let update = HQMMessage::PlayerUpdate {
-                    player_name: player_name.clone().into_bytes(),
-                    team: HQMTeam::Spec,
-                    player_index: x,
-                    object_index: None,
-                    in_server: true,
-                };
-
-                self.add_global_message(update);
-
-                let new_player = HQMConnectedPlayer::new(player_name, *addr,
-                                                         self.game.global_messages.clone());
-
-                self.players[x] = Some(new_player);
-
-                true
-            }
-            _ => false
-        }
     }
 
     fn add_global_message(&mut self, message: HQMMessage) {
@@ -1319,39 +1319,58 @@ impl HQMServer {
         }
 
         let mut fulfilled_role_vec = vec![vec![0; 2]; self.config.faceoff_positions.len()];
+        let mid = Point3::new (self.game.rink.width / 2.0, 0.0, self.game.rink.length / 2.0);
 
-        // Set faceoff positions
-        for p in self.players.iter() {
+        self.game.objects = vec![HQMGameObject::None; 32];
+        HQMServer::create_puck_object(& mut self.game.objects, Point3::new (mid.x, 1.5, mid.z), Matrix3::identity());
+
+        let mut messages = Vec::new();
+
+        fn setup (messages: & mut Vec<HQMMessage>, objects: & mut Vec<HQMGameObject>,
+                  player: & mut HQMConnectedPlayer, player_index: usize, pos: Point3<f32>, rot: Matrix3<f32>) {
+            let new_object_index = HQMServer::create_player_object(objects,
+                                                                   pos, rot,
+                                                                   player.hand, player_index);
+            player.skater = new_object_index;
+            if new_object_index.is_none() {
+                // Something very strange happened, we have to move the player
+                // back to the spectators
+                player.team = HQMTeam::Spec;
+            }
+
+            let update = HQMMessage::PlayerUpdate {
+                player_name: player.player_name.clone().into_bytes(),
+                team: player.team,
+                player_index,
+                object_index: new_object_index,
+                in_server: true,
+            };
+            messages.push(update);
+        }
+
+        for (player_index, p) in self.players.iter_mut().enumerate() {
             if let Some(player) = p {
-                if let Some(skater_obj_index) = player.skater {
-                    if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
-
-                        
-
-                        let p = &self.config.faceoff_positions[player.faceoff_position_index].faceoff_offsets[faceoff_position_index];
-                        let mid = Point3::new (self.game.rink.width / 2.0, 0.0, self.game.rink.length / 2.0);
-                        match player.team{
-                            HQMTeam::Red=>{
-                                let player_rotation = Rotation3::from_euler_angles(0.0,0.0,0.0);
-                                let player_position = mid + p;
-
-                                skater.set_orientation(player_position, player_rotation);
-                            },
-                            HQMTeam::Blue=>{
-                                let player_rotation = Rotation3::from_euler_angles(0.0,std::f32::consts::PI,0.0);
-                                let player_position = mid + &player_rotation * p;
-
-                                skater.set_orientation(player_position, player_rotation);
-
-                            },
-                            _=>{
-                                skater.set_orientation(Point3::new(0.0,4.0,0.0), Rotation3::from_euler_angles(0.0,0.0,0.0));
-                            }
-                        }
-
-                    }
+                let p = &self.config.faceoff_positions[player.faceoff_position_index].faceoff_offsets[faceoff_position_index];
+                match player.team{
+                    HQMTeam::Red=>{
+                        let player_rotation = Rotation3::from_euler_angles(0.0,0.0,0.0);
+                        let player_position = &mid + &player_rotation * p;
+                        setup (& mut messages, & mut self.game.objects, player, player_index, player_position,
+                               player_rotation.matrix().clone_owned())
+                    },
+                    HQMTeam::Blue=>{
+                        let player_rotation = Rotation3::from_euler_angles(0.0,std::f32::consts::PI,0.0);
+                        let player_position = &mid + &player_rotation * p;
+                        setup (& mut messages, & mut self.game.objects, player, player_index, player_position,
+                               player_rotation.matrix().clone_owned())
+                    },
+                    _=>{}
                 }
             }
+        }
+
+        for message in messages {
+            self.add_global_message(message);
         }
 
     }
@@ -1540,6 +1559,7 @@ impl HQMPlayerInput {
     pub fn spectate (&self) -> bool { self.keys & 0x20 != 0}
 }
 
+#[derive(Debug, Clone)]
 enum HQMGameObject {
     None,
     Player(HQMSkater),
@@ -1578,6 +1598,7 @@ impl Display for HQMTeam {
     }
 }
 
+#[derive(Debug, Clone)]
 struct HQMBody {
     pos: Point3<f32>,                // Measured in meters
     linear_velocity: Vector3<f32>,   // Measured in meters per hundred of a second
@@ -1586,11 +1607,12 @@ struct HQMBody {
     rot_mul: Vector3<f32>
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum HQMSkaterHand {
     Left, Right
 }
 
+#[derive(Debug, Clone)]
 struct HQMSkater {
     index: usize,
     connected_player_index: usize,
@@ -1668,22 +1690,9 @@ impl HQMSkater {
         }
     }
 
-    fn set_orientation(&mut self, pos: Point3<f32>, in_rotation: Rotation3<f32>){
-        let matrix = Matrix3::from(in_rotation);
-
-        self.body.pos = pos.clone();
-        self.body.linear_velocity = Vector3::new(0.0,0.0,0.0);
-        self.body.angular_velocity = Vector3::new(0.0,0.0,0.0);
-        self.body.rot = matrix.clone_owned();
-        self.stick_pos = pos.clone();
-        self.stick_rot = matrix.clone_owned();
-        self.stick_velocity = Vector3::new(0.0,0.0,0.0);
-        self.collision_balls = HQMSkater::get_collision_balls(&pos, &matrix, &self.body.linear_velocity);
-
-    }
-
 }
 
+#[derive(Debug, Clone)]
 struct HQMSkaterCollisionBall {
     offset: Vector3<f32>,
     pos: Point3<f32>,
@@ -1704,6 +1713,7 @@ impl HQMSkaterCollisionBall {
     }
 }
 
+#[derive(Debug, Clone)]
 struct HQMPuck {
     index: usize,
     body: HQMBody,
