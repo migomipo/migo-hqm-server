@@ -1855,7 +1855,7 @@ struct HQMServerConfiguration {
 async fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
 
-    let config_path = if args.len() > 2 {
+    let config_path = if args.len() > 1 {
         &args[1]
     } else {
         "config.ini"
