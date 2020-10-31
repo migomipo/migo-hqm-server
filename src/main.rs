@@ -974,6 +974,7 @@ impl HQMServer {
 
     async fn tick(&mut self, socket: & UdpSocket, write_buf: & mut [u8]) {
         if self.player_count() != 0 {
+            self.game.active = true;
             self.remove_inactive_players ();
             self.move_players_between_teams();
             self.copy_player_input_to_object();
