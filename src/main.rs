@@ -379,7 +379,6 @@ impl HQMServer {
             if let Some(player) = & mut self.players[player_index] {
                 player.faceoff_position_index = role_index;
 
-                let team = player.team;
                 let msg = format!("{} position {}", player.player_name, position.abbreviation.to_uppercase());
                 self.add_server_chat_message(msg);
 
@@ -859,29 +858,6 @@ impl HQMServer {
         }
     }
 
-    fn get_free_role(& self,input_team: HQMTeam ) -> usize {
-
-        for faceoff_position_index in 0..self.config.faceoff_positions.len(){
-            let mut found:bool=false;
-
-            for p in self.players.iter() {
-                if let Some(player) = p {
-                    if player.team == input_team{
-                        if player.faceoff_position_index == faceoff_position_index {
-                            found=true;
-                        }
-                    }
-                }
-
-                if !found{
-                    return faceoff_position_index;
-                }
-            }
-        }
-
-        return 0;
-    }
-
     fn create_player_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize) -> Option<usize> {
         let object_slot = HQMServer::find_empty_object_slot(& objects);
         if let Some(i) = object_slot {
@@ -936,10 +912,7 @@ impl HQMServer {
                         } else {
                             player.team = new_team;
                         }
-
                         
-                        player.faceoff_position_index = 1;//HQMServer::get_free_role(new_team); // TODO; proper get role; this function should return a free role
-
                         // Message for new player
                         new_messages.push(HQMMessage::PlayerUpdate {
                             player_name: player.player_name.clone().into_bytes(),
@@ -1016,7 +989,7 @@ impl HQMServer {
 
                             let mut goal_scorer_index = None;
                             let mut assist_index = None;
-
+                            
                             if let HQMGameObject::Puck(this_puck) = & mut self.game.objects[puck] {
                                 let list = &this_puck.last_player_index;
 
@@ -1024,9 +997,10 @@ impl HQMServer {
                                     if let Some(player_index) = list[i] {
                                         if let Some(player) = &self.players[player_index] {
                                             if player.team == scoring_team {
+
                                                 if goal_scorer_index.is_none() {
                                                     goal_scorer_index = Some(player_index);
-                                                } else if assist_index.is_none() {
+                                                } else if assist_index.is_none() && Some(player_index) != goal_scorer_index {
                                                     assist_index = Some(player_index);
                                                     break;
                                                 }
@@ -1268,6 +1242,66 @@ impl HQMServer {
         // For making sure teams have centers
         let mut red_default_role_found = false;
         let mut blue_default_role_found = false;
+
+        // Get amount of faceoff positiions, so we don't need to keep calling the function throughout
+        let role_amount = self.config.faceoff_positions.len();
+
+        // Make sure positions are good with no doubles (until there are more players than positions to fill)]
+        // Creates a 2 (red,blue) by [amount of positions] boolean array
+        let mut position_filled = vec![vec![0; role_amount]; 2];
+
+        // Keeps track of the amount of players for a team that have been assigned
+        // if this number is higher than the amount of positions/roles, preventing
+        // multiples will be disregarded
+        let mut red_players_found=0;
+        let mut blue_players_found=0;
+
+        // Loop through players
+        for p in self.players.iter_mut() {
+            if let Some(player) = p {
+                if let Some(skater_obj_index) = player.skater {
+                    if let HQMGameObject::Player(_) = & self.game.objects[skater_obj_index] {
+
+                        // Check team's "position filled?" array, and if filled, find an untaken position
+                        // otherwise, flip the "position filled?" flag
+                        match player.team {
+                            HQMTeam::Red => {
+                                if position_filled[0][player.faceoff_position_index] == 1 {
+                                    for this_position_index in 0..role_amount {
+                                        if position_filled[0][this_position_index] != 1 {
+                                            position_filled[0][this_position_index]=1;
+                                            player.set_role(this_position_index);
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    position_filled[0][player.faceoff_position_index] = 1;
+                                }
+                                red_players_found = red_players_found + 1;
+                            },
+                            HQMTeam::Blue => {
+                                if position_filled[1][player.faceoff_position_index] == 1 {
+                                    for this_position_index in 0..role_amount {
+                                        if position_filled[1][this_position_index] != 1 {
+                                            position_filled[1][this_position_index]=1;
+                                            player.set_role(this_position_index);
+                                            break;
+                                        }
+                                    }
+                                }else{
+                                    position_filled[1][player.faceoff_position_index] = 1;
+                                }
+                                blue_players_found = blue_players_found + 1
+                            },
+                            _ => {}
+                        }
+
+                        println!("{} position {}", player.player_name,player.faceoff_position_index);
+                    }
+                }
+            }
+        }             
+
 
         // Make sure each team has a center
         for p in self.players.iter() {
@@ -1526,6 +1560,10 @@ impl HQMConnectedPlayer {
             hand: HQMSkaterHand::Right,
             team_switch_timer: 0
         }
+    }
+
+    pub fn set_role(&mut self,input_role:usize){
+        self.faceoff_position_index = input_role;
     }
 }
 
