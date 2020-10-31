@@ -1,0 +1,10 @@
+[Unit]
+Description=HQM Server
+
+[Service]
+WorkingDirectory=/srv/hqm
+User=hqm
+ExecStart=/srv/hqm/rust_hqm_server /srv/hqm/%i.ini
+
+[Install]
+WantedBy=multi-user.target
