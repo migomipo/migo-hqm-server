@@ -705,10 +705,17 @@ impl HQMServer {
                     in_server: true,
                 };
 
-                self.add_global_message(update);
+                self.add_global_message(update, true);
 
-                let new_player = HQMConnectedPlayer::new(player_name, *addr,
-                                                         self.game.global_messages.clone());
+                let mut messages = self.game.global_messages.clone();
+                for welcome_msg in self.config.welcome.iter() {
+                    messages.push(Rc::new(HQMMessage::Chat {
+                        player_index: None,
+                        message: welcome_msg.clone().into_bytes()
+                    }));
+                }
+
+                let new_player = HQMConnectedPlayer::new(player_name, *addr, messages);
 
                 self.players[x] = Some(new_player);
 
@@ -732,7 +739,7 @@ impl HQMServer {
                     self.game.objects[object_index] = HQMGameObject::None;
                 }
 
-                self.add_global_message(update);
+                self.add_global_message(update, true);
 
                 self.players[player_index as usize] = None;
             }
@@ -749,7 +756,7 @@ impl HQMServer {
                 player_index: Some(player_index),
                 message: message.into_bytes(),
             };
-            self.add_global_message(chat);
+            self.add_global_message(chat, false);
         }
 
     }
@@ -760,7 +767,7 @@ impl HQMServer {
             player_index: None,
             message: message.into_bytes(),
         };
-        self.add_global_message(chat);
+        self.add_global_message(chat, false);
     }
 
     fn player_join(&mut self, addr: &SocketAddr, parser: &mut HQMClientParser) {
@@ -791,9 +798,11 @@ impl HQMServer {
         };
     }
 
-    fn add_global_message(&mut self, message: HQMMessage) {
+    fn add_global_message(&mut self, message: HQMMessage, persistent: bool) {
         let rc = Rc::new(message);
-        self.game.global_messages.push(rc.clone());
+        if persistent {
+            self.game.global_messages.push(rc.clone());
+        }
         for player in self.players.iter_mut() {
             match player {
                 Some(player) => {
@@ -940,7 +949,7 @@ impl HQMServer {
             }
         }
         for m in new_messages {
-            self.add_global_message(m);
+            self.add_global_message(m, true);
         }
     }
 
@@ -1016,7 +1025,7 @@ impl HQMServer {
                                 goal_player_index: goal_scorer_index,
                                 assist_player_index: assist_index
                             };
-                            self.add_global_message(message);
+                            self.add_global_message(message, true);
 
                         }
                     },
@@ -1230,7 +1239,7 @@ impl HQMServer {
 
         }
         for message in messages {
-            self.add_global_message(message);
+            self.add_global_message(message, true);
         }
 
         self.game.time = self.config.time_warmup * 100;
@@ -1409,7 +1418,7 @@ impl HQMServer {
         }
 
         for message in messages {
-            self.add_global_message(message);
+            self.add_global_message(message, true);
         }
 
     }
@@ -1831,6 +1840,7 @@ struct HQMServerConfiguration {
     public: bool,
     player_max: u32,
     team_max: u32,
+    welcome: Vec<String>,
     
     password: String,
 
@@ -1868,6 +1878,12 @@ async fn main() -> std::io::Result<()> {
         let server_team_max = server_section.get("team_max").unwrap().parse::<u32>().unwrap(); // Codemonster Todo: enforce player max
         let server_password = server_section.get("password").unwrap().parse::<String>().unwrap();
 
+        let welcome = server_section.get("welcome").unwrap_or("");
+
+        let welcome_str = welcome.lines()
+            .map(String::from)
+            .filter(|x| !x.is_empty()).collect();
+
         // Rules
         let rules_section = conf.section(Some("Rules")).unwrap();
         let rules_time_period = rules_section.get("time_period").unwrap().parse::<u32>().unwrap();
@@ -1900,8 +1916,8 @@ async fn main() -> std::io::Result<()> {
         HQMServerConfiguration {
             server_name,
             port: server_port,
-            team_max: server_team_max, // Codemonster TODO: implement
-            player_max: server_player_max, // Codemonster TODO: implement
+            team_max: server_team_max,
+            player_max: server_player_max,
             public: server_public,
 
             password: server_password,
@@ -1910,7 +1926,8 @@ async fn main() -> std::io::Result<()> {
             time_warmup: rules_time_warmup, 
             time_intermission: rules_time_intermission,
 
-            faceoff_positions: rolevec
+            faceoff_positions: rolevec,
+            welcome: welcome_str
         }
     } else{
 
@@ -1962,7 +1979,8 @@ async fn main() -> std::io::Result<()> {
             time_warmup: 300,
             time_intermission: 10,
 
-            faceoff_positions: rolevec
+            faceoff_positions: rolevec,
+            welcome: vec![]
         }
 
     };
