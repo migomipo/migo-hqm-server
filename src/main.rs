@@ -1742,7 +1742,7 @@ impl HQMSkater {
                         get_position (13, 1024.0 * (self.stick_pos.z - self.body.pos.z + 4.0))),
             stick_rot,
             head_rot: get_position (16, (self.head_rot + 2.0) * 8192.0),
-            body_rot: get_position (16, (self.head_rot + 2.0) * 8192.0)
+            body_rot: get_position (16, (self.body_rot + 2.0) * 8192.0)
         }
     }
 
