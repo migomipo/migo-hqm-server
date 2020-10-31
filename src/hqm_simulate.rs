@@ -691,13 +691,6 @@ fn limit_vector_length (v: &Vector3<f32>, max_len: f32) -> Vector3<f32> {
     res
 }
 
-fn limit_vector_length_mut (v: & mut Vector3<f32>, max_len: f32) {
-    let norm = v.norm();
-    if norm > max_len {
-        v.scale_mut(max_len / norm);
-    }
-}
-
 fn limit_vector_length_mut2 (v: & mut Vector2<f32>, max_len: f32) {
     let norm = v.norm();
     if norm > max_len {

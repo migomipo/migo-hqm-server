@@ -150,6 +150,7 @@ impl<'a> HQMServerWriter<'a> {
         self.pos += 4;
     }
 
+    #[allow(dead_code)]
     pub fn write_f32_aligned(&mut self, v: f32) {
         self.write_u32_aligned(f32::to_bits(v));
     }

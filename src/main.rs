@@ -967,7 +967,7 @@ impl HQMServer {
             for event in events {
                 match event {
                     HQMSimulationEvent::EnteredNet {
-                        team, net, puck
+                        team, net: _, puck
                     } => {
                         if self.game.period > 0 &&
                             self.game.time > 0 &&
@@ -1358,7 +1358,6 @@ impl HQMServer {
             }
         }
 
-        let mut fulfilled_role_vec = vec![vec![0; 2]; self.config.faceoff_positions.len()];
         let mid = Point3::new (self.game.rink.width / 2.0, 0.0, self.game.rink.length / 2.0);
 
         self.game.objects = vec![HQMGameObject::None; 32];
@@ -1496,7 +1495,6 @@ impl HQMServer {
                 }
             }
         }
-        Ok(())
     }
 
     pub fn new(config: HQMServerConfiguration) -> Self {
