@@ -1016,7 +1016,7 @@ impl HQMServer {
 
                             let mut goal_scorer_index = None;
                             let mut assist_index = None;
-
+                            
                             if let HQMGameObject::Puck(this_puck) = & mut self.game.objects[puck] {
                                 let list = &this_puck.last_player_index;
 
@@ -1024,9 +1024,10 @@ impl HQMServer {
                                     if let Some(player_index) = list[i] {
                                         if let Some(player) = &self.players[player_index] {
                                             if player.team == scoring_team {
+
                                                 if goal_scorer_index.is_none() {
                                                     goal_scorer_index = Some(player_index);
-                                                } else if assist_index.is_none() {
+                                                } else if assist_index.is_none() && Some(player_index) != goal_scorer_index {
                                                     assist_index = Some(player_index);
                                                     break;
                                                 }
