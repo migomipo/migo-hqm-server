@@ -765,14 +765,20 @@ impl HQMServer {
     }
 
     fn player_join(&mut self, addr: &SocketAddr, parser: &mut HQMClientParser) {
-        let current_slot = HQMServer::find_player_slot(self, addr);
-        if current_slot.is_some() {
-            return; // Player has already joined
+        let player_count = self.player_count();
+        let max_player_count = self.config.player_max;
+        if player_count >= max_player_count {
+            return; // Ignore join request
         }
         let player_version = parser.read_bits(8);
         if player_version != 55 {
             return; // Not the right version
         }
+        let current_slot = HQMServer::find_player_slot(self, addr);
+        if current_slot.is_some() {
+            return; // Player has already joined
+        }
+
         let player_name_bytes = parser.read_bytes_aligned(32);
         let player_name = HQMServer::get_player_name(player_name_bytes);
         match player_name {
