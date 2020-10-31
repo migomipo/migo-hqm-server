@@ -122,7 +122,7 @@ impl HQMGame {
                 if let Some((overlap, normal)) = collision_between_sphere_and_posts(&puck.body.pos, puck.radius, &self.rink) {
                     let p = &puck.body.pos - puck.radius*normal;
                     let vertex_velocity = speed_of_point_including_rotation(&p, &puck.body.pos, &puck.body.linear_velocity, &puck.body.angular_velocity);
-                    let mut puck_force = normal.scale(overlap * 0.125) - vertex_velocity;
+                    let mut puck_force = normal.scale(overlap * 0.125) - vertex_velocity.scale (0.25);
 
                     if normal.dot (&puck_force) > 0.0 {
                         limit_rejection(&mut puck_force, &normal, 0.2);
