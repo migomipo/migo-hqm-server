@@ -1216,12 +1216,12 @@ impl HQMServer {
         self.game_alloc += 1;
         self.game = HQMGame::new(self.game_alloc);
 
-        for x in 0..4 {
-            for y in 0..4 {
-                let pos = Point3::new(15.0 + ((x-2) as f32) * 2.0, 1.5, 30.5 + ((y-2) as f32) * 2.0);
-                let rot = Matrix3::identity();
-                HQMServer::create_puck_object(& mut self.game.objects, pos, rot);
-            }
+        let puck_line_start= self.game.rink.width / 2.0 - 0.4 * ((self.config.warmup_pucks - 1) as f32);
+
+        for i in 0..self.config.warmup_pucks {
+            let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, self.game.rink.length / 2.0);
+            let rot = Matrix3::identity();
+            HQMServer::create_puck_object(& mut self.game.objects, pos, rot);
         }
 
         let mut messages = Vec::new();
@@ -1853,6 +1853,7 @@ struct HQMServerConfiguration {
     time_period: u32,
     time_warmup: u32,
     time_intermission: u32,
+    warmup_pucks: u32,
 
     faceoff_positions: Vec<HQMFaceoffPosition>,
 }
@@ -1880,8 +1881,8 @@ async fn main() -> std::io::Result<()> {
         let server_name = server_section.get("name").unwrap().parse::<String>().unwrap();
         let server_port = server_section.get("port").unwrap().parse::<u16>().unwrap();
         let server_public = server_section.get("public").unwrap().parse::<bool>().unwrap();
-        let server_player_max = server_section.get("player_max").unwrap().parse::<u32>().unwrap(); // Codemonster Todo: enforce player max
-        let server_team_max = server_section.get("team_max").unwrap().parse::<u32>().unwrap(); // Codemonster Todo: enforce player max
+        let server_player_max = server_section.get("player_max").unwrap().parse::<u32>().unwrap();
+        let server_team_max = server_section.get("team_max").unwrap().parse::<u32>().unwrap();
         let server_password = server_section.get("password").unwrap().parse::<String>().unwrap();
 
         let welcome = server_section.get("welcome").unwrap_or("");
@@ -1895,6 +1896,8 @@ async fn main() -> std::io::Result<()> {
         let rules_time_period = rules_section.get("time_period").unwrap().parse::<u32>().unwrap();
         let rules_time_warmup = rules_section.get("time_warmup").unwrap().parse::<u32>().unwrap();
         let rules_time_intermission = rules_section.get("time_intermission").unwrap().parse::<u32>().unwrap();
+        let warmup_pucks = rules_section.get("warmup_pucks").map_or_else(|| 1, |x| x.parse::<u32>().unwrap());
+
 
         // Roles
         let roles_section = conf.section(Some("Roles")).unwrap();
@@ -1931,6 +1934,7 @@ async fn main() -> std::io::Result<()> {
             time_period: rules_time_period, 
             time_warmup: rules_time_warmup, 
             time_intermission: rules_time_intermission,
+            warmup_pucks,
 
             faceoff_positions: rolevec,
             welcome: welcome_str
@@ -1985,6 +1989,7 @@ async fn main() -> std::io::Result<()> {
             time_warmup: 300,
             time_intermission: 10,
 
+            warmup_pucks: 1,
             faceoff_positions: rolevec,
             welcome: vec![]
         }
