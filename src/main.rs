@@ -205,7 +205,7 @@ impl HQMServer {
         let command = parser.read_byte_aligned();
         match command {
             0 => {
-                self.request_info(socket, &addr, &mut parser, write_buf).await;
+                let _ = self.request_info(socket, &addr, &mut parser, write_buf).await;
             },
             2 => {
                 self.player_join(&addr, &mut parser);
@@ -1209,7 +1209,7 @@ impl HQMServer {
         }
 
         let slice = writer.get_slice();
-        socket.send_to(slice, player.addr).await;
+        let _ = socket.send_to(slice, player.addr).await;
     }
 
     fn new_game(&mut self) {
@@ -1503,7 +1503,7 @@ impl HQMServer {
                     self.tick(& socket, & mut write_buf).await;
                 }
                 _ = public_timer.tick(), if self.config.public => {
-                    notify_master_server(& socket).await;
+                    let _ = notify_master_server(& socket).await;
                 }
                 Ok((size, addr)) = socket.recv_from(&mut read_buf) => {
                     self.handle_message(addr, & socket, & read_buf[0..size], & mut write_buf).await;
