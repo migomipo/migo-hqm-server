@@ -917,8 +917,13 @@ impl HQMServer {
                     if new_team != player.team && *new_team_count + 1 <= self.config.team_max {
                         if player.skater.is_none() {
                             let (mid_x, mid_z) = (self.game.rink.width / 2.0, self.game.rink.length / 2.0);
-                            let pos = Point3::new(mid_x, 2.5, mid_z);
-                            let rot = Matrix3::identity();
+
+                            let rot = match new_team {
+                                HQMTeam::Red => Matrix3::identity(),
+                                HQMTeam::Blue => Rotation3::from_euler_angles(0.0,std::f32::consts::PI,0.0).matrix().clone_owned(),
+                                _ => panic!()
+                            };
+                            let pos = Point3::new(mid_x, 2.5, mid_z) + rot * Vector3::new(0.0,0.0,2.0);
 
                             if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand, player_index) {
                                 player.team = new_team;
@@ -1871,7 +1876,7 @@ async fn main() -> std::io::Result<()> {
     let mut rolevec:Vec<HQMFaceoffPosition>=Vec::new();
 
     // Load configuration (if exists)
-    let config = if Path::new(config_path).exists(){
+    if Path::new(config_path).exists() {
 
         // Load configuration file
         let conf = Ini::load_from_file(config_path).unwrap();
@@ -1922,7 +1927,7 @@ async fn main() -> std::io::Result<()> {
             });
         }
 
-        HQMServerConfiguration {
+        let config = HQMServerConfiguration {
             server_name,
             port: server_port,
             team_max: server_team_max,
@@ -1938,66 +1943,16 @@ async fn main() -> std::io::Result<()> {
 
             faceoff_positions: rolevec,
             welcome: welcome_str
-        }
+        };
+        // Config file didn't exist; use defaults as described
+        return HQMServer::new(config).run().await;
     } else{
 
-        // No config file: set defaults
-
-        // Default roles
-        rolevec.push(HQMFaceoffPosition {
-            abbreviation: String::from("C"),
-            faceoff_offsets:vec![Vector3::new(0.0,1.5,0.75)]
-        });
-
-        rolevec.push(HQMFaceoffPosition {
-            abbreviation: String::from("LD"),
-            faceoff_offsets:vec![Vector3::new(-2.0,1.5,8.0)]
-        });
-
-        rolevec.push(HQMFaceoffPosition {
-            abbreviation: String::from("RD"),
-            faceoff_offsets:vec![Vector3::new(2.0,1.5,8.0)]
-        });
-
-        rolevec.push(HQMFaceoffPosition {
-            abbreviation: String::from("LW"),
-            faceoff_offsets:vec![Vector3::new(-5.0,1.5,2.0)]
-        });
-
-        rolevec.push(HQMFaceoffPosition {
-            abbreviation: String::from("RW"),
-            faceoff_offsets:vec![Vector3::new(5.0,1.5,2.0)]
-        });
-
-        rolevec.push(HQMFaceoffPosition {
-            abbreviation: String::from("G"),
-            faceoff_offsets:vec![Vector3::new(0.0,1.5,22.0)]
-        });
-
-        // Default values
-        HQMServerConfiguration {
-            server_name: String::from("MigoTest"),
-            port: 27585,
-            public: true,
-
-            team_max: 5,
-            player_max: 15, // Codemonster TODO: implement
-
-            password: String::from("admin"),
-
-            time_period: 300,
-            time_warmup: 300,
-            time_intermission: 10,
-
-            warmup_pucks: 1,
-            faceoff_positions: rolevec,
-            welcome: vec![]
-        }
-
+        println! ("Could not open configuration file {}!", config_path);
+        return Ok(())
     };
 
-    // Config file didn't exist; use defaults as described
-    return HQMServer::new(config).run().await;
+
 
 }
 
