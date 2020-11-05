@@ -28,6 +28,8 @@ const MASTER_SERVER: &str = "66.226.72.227:27590";
 
 struct HQMGame {
 
+    state: HQMGameState,
+    rules_state: HQMRulesState,
     objects: Vec<HQMGameObject>,
     global_messages: Vec<Rc<HQMMessage>>,
     red_score: u32,
@@ -166,6 +168,8 @@ impl HQMGame {
         }
 
         HQMGame {
+            state:HQMGameState::Warmup,
+            rules_state:HQMRulesState::None,
             objects: object_vec,
             global_messages: vec![],
             red_score: 0,
@@ -210,8 +214,9 @@ impl HQMServer {
             2 => {
                 self.player_join(&addr, &mut parser);
             },
-            4 => {
-                self.player_update(&addr, &mut parser);
+            // if 8 or 0x10, client is modded, probly want to send it to the player_update function to store it in the client/player struct, to use when responding to clients
+            4 | 8 | 0x10 => {
+                self.player_update(&addr, &mut parser, command);
             },
             7 => {
                 self.player_exit(&addr);
@@ -232,7 +237,7 @@ impl HQMServer {
 
         let player_count  = self.player_count();
         writer.write_bits(8, player_count);
-        writer.write_bits(4, 0);
+        writer.write_bits(4, 4);
         writer.write_bits(4, self.config.team_max);
 
         writer.write_bytes_aligned_padded(32, self.config.server_name.as_ref());
@@ -251,7 +256,7 @@ impl HQMServer {
         player_count
     }
 
-    fn player_update(&mut self, addr: &SocketAddr, parser: &mut HQMClientParser) {
+    fn player_update(&mut self, addr: &SocketAddr, parser: &mut HQMClientParser, command: u8) {
         let current_slot = HQMServer::find_player_slot(self, addr);
         let (player_index, player) = match current_slot {
             Some(x) => {
@@ -261,6 +266,21 @@ impl HQMServer {
                 return;
             }
         };
+
+        // Set client version based on the command used to trigger player_update
+        // Huge thank you to Baba for his help with this!
+        match command {
+            4 => {
+                player.client_version = 0; // Cryptic
+            },
+            8 => {
+                player.client_version = 1; // Baba - Ping
+            },
+            0x10 => {
+                player.client_version = 2; // Baba - Ping + Rules
+            },
+            _ => {}
+        }
 
         let current_game_id = parser.read_u32_aligned();
 
@@ -284,6 +304,12 @@ impl HQMServer {
             keys: input_keys,
         };
 
+        // if modded client get deltatime
+        if player.client_version > 0 {
+            let delta = parser.read_u32_aligned();
+            player.deltatime = delta;
+        }
+
         let packet = parser.read_u32_aligned();
         if packet < player.packet && player.packet - packet < 1000 {
             // UDP does not guarantee that the packets arrive in the same order they were sent,
@@ -297,6 +323,8 @@ impl HQMServer {
         player.input = input;
         player.game_id = current_game_id;
         player.msgpos = parser.read_u16_aligned() as u32;
+
+
         let has_chat_msg = parser.read_bits(1) == 1;
         if has_chat_msg {
             let chat_rep = parser.read_bits(3);
@@ -499,14 +527,26 @@ impl HQMServer {
     }
 
     fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
+
+        
         if let Some(player) = & mut self.players[player_index] {
             player.hand = hand;
             if let Some(skater_obj_index) = player.skater {
                 if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
+
+                    if self.game.state == HQMGameState::Game {
+
+                        let msg = format!("{}: You can not change your stick hand in-game",player.player_name);
+                        self.add_server_chat_message(msg);
+
+                        return;
+                    }
+
                     skater.hand = hand;
                 }
             }
         }
+        
     }
 
     fn process_command (&mut self, command: &str, args: &[&str], player_index: usize) {
@@ -1063,6 +1103,8 @@ impl HQMServer {
             }
             self.update_clock();
 
+            self.update_game_state();
+
             let mut packets: Vec<HQMObjectPacket> = Vec::with_capacity(32);
             for i in 0usize..32 {
                 let packet = match &self.game.objects[i] {
@@ -1107,6 +1149,18 @@ impl HQMServer {
             writer.write_bits(16, self.game.timeout);
             writer.write_bits(8, self.game.period);
             writer.write_bits(8, i as u32);
+
+            // if using a non-cryptic version, send ping
+            if player.client_version > 0 {
+                writer.write_u32_aligned(player.deltatime);
+            }
+
+            // if baba's second version or above, send rules
+            if player.client_version > 1 {
+                writer.write_u32_aligned(self.game.rules_state.update_num());
+            }
+
+
             writer.write_u32_aligned(self.game.packet);
             writer.write_u32_aligned(player.packet);
 
@@ -1434,6 +1488,36 @@ impl HQMServer {
 
     }
 
+    fn update_game_state(&mut self){
+        
+        if !self.game.paused {
+
+            if self.game.period == 0 {
+                self.game.state = HQMGameState::Warmup;
+            } else {
+                self.game.state = HQMGameState::Game;
+            }
+
+            if self.game.intermission > 0 {
+                self.game.state = HQMGameState::Intermission;
+            }
+
+            if self.game.timeout > 0 {
+                self.game.state = HQMGameState::Timeout;
+            }
+
+            if self.game.game_over {
+                self.game.state = HQMGameState::GameOver;
+            }
+
+            
+
+        } else{
+            self.game.state = HQMGameState::Paused;
+        }
+
+    }
+
     fn update_clock(&mut self) {
         if !self.game.paused {
             if self.game.period == 0 && self.game.time > 2000 {
@@ -1542,6 +1626,7 @@ async fn notify_master_server(socket: & UdpSocket) -> std::io::Result<usize> {
 struct HQMConnectedPlayer {
     player_name: String,
     addr: SocketAddr,
+    client_version: u8,
     team: HQMTeam,
     faceoff_position_index: usize,
     skater: Option<usize>,
@@ -1555,7 +1640,8 @@ struct HQMConnectedPlayer {
     is_admin: bool,
     is_muted:bool,
     team_switch_timer: u32,
-    hand: HQMSkaterHand
+    hand: HQMSkaterHand,
+    deltatime: u32
 }
 
 impl HQMConnectedPlayer {
@@ -1563,6 +1649,7 @@ impl HQMConnectedPlayer {
         HQMConnectedPlayer {
             player_name,
             addr,
+            client_version: 0,
             team: HQMTeam::Spec,
             faceoff_position_index: 0,
             skater: None,
@@ -1576,7 +1663,9 @@ impl HQMConnectedPlayer {
             is_admin: false,
             is_muted:false,
             hand: HQMSkaterHand::Right,
-            team_switch_timer: 0
+            team_switch_timer: 0,
+            // store latest deltime client sends you to respond with it
+            deltatime: 0
         }
     }
 
@@ -1656,6 +1745,68 @@ impl Display for HQMTeam {
             HQMTeam::Red => write!(f, "Red"),
             HQMTeam::Blue => write!(f, "Blue"),
             HQMTeam::Spec => write!(f, "Spec")
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum HQMGameState {
+    Warmup,
+    Game,
+    Intermission,
+    Timeout,
+    Paused,
+    GameOver,
+}
+
+impl Display for HQMGameState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            HQMGameState::Warmup => write!(f, "Warmup"),
+            HQMGameState::Game => write!(f, "Game"),
+            HQMGameState::Intermission => write!(f, "Intermission"),
+            HQMGameState::Timeout => write!(f, "Timeout"),
+            HQMGameState::Paused => write!(f, "Paused"),
+            HQMGameState::GameOver => write!(f, "Game Over"),
+
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum HQMRulesState {
+    None,
+    OffsideWarning,
+    IcingWarning,
+    DualWarning,
+    Offside,
+    Icing,
+}
+
+impl HQMRulesState {
+    fn update_num(self) -> u32 {
+        match self {
+            HQMRulesState::None => 0,
+            HQMRulesState::OffsideWarning => 1,
+            HQMRulesState::IcingWarning => 2,
+            HQMRulesState::DualWarning => 3,
+            HQMRulesState::Offside => 4,
+            HQMRulesState::Icing => 8,
+
+        }
+    }
+}
+
+impl Display for HQMRulesState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            HQMRulesState::None => write!(f, "None"),
+            HQMRulesState::OffsideWarning => write!(f, "Offside Warning"),
+            HQMRulesState::IcingWarning => write!(f, "Icing Warning"),
+            HQMRulesState::DualWarning => write!(f, "Offside Warning + Icing Warning"),
+            HQMRulesState::Offside => write!(f, "Offside"),
+            HQMRulesState::Icing => write!(f, "Icing"),
+
         }
     }
 }
