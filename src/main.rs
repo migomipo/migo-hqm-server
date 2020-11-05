@@ -817,6 +817,18 @@ impl HQMServer {
         self.add_global_message(chat, false);
     }
 
+    fn add_directed_server_chat_message(&mut self, message: String, player_receiving_index: usize) {
+        println!("{}", &message);
+        // This message will only be visible to a single player
+        let chat = HQMMessage::Chat {
+            player_index: None,
+            message: message.into_bytes(),
+        };
+        if let Some(player) = & mut self.players[player_receiving_index] {
+            player.messages.push(Rc::new (chat));
+        }
+    }
+
     fn player_join(&mut self, addr: &SocketAddr, parser: &mut HQMClientParser) {
         let player_count = self.player_count();
         let max_player_count = self.config.player_max;
