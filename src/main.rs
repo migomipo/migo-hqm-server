@@ -527,8 +527,6 @@ impl HQMServer {
     }
 
     fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
-
-        
         if let Some(player) = & mut self.players[player_index] {
             player.hand = hand;
             if let Some(skater_obj_index) = player.skater {
@@ -536,8 +534,8 @@ impl HQMServer {
 
                     if self.game.state == HQMGameState::Game {
 
-                        let msg = format!("{}: You can not change your stick hand in-game",player.player_name);
-                        self.add_server_chat_message(msg);
+                        let msg = format!("You can not change your stick hand in-game");
+                        self.add_directed_server_chat_message(msg, player_index);
 
                         return;
                     }
