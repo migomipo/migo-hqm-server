@@ -26,11 +26,41 @@ const GAME_HEADER: &[u8] = b"Hock";
 
 const MASTER_SERVER: &str = "66.226.72.227:27590";
 
+struct HQMGameWorld {
+    objects: Vec<HQMGameObject>,
+    rink: HQMRink,
+    gravity: f32
+}
+
+impl HQMGameWorld {
+    fn create_player_object (& mut self, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize) -> Option<usize> {
+        let object_slot = self.find_empty_object_slot();
+        if let Some(i) = object_slot {
+            self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, start, rot, hand, connected_player_index));
+        }
+        return object_slot;
+    }
+
+    fn create_puck_object (& mut self, start: Point3<f32>, rot: Matrix3<f32>) -> Option<usize> {
+        let object_slot = self.find_empty_object_slot();
+        if let Some(i) = object_slot {
+            self.objects[i] = HQMGameObject::Puck(HQMPuck::new(i, start, rot));
+        }
+        return object_slot;
+    }
+
+    fn find_empty_object_slot(& self) -> Option<usize> {
+        return self.objects.iter().position(|x| {match x {
+            HQMGameObject::None  => true,
+            _ => false
+        }});
+    }
+}
 struct HQMGame {
 
     state: HQMGameState,
     rules_state: HQMRulesState,
-    objects: Vec<HQMGameObject>,
+    world: HQMGameWorld,
     global_messages: Vec<Rc<HQMMessage>>,
     red_score: u32,
     blue_score: u32,
@@ -43,7 +73,7 @@ struct HQMGame {
     game_step: u32,
     game_over: bool,
     packet: u32,
-    rink: HQMRink,
+
     active: bool,
 }
 
@@ -170,7 +200,11 @@ impl HQMGame {
         HQMGame {
             state:HQMGameState::Warmup,
             rules_state:HQMRulesState::None,
-            objects: object_vec,
+            world: HQMGameWorld {
+                objects: object_vec,
+                rink: HQMRink::new(30.0, 61.0, 8.5),
+                gravity: 0.000680
+            },
             global_messages: vec![],
             red_score: 0,
             blue_score: 0,
@@ -184,7 +218,6 @@ impl HQMGame {
             game_id,
             game_step: 0,
             packet: 0,
-            rink: HQMRink::new(30.0, 61.0, 8.5),
             active: false,
         }
     }
@@ -259,7 +292,7 @@ impl HQMServer {
     }
 
     fn player_update(&mut self, addr: &SocketAddr, parser: &mut HQMClientParser, command: u8) {
-        let current_slot = HQMServer::find_player_slot(self, addr);
+        let current_slot = self.find_player_slot(addr);
         let (player_index, player) = match current_slot {
             Some(x) => {
                 (x, self.players[x].as_mut().unwrap())
@@ -461,7 +494,7 @@ impl HQMServer {
                 force_player.team = HQMTeam::Spec;
                 force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
                 if let Some (i) = force_player.skater {
-                    self.game.objects[i] = HQMGameObject::None;
+                    self.game.world.objects[i] = HQMGameObject::None;
                     force_player.skater = None;
                 }
                 let force_player_name = force_player.player_name.clone();
@@ -799,7 +832,7 @@ impl HQMServer {
         if let Some(player) = & mut self.players[player_index] {
             player.hand = hand;
             if let Some(skater_obj_index) = player.skater {
-                if let HQMGameObject::Player(skater) = & mut self.game.objects[skater_obj_index] {
+                if let HQMGameObject::Player(skater) = & mut self.game.world.objects[skater_obj_index] {
 
                     if self.game.state == HQMGameState::Game {
 
@@ -1014,7 +1047,7 @@ impl HQMServer {
     }
 
     fn player_exit(&mut self, addr: &SocketAddr) {
-        let current_slot = HQMServer::find_player_slot(self, addr);
+        let current_slot = self.find_player_slot(addr);
         match current_slot {
             Some(x) => {
                 let player_name = {
@@ -1032,7 +1065,7 @@ impl HQMServer {
     }
 
     fn add_player(&mut self, player_name: String, addr: &SocketAddr) -> bool {
-        let player_index = HQMServer::find_empty_player_slot(self);
+        let player_index = self.find_empty_player_slot();
         match player_index {
             Some(x) => {
                 let update = HQMMessage::PlayerUpdate {
@@ -1077,7 +1110,7 @@ impl HQMServer {
                     in_server: false,
                 };
                 if let Some(object_index) = player.skater {
-                    self.game.objects[object_index] = HQMGameObject::None;
+                    self.game.world.objects[object_index] = HQMGameObject::None;
                 }
 
                 if player.is_admin{
@@ -1156,7 +1189,7 @@ impl HQMServer {
         if player_version != 55 {
             return; // Not the right version
         }
-        let current_slot = HQMServer::find_player_slot(self, addr);
+        let current_slot = self.find_player_slot( addr);
         if current_slot.is_some() {
             return; // Player has already joined
         }
@@ -1225,13 +1258,6 @@ impl HQMServer {
         return self.players.iter().position(|x| x.is_none());
     }
 
-    fn find_empty_object_slot(objects: & Vec<HQMGameObject>) -> Option<usize> {
-        return objects.iter().position(|x| {match x {
-            HQMGameObject::None  => true,
-            _ => false
-        }});
-    }
-
     fn remove_inactive_players (& mut self) {
         for i in 0..self.players.len() {
             let inactivity = match & mut self.players[i] {
@@ -1253,21 +1279,6 @@ impl HQMServer {
         }
     }
 
-    fn create_player_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize) -> Option<usize> {
-        let object_slot = HQMServer::find_empty_object_slot(& objects);
-        if let Some(i) = object_slot {
-            objects[i] = HQMGameObject::Player(HQMSkater::new(i, start, rot, hand, connected_player_index));
-        }
-        return object_slot;
-    }
-
-    fn create_puck_object (objects: & mut Vec<HQMGameObject>, start: Point3<f32>, rot: Matrix3<f32>) -> Option<usize> {
-        let object_slot = HQMServer::find_empty_object_slot(& objects);
-        if let Some(i) = object_slot {
-            objects[i] = HQMGameObject::Puck(HQMPuck::new(i, start, rot));
-        }
-        return object_slot;
-    }
 
     fn move_players_between_teams(&mut self) {
         let mut red_player_count = 0;
@@ -1313,7 +1324,7 @@ impl HQMServer {
                                 _=>{}
                             }
 
-                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot.matrix().clone_owned(), player.hand, player_index) {
+                            if let Some(i) = self.game.world.create_player_object(pos, rot.matrix().clone_owned(), player.hand, player_index) {
                                 player.team = new_team;
                                 player.skater = Some(i);
                                 *new_team_count += 1;
@@ -1335,7 +1346,7 @@ impl HQMServer {
                     player.team = HQMTeam::Spec;
                     player.team_switch_timer = 500; // 500 ticks, 5 seconds
                     if let Some (i) = player.skater {
-                        self.game.objects[i] = HQMGameObject::None;
+                        self.game.world.objects[i] = HQMGameObject::None;
                         player.skater = None;
                     }
                     new_messages.push(HQMMessage::PlayerUpdate {
@@ -1357,7 +1368,7 @@ impl HQMServer {
         for p in self.players.iter() {
             if let Some (player) = p {
                 if let Some (object_index) = player.skater {
-                    if let HQMGameObject::Player(player_object) = & mut self.game.objects[object_index] {
+                    if let HQMGameObject::Player(player_object) = & mut self.game.world.objects[object_index] {
                         player_object.input = player.input.clone();
                     }
                 }
@@ -1371,7 +1382,7 @@ impl HQMServer {
             self.remove_inactive_players ();
             self.move_players_between_teams();
             self.copy_player_input_to_object();
-            let events = self.game.simulate_step();
+            let events = self.game.world.simulate_step();
             for event in events {
                 match event {
                     HQMSimulationEvent::EnteredNet {
@@ -1398,7 +1409,7 @@ impl HQMServer {
                             let mut goal_scorer_index = None;
                             let mut assist_index = None;
                             
-                            if let HQMGameObject::Puck(this_puck) = & mut self.game.objects[puck] {
+                            if let HQMGameObject::Puck(this_puck) = & mut self.game.world.objects[puck] {
                                 let list = &this_puck.last_player_index;
 
                                 for i in 0..4 {
@@ -1432,11 +1443,11 @@ impl HQMServer {
                         player, puck
                     } => {
                         // Get connected player index from skater
-                        if let HQMGameObject::Player(this_skater) = & mut self.game.objects[player] {
+                        if let HQMGameObject::Player(this_skater) = & mut self.game.world.objects[player] {
                             let this_connected_player_index = this_skater.connected_player_index;
 
                             // Store player index in queue for awarding goals/assists
-                            if let HQMGameObject::Puck(this_puck) = & mut self.game.objects[puck] {
+                            if let HQMGameObject::Puck(this_puck) = & mut self.game.world.objects[puck] {
                                 if Some(this_connected_player_index) != this_puck.last_player_index[0] {
                                     this_puck.last_player_index[3] = this_puck.last_player_index[2];
                                     this_puck.last_player_index[2] = this_puck.last_player_index[1];
@@ -1455,7 +1466,7 @@ impl HQMServer {
 
             let mut packets: Vec<HQMObjectPacket> = Vec::with_capacity(32);
             for i in 0usize..32 {
-                let packet = match &self.game.objects[i] {
+                let packet = match &self.game.world.objects[i] {
                     HQMGameObject::Puck(puck) => HQMObjectPacket::Puck(puck.get_packet()),
                     HQMGameObject::Player(player) => HQMObjectPacket::Skater(player.get_packet()),
                     HQMGameObject::None => HQMObjectPacket::None
@@ -1624,12 +1635,12 @@ impl HQMServer {
         self.game_alloc += 1;
         self.game = HQMGame::new(self.game_alloc);
 
-        let puck_line_start= self.game.rink.width / 2.0 - 0.4 * ((self.config.warmup_pucks - 1) as f32);
+        let puck_line_start= self.game.world.rink.width / 2.0 - 0.4 * ((self.config.warmup_pucks - 1) as f32);
 
         for i in 0..self.config.warmup_pucks {
-            let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, self.game.rink.length / 2.0);
+            let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, self.game.world.rink.length / 2.0);
             let rot = Matrix3::identity();
-            HQMServer::create_puck_object(& mut self.game.objects, pos, rot);
+            self.game.world.create_puck_object(pos, rot);
         }
 
         let mut messages = Vec::new();
@@ -1683,7 +1694,7 @@ impl HQMServer {
         for p in self.players.iter_mut() {
             if let Some(player) = p {
                 if let Some(skater_obj_index) = player.skater {
-                    if let HQMGameObject::Player(_) = & self.game.objects[skater_obj_index] {
+                    if let HQMGameObject::Player(_) = & self.game.world.objects[skater_obj_index] {
 
                         // Check team's "position filled?" array, and if filled, find an untaken position
                         // otherwise, flip the "position filled?" flag
@@ -1730,7 +1741,7 @@ impl HQMServer {
         for p in self.players.iter() {
             if let Some(player) = p {
                 if let Some(skater_obj_index) = player.skater {
-                    if let HQMGameObject::Player(_) = & self.game.objects[skater_obj_index] {
+                    if let HQMGameObject::Player(_) = & self.game.world.objects[skater_obj_index] {
                         if player.faceoff_position_index == 0 {
                             match player.team {
                                 HQMTeam::Red => {
@@ -1752,7 +1763,7 @@ impl HQMServer {
             for p in self.players.iter_mut() {
                 if let Some(player) = p {
                     if let Some(skater_obj_index) = player.skater {
-                        if let HQMGameObject::Player(_) = & self.game.objects[skater_obj_index] {
+                        if let HQMGameObject::Player(_) = & self.game.world.objects[skater_obj_index] {
 
                             match player.team{
                                 HQMTeam::Red => {
@@ -1781,17 +1792,16 @@ impl HQMServer {
             }
         }
 
-        let mid = Point3::new (self.game.rink.width / 2.0, 0.0, self.game.rink.length / 2.0);
+        let mid = Point3::new (self.game.world.rink.width / 2.0, 0.0, self.game.world.rink.length / 2.0);
 
-        self.game.objects = vec![HQMGameObject::None; 32];
-        HQMServer::create_puck_object(& mut self.game.objects, Point3::new (mid.x, 1.5, mid.z), Matrix3::identity());
+        self.game.world.objects = vec![HQMGameObject::None; 32];
+        self.game.world.create_puck_object(Point3::new (mid.x, 1.5, mid.z), Matrix3::identity());
 
         let mut messages = Vec::new();
 
-        fn setup (messages: & mut Vec<HQMMessage>, objects: & mut Vec<HQMGameObject>,
+        fn setup (messages: & mut Vec<HQMMessage>, world: & mut HQMGameWorld,
                   player: & mut HQMConnectedPlayer, player_index: usize, pos: Point3<f32>, rot: Matrix3<f32>) {
-            let new_object_index = HQMServer::create_player_object(objects,
-                                                                   pos, rot,
+            let new_object_index = world.create_player_object(pos, rot,
                                                                    player.hand, player_index);
             player.skater = new_object_index;
             if new_object_index.is_none() {
@@ -1817,13 +1827,13 @@ impl HQMServer {
                     HQMTeam::Red=>{
                         let player_rotation = Rotation3::from_euler_angles(0.0,0.0,0.0);
                         let player_position = &mid + &player_rotation * p;
-                        setup (& mut messages, & mut self.game.objects, player, player_index, player_position,
+                        setup (& mut messages, & mut self.game.world, player, player_index, player_position,
                                player_rotation.matrix().clone_owned())
                     },
                     HQMTeam::Blue=>{
                         let player_rotation = Rotation3::from_euler_angles(0.0,std::f32::consts::PI,0.0);
                         let player_position = &mid + &player_rotation * p;
-                        setup (& mut messages, & mut self.game.objects, player, player_index, player_position,
+                        setup (& mut messages, & mut self.game.world, player, player_index, player_position,
                                player_rotation.matrix().clone_owned())
                     },
                     _=>{}
@@ -2491,12 +2501,9 @@ async fn main() -> std::io::Result<()> {
         // Config file didn't exist; use defaults as described
         return HQMServer::new(config).run().await;
     } else{
-
         println! ("Could not open configuration file {}!", config_path);
         return Ok(())
     };
-
-
 
 }
 
