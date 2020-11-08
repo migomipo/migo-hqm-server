@@ -192,6 +192,8 @@ impl HQMGame {
 
 struct HQMServer {
     players: Vec<Option<HQMConnectedPlayer>>,
+    ban_list: Vec<std::net::IpAddr>,
+    allow_join: bool,
     config: HQMServerConfiguration,
     game: HQMGame,
     game_alloc: u32,
@@ -337,6 +339,31 @@ impl HQMServer {
         }
     }
 
+    fn admin_deny_message (& mut self, player_index: usize) {
+        let msg = format!("Please log in before using that command");
+            self.add_directed_server_chat_message(msg,player_index);
+
+    }
+
+    fn set_allow_join (& mut self, player_index: usize, allowed: bool) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+                self.allow_join=allowed;
+
+                if allowed {
+                    let msg = format!("Joins enabled by {}",player.player_name);
+                    self.add_server_chat_message(msg);
+                } else {
+                    let msg = format!("Joins disabled by {}",player.player_name);
+                    self.add_server_chat_message(msg);
+                }
+                
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
+
     fn mute_player (& mut self, player_index: usize, mute_player: String) {
         if let Some(player) = & self.players[player_index]{
             if player.is_admin {
@@ -356,6 +383,8 @@ impl HQMServer {
                     let msg = format!("{} muted by {}",mute_player,admin_player_name);
                     self.add_server_chat_message(msg);
                 }
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
 
@@ -380,6 +409,8 @@ impl HQMServer {
                     let msg = format!("{} unmuted by {}",mute_player,admin_player_name);
                     self.add_server_chat_message(msg);
                 }
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
     }
@@ -391,6 +422,8 @@ impl HQMServer {
 
                 let msg = format!("Chat muted by {}",player.player_name);
                 self.add_server_chat_message(msg);
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
     }
@@ -402,8 +435,51 @@ impl HQMServer {
 
                 let msg = format!("Chat unmuted by {}",player.player_name);
                 self.add_server_chat_message(msg);
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
+    }
+
+    fn force_player_off_ice (& mut self, player_index: usize, force_player_off_number: u32) {
+
+        let mut admin_player_name = "".to_string();
+
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin {
+                admin_player_name = player.player_name.clone();
+            } else {
+                self.admin_deny_message(player_index);
+                return;
+            }
+        }
+
+        let force_player_index_number = force_player_off_number - 1;
+
+        if force_player_index_number as usize <= self.players.len()-1{
+            if let Some(force_player) = & mut self.players[force_player_index_number as usize] {
+                force_player.team = HQMTeam::Spec;
+                force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
+                if let Some (i) = force_player.skater {
+                    self.game.objects[i] = HQMGameObject::None;
+                    force_player.skater = None;
+                }
+                let force_player_name = force_player.player_name.clone();
+                let force_player_name_bytes = force_player.player_name.clone().into_bytes();
+                self.add_global_message(HQMMessage::PlayerUpdate {
+                    player_name: force_player_name_bytes,
+                    team: HQMTeam::Spec,
+                    player_index: force_player_index_number as usize,
+                    object_index: None,
+                    in_server: true
+                },true);
+
+                let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
+                self.add_server_chat_message(msg);
+            }
+        }
+
+
     }
 
     fn set_role (& mut self, player_index: usize, input_position:&str) {
@@ -430,6 +506,185 @@ impl HQMServer {
 
                 let msg = format!("{} admin", player.player_name);
                 self.add_server_chat_message(msg);
+            } else {
+
+                let msg = format!("Incorrect password");
+                self.add_directed_server_chat_message(msg,player_index);
+                
+            }
+        }
+    }
+
+    fn kick_player (& mut self, admin_player_index: usize, kick_player_name: String, ban_player: bool) {
+
+        // Because we allow matching using wildcards, we use vectors for multiple instances found
+        let mut kick_player_indexes: Vec<usize> = Vec::new();
+        let mut kick_player_names: Vec<String> = Vec::new();
+        let mut kick_player_socket_addresses: Vec<SocketAddr> = Vec::new();
+
+        let mut match_mode = 0; // 0 full string | 1 begins with | 2 ends with | 3 contains
+
+        let mut admin_player_name:String = ("").to_string();
+        let mut player_found:bool = false;
+
+        if let Some(player) = & self.players[admin_player_index]{
+            if player.is_admin {
+                admin_player_name = player.player_name.clone();
+
+                
+
+                if kick_player_name.starts_with("%"){
+                    if kick_player_name.ends_with("%"){
+                        match_mode=3;// %contains%
+                    }else{
+                        match_mode=2;// %ends with
+                    }
+                }else if kick_player_name.ends_with("%"){
+                    match_mode=1;// begins with%
+                }
+
+                
+
+                for (player_index, p) in self.players.iter_mut().enumerate() {
+                    if let Some(player) = p {
+
+                        match match_mode {
+                            0 =>{ // full string
+                                if player.player_name == kick_player_name{
+                                    kick_player_indexes.push(player_index);
+                                    kick_player_names.push(player.player_name.clone());
+                                    kick_player_socket_addresses.push(player.addr);
+                                    player_found=true;
+                                }
+                            },
+                            1 =>{ // begins with%
+
+                                let match_string: String = kick_player_name.chars().take(kick_player_name.len()-1).collect();
+                                
+                                if player.player_name.starts_with(&match_string) || player.player_name == kick_player_name{
+                                    kick_player_indexes.push(player_index);
+                                    kick_player_names.push(player.player_name.clone());
+                                    kick_player_socket_addresses.push(player.addr);
+                                    player_found=true;
+                                }
+                                
+                            },
+                            2 =>{ // %ends with
+                                
+                                let match_string: String = kick_player_name.chars().skip(1).take(kick_player_name.len()-1).collect();
+                                
+                                if player.player_name.ends_with(&match_string) || player.player_name == kick_player_name{
+                                    kick_player_indexes.push(player_index);
+                                    kick_player_names.push(player.player_name.clone());
+                                    kick_player_socket_addresses.push(player.addr);
+                                    player_found=true;
+                                }
+
+                            },
+                            3 =>{ // %contains%
+                                
+                                let match_string: String = kick_player_name.chars().skip(1).take(kick_player_name.len()-2).collect();
+                                
+                                if player.player_name.contains(&match_string) || player.player_name == kick_player_name{
+                                    kick_player_indexes.push(player_index);
+                                    kick_player_names.push(player.player_name.clone());
+                                    kick_player_socket_addresses.push(player.addr);
+                                    player_found=true;
+                                }
+
+                            },
+                            _=>{}
+                        }
+
+                        
+                    }
+                }
+
+                
+            } else{
+                self.admin_deny_message(admin_player_index);
+                return;
+            }
+        }
+
+        if player_found {
+
+            for this_player_index in 0 .. kick_player_indexes.len(){
+
+                if kick_player_indexes[this_player_index] != admin_player_index {
+                    self.remove_player(kick_player_indexes[this_player_index]);
+
+                    if ban_player{
+
+                        self.ban_list.push(kick_player_socket_addresses[this_player_index].ip());
+
+                        let msg = format!("{} banned by {}",kick_player_names[this_player_index],admin_player_name);
+                        self.add_server_chat_message(msg);
+                    } else {
+                        let msg = format!("{} kicked by {}",kick_player_names[this_player_index],admin_player_name);
+                        self.add_server_chat_message(msg);
+                    }
+
+                    
+                } else {
+
+                    if ban_player{
+                        let msg = format!("You cannot ban yourself");
+                        self.add_directed_server_chat_message(msg,admin_player_index);
+                    } else {
+                        let msg = format!("You cannot kick yourself");
+                        self.add_directed_server_chat_message(msg,admin_player_index);
+                    }
+                    
+                }
+            }
+
+        } else {
+
+            match match_mode {
+                0 =>{ // full string
+
+                    let msg = format!("No player names match {}",kick_player_name);
+                    self.add_directed_server_chat_message(msg,admin_player_index);
+
+                },
+                1 =>{ // begins with%
+
+                    let msg = format!("No player names begin with {}",kick_player_name);
+                    self.add_directed_server_chat_message(msg,admin_player_index);
+                    
+                },
+                2 =>{ // %ends with
+                    
+                    let msg = format!("No player names end with {}",kick_player_name);
+                    self.add_directed_server_chat_message(msg,admin_player_index);
+
+                },
+                3 =>{ // %contains%
+                    
+                    let msg = format!("No player names contain {}",kick_player_name);
+                    self.add_directed_server_chat_message(msg,admin_player_index);
+
+                },
+                _=>{}
+            }
+
+            
+
+        }
+        
+
+    }
+
+    fn clear_bans (& mut self, player_index: usize) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+                self.ban_list.clear();
+
+                let msg = format!("Bans cleared by {}",player.player_name);
+                self.add_server_chat_message(msg);
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
     }
@@ -441,6 +696,8 @@ impl HQMServer {
 
                 let msg = format!("Clock set by {}", player.player_name);
                 self.add_server_chat_message(msg);
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
 
@@ -464,6 +721,8 @@ impl HQMServer {
                     },
                     _=>{}
                 }
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
     }
@@ -477,6 +736,8 @@ impl HQMServer {
                 let msg = format!("Period set by {}",player.player_name);
                 self.add_server_chat_message(msg);
 
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
     }
@@ -488,6 +749,8 @@ impl HQMServer {
 
                 let msg = format!("Faceoff initiated by {}",player.player_name);
                 self.add_server_chat_message(msg);
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
     }
@@ -500,6 +763,8 @@ impl HQMServer {
                 self.new_game();
 
                 self.add_server_chat_message(msg);
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
     }
@@ -511,6 +776,8 @@ impl HQMServer {
 
                 let msg = format!("Game paused by {}",player.player_name);
                 self.add_server_chat_message(msg);
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
     }
@@ -522,6 +789,8 @@ impl HQMServer {
 
                 let msg = format!("Game resumed by {}",player.player_name);
                 self.add_server_chat_message(msg);
+            } else {
+                self.admin_deny_message(player_index);
             }
         }
     }
@@ -550,6 +819,12 @@ impl HQMServer {
     fn process_command (&mut self, command: &str, args: &[&str], player_index: usize) {
 
         match command{
+            "enablejoin" => {
+                self.set_allow_join(player_index,true);
+            },
+            "disablejoin" => {
+                self.set_allow_join(player_index,false);
+            },
             "muteplayer" => {
                 if args.len() > 0{
                     self.mute_player(player_index,args.join(" "));
@@ -565,6 +840,24 @@ impl HQMServer {
             },
             "unmute" => {
                 self.unmute_chat(player_index);
+            },
+            "fs" => {
+                if args.len() > 0{
+                    self.force_player_off_ice(player_index,args.join(" ").parse::<u32>().unwrap());
+                }
+            },
+            "kick" => {
+                if args.len() > 0{
+                    self.kick_player(player_index,args.join(" "),false);
+                }
+            },
+            "ban" => {
+                if args.len() > 0{
+                    self.kick_player(player_index,args.join(" "),true);
+                }
+            },
+            "clearbans" => {
+                self.clear_bans(player_index);
             },
             "set" => {
 
@@ -702,7 +995,7 @@ impl HQMServer {
 
         if self.players[player_index].is_some() {
             if msg.starts_with("/") {
-                let split: Vec<&str> = msg.split_ascii_whitespace().collect();
+                let split: Vec<&str> = msg.split(" ").collect(); // Temporary comment: this was changed from split_ascii_whitespace so that player names with spaces could be used as an argument for /kick etc (there appears to be no way to reconstruct such a name otherwise)
                 let command = &split[0][1..];
                 let args = &split[1..];
                 self.process_command(command, args, player_index);
@@ -771,6 +1064,9 @@ impl HQMServer {
     }
 
     fn remove_player(&mut self, player_index: usize) {
+
+        let mut admin_check:bool = false;
+
         match &self.players[player_index as usize] {
             Some(player) => {
                 let update = HQMMessage::PlayerUpdate {
@@ -784,6 +1080,10 @@ impl HQMServer {
                     self.game.objects[object_index] = HQMGameObject::None;
                 }
 
+                if player.is_admin{
+                    admin_check=true;
+                }
+
                 self.add_global_message(update, true);
 
                 self.players[player_index as usize] = None;
@@ -792,6 +1092,25 @@ impl HQMServer {
                 println!("Player has already exited");
             }
         }
+
+        if admin_check{
+
+            let mut admin_found=false;
+
+            for p in self.players.iter_mut() {
+                if let Some(player) = p {
+                    if player.is_admin{
+                        admin_found=true;
+                    }
+                }
+            }
+
+            if !admin_found{
+                self.allow_join=true;
+            }
+
+        }
+        
     }
 
     fn add_user_chat_message(&mut self, player_index: usize, message: String) {
@@ -840,6 +1159,16 @@ impl HQMServer {
         let current_slot = HQMServer::find_player_slot(self, addr);
         if current_slot.is_some() {
             return; // Player has already joined
+        }
+
+        // Check ban list
+        if self.ban_list.contains(&addr.ip()){
+            return;
+        }
+
+        // Disabled join
+        if !self.allow_join{
+            return;
         }
 
         let player_name_bytes = parser.read_bytes_aligned(32);
@@ -967,16 +1296,24 @@ impl HQMServer {
                     if new_team != player.team && *new_team_count + 1 <= self.config.team_max
                         && (!self.config.force_team_size_parity || (*new_team_count <= other_team_count)) {
                         if player.skater.is_none() {
-                            let (mid_x, mid_z) = (self.game.rink.width / 2.0, self.game.rink.length / 2.0);
 
-                            let rot = match new_team {
-                                HQMTeam::Red => Matrix3::identity(),
-                                HQMTeam::Blue => Rotation3::from_euler_angles(0.0,std::f32::consts::PI,0.0).matrix().clone_owned(),
-                                _ => panic!()
-                            };
-                            let pos = Point3::new(mid_x, 2.5, mid_z) + rot * Vector3::new(0.0,0.0,2.0);
+                            let mut pos = Point3::new(0.0,2.5,0.0);
+                            let mut rot = Rotation3::from_euler_angles(0.0,0.0,0.0);
 
-                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot, player.hand, player_index) {
+                            match new_team{
+                                HQMTeam::Red=>{
+                                    pos = Point3::new(self.config.entry_point_red[0],self.config.entry_point_red[1],self.config.entry_point_red[2]);
+                                    rot = Rotation3::from_euler_angles(0.0,self.config.entry_rotation_red,0.0);
+
+                                },
+                                HQMTeam::Blue=>{
+                                    pos = Point3::new(self.config.entry_point_blue[0],self.config.entry_point_blue[1],self.config.entry_point_blue[2]);
+                                    rot = Rotation3::from_euler_angles(0.0,self.config.entry_rotation_blue,0.0);
+                                },
+                                _=>{}
+                            }
+
+                            if let Some(i) = HQMServer::create_player_object(& mut self.game.objects, pos, rot.matrix().clone_owned(), player.hand, player_index) {
                                 player.team = new_team;
                                 player.skater = Some(i);
                                 *new_team_count += 1;
@@ -1135,6 +1472,7 @@ impl HQMServer {
             self.game.game_step += 1;
         } else if self.game.active {
             self.new_game();
+            self.allow_join=true;
         }
 
     }
@@ -1613,13 +1951,18 @@ impl HQMServer {
     }
 
     pub fn new(config: HQMServerConfiguration) -> Self {
+        let ban_vec = Vec::new();
         let mut player_vec = Vec::with_capacity(64);
         for _ in 0..64 {
             player_vec.push(None);
         }
 
+        
+
         HQMServer {
             players: player_vec,
+            ban_list: ban_vec,
+            allow_join:true,
             game: HQMGame::new(1),
             game_alloc: 1,
             is_muted:false,
@@ -2024,6 +2367,11 @@ struct HQMServerConfiguration {
     warmup_pucks: u32,
 
     faceoff_positions: Vec<HQMFaceoffPosition>,
+
+    entry_point_red: Vector3<f32>,
+    entry_point_blue: Vector3<f32>,
+    entry_rotation_red: f32,
+    entry_rotation_blue: f32
 }
 
 #[tokio::main]
@@ -2070,6 +2418,29 @@ async fn main() -> std::io::Result<()> {
         let rules_time_intermission = rules_section.get("time_intermission").unwrap().parse::<u32>().unwrap();
         let warmup_pucks = rules_section.get("warmup_pucks").map_or_else(|| 1, |x| x.parse::<u32>().unwrap());
 
+        // Game
+        let game_section = conf.section(Some("Game")).unwrap();
+
+        // Game: Red Entry Offset
+        let mut red_game_entry_offset:Vector3<f32>=Vector3::new(15.0,2.75,27.75);
+        let red_entry_offset_parts = game_section.get("entry_point_red").unwrap().parse::<String>().unwrap();
+        let red_offset_parts: Vec<&str> = red_entry_offset_parts.split(',').collect();
+
+        red_game_entry_offset[0] = red_offset_parts[0].parse::<f32>().unwrap();
+        red_game_entry_offset[1] = red_offset_parts[1].parse::<f32>().unwrap();
+        red_game_entry_offset[2] = red_offset_parts[2].parse::<f32>().unwrap();
+        let red_game_entry_rotation = red_offset_parts[3].parse::<f32>().unwrap() * (std::f32::consts::PI/180.0);
+
+        // Game: Blue Entry Offset
+        let mut blue_game_entry_offset:Vector3<f32>=Vector3::new(15.0,2.75,33.25);
+        let blue_entry_offset_parts = game_section.get("entry_point_blue").unwrap().parse::<String>().unwrap();
+        let blue_offset_parts: Vec<&str> = blue_entry_offset_parts.split(',').collect();
+
+        blue_game_entry_offset[0] = blue_offset_parts[0].parse::<f32>().unwrap();
+        blue_game_entry_offset[1] = blue_offset_parts[1].parse::<f32>().unwrap();
+        blue_game_entry_offset[2] = blue_offset_parts[2].parse::<f32>().unwrap();
+        let blue_game_entry_rotation = blue_offset_parts[3].parse::<f32>().unwrap() * (std::f32::consts::PI/180.0);
+
         // Roles
         let roles_section = conf.section(Some("Roles")).unwrap();
         for (k, v) in roles_section.iter() {
@@ -2078,8 +2449,8 @@ async fn main() -> std::io::Result<()> {
 
             let mut offsets:Vec<Vector3<f32>>=Vec::new();
 
-            let offset_parts: Vec<&str> = string_offsets.split('|').collect();
-            for this_offset in offset_parts{
+            let position_parts: Vec<&str> = string_offsets.split('|').collect();
+            for this_offset in position_parts{
                 let offset_parts: Vec<&str> = this_offset.split(',').collect();
 
                 offsets.push(Vector3::new(offset_parts[0].parse::<f32>().unwrap(),
@@ -2106,6 +2477,12 @@ async fn main() -> std::io::Result<()> {
             time_warmup: rules_time_warmup, 
             time_intermission: rules_time_intermission,
             warmup_pucks,
+
+            entry_point_red:red_game_entry_offset,
+            entry_rotation_red:red_game_entry_rotation,
+
+            entry_point_blue:blue_game_entry_offset,
+            entry_rotation_blue:blue_game_entry_rotation,
 
             faceoff_positions: rolevec,
             welcome: welcome_str,
