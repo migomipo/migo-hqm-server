@@ -1288,12 +1288,13 @@ impl HQMServer {
                 if (player.input.join_red() || player.input.join_blue())
                     && player.team == HQMTeam::Spec
                     && player.team_switch_timer == 0 {
-                    let (new_team, new_team_count) = if player.input.join_red() {
-                        (HQMTeam::Red, & mut red_player_count)
+                    let (new_team, new_team_count, other_team_count) = if player.input.join_red() {
+                        (HQMTeam::Red, & mut red_player_count, blue_player_count)
                     } else {
-                        (HQMTeam::Blue, & mut blue_player_count)
+                        (HQMTeam::Blue, & mut blue_player_count, red_player_count)
                     };
-                    if new_team != player.team && *new_team_count + 1 <= self.config.team_max {
+                    if new_team != player.team && *new_team_count + 1 <= self.config.team_max
+                        && (!self.config.force_team_size_parity || (*new_team_count <= other_team_count)) {
                         if player.skater.is_none() {
 
                             let mut pos = Point3::new(0.0,2.5,0.0);
@@ -2355,6 +2356,7 @@ struct HQMServerConfiguration {
     public: bool,
     player_max: u32,
     team_max: u32,
+    force_team_size_parity: bool,
     welcome: Vec<String>,
     
     password: String,
@@ -2397,6 +2399,10 @@ async fn main() -> std::io::Result<()> {
         let server_public = server_section.get("public").unwrap().parse::<bool>().unwrap();
         let server_player_max = server_section.get("player_max").unwrap().parse::<u32>().unwrap();
         let server_team_max = server_section.get("team_max").unwrap().parse::<u32>().unwrap();
+        let force_team_size_parity = match server_section.get("force_team_size_parity") {
+            Some(s) => s.eq_ignore_ascii_case("true"),
+            None => false
+        };
         let server_password = server_section.get("password").unwrap().parse::<String>().unwrap();
 
         let welcome = server_section.get("welcome").unwrap_or("");
@@ -2479,7 +2485,8 @@ async fn main() -> std::io::Result<()> {
             entry_rotation_blue:blue_game_entry_rotation,
 
             faceoff_positions: rolevec,
-            welcome: welcome_str
+            welcome: welcome_str,
+            force_team_size_parity
         };
         // Config file didn't exist; use defaults as described
         return HQMServer::new(config).run().await;
