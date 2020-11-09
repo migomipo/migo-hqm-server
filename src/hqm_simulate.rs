@@ -1,4 +1,6 @@
-use crate::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld};
+
+
+use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld};
 use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Vector2, Point3};
 use std::ops::{AddAssign};
 use std::f32::consts::PI;
