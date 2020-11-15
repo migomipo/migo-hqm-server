@@ -226,7 +226,7 @@ pub(crate) struct HQMSkater {
     pub(crate) body_rot: f32,                 // Radians
     pub(crate) height: f32,
     pub(crate) input: HQMPlayerInput,
-    pub(crate) old_input: HQMPlayerInput,
+    pub(crate) jumped_last_frame: bool,
     pub(crate) stick_placement: Vector2<f32>,      // Azimuth and inclination in radians
     pub(crate) stick_placement_delta: Vector2<f32>, // Change in azimuth and inclination per hundred of a second
     pub(crate) collision_balls: Vec<HQMSkaterCollisionBall>,
@@ -266,7 +266,7 @@ impl HQMSkater {
             body_rot: 0.0,
             height: 0.75,
             input: HQMPlayerInput::default(),
-            old_input: HQMPlayerInput::default(),
+            jumped_last_frame: false,
             stick_placement: Vector2::new(0.0, 0.0),
             stick_placement_delta: Vector2::new(0.0, 0.0),
             hand,

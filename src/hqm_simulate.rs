@@ -53,7 +53,6 @@ impl HQMGameWorld {
 
             update_player2(player);
             update_stick(player, & pos_delta_copy, & rot_axis_copy, & self.rink);
-            player.old_input = player.input.clone();
         }
 
         for i in 0..players.len() {
@@ -481,13 +480,15 @@ fn update_player(player: & mut HQMSkater, gravity: f32) {
 
             player.body.linear_velocity += limit_vector_length(&skate_direction, max_acceleration);
         }
-        if player.input.jump() && !player.old_input.jump() {
-            player.body.linear_velocity[1] += 0.025;
+        if player.input.jump() && !player.jumped_last_frame && player.body.linear_velocity[1] < 0.025 {
+            let diff = 0.025 - player.body.linear_velocity[1].max (0.0);
+            player.body.linear_velocity[1] += diff;
             for collision_ball in player.collision_balls.iter_mut() {
-                collision_ball.velocity[1] += 0.025;
+                collision_ball.velocity[1] += diff;
             }
         }
     }
+    player.jumped_last_frame = player.input.jump();
 
     // Turn player
     let turn = clamp(player.input.turn, -1.0, 1.0);
