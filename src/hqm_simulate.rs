@@ -40,7 +40,7 @@ impl HQMGameWorld {
 
         let mut collisions = vec![];
         for (i, player) in players.iter_mut().enumerate() {
-            update_player(player, self.gravity);
+            update_player(player, self.gravity, self.limit_jump_speed);
 
             for (ib, collision_ball) in player.collision_balls.iter().enumerate() {
                 let collision = collision_between_collision_ball_and_rink(collision_ball, & self.rink);
@@ -451,7 +451,7 @@ fn get_puck_vertices (pos: & Point3<f32>, rot: & Matrix3<f32>, height: f32, radi
     res
 }
 
-fn update_player(player: & mut HQMSkater, gravity: f32) {
+fn update_player(player: & mut HQMSkater, gravity: f32, limit_jump_speed: bool) {
     let old_pos_delta = player.body.linear_velocity.clone_owned();
     let old_rot_axis = player.body.angular_velocity.clone_owned();
 
@@ -480,11 +480,17 @@ fn update_player(player: & mut HQMSkater, gravity: f32) {
 
             player.body.linear_velocity += limit_vector_length(&skate_direction, max_acceleration);
         }
-        if player.input.jump() && !player.jumped_last_frame && player.body.linear_velocity[1] < 0.025 {
-            let diff = 0.025 - player.body.linear_velocity[1].max (0.0);
-            player.body.linear_velocity[1] += diff;
-            for collision_ball in player.collision_balls.iter_mut() {
-                collision_ball.velocity[1] += diff;
+        if player.input.jump() && !player.jumped_last_frame {
+            let diff = if limit_jump_speed {
+                clamp (0.025 - player.body.linear_velocity[1], 0.0, 0.025)
+            } else {
+                0.025
+            };
+            if diff != 0.0 {
+                player.body.linear_velocity[1] += diff;
+                for collision_ball in player.collision_balls.iter_mut() {
+                    collision_ball.velocity[1] += diff;
+                }
             }
         }
     }

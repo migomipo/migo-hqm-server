@@ -4,11 +4,13 @@ use std::fmt;
 use crate::hqm_parse;
 use crate::hqm_parse::{HQMSkaterPacket, HQMPuckPacket};
 use std::rc::Rc;
+use crate::hqm_server::HQMServerConfiguration;
 
 pub(crate) struct HQMGameWorld {
     pub(crate) objects: Vec<HQMGameObject>,
     pub(crate) rink: HQMRink,
-    pub(crate) gravity: f32
+    pub(crate) gravity: f32,
+    pub(crate) limit_jump_speed: bool,
 }
 
 impl HQMGameWorld {
@@ -58,7 +60,7 @@ pub(crate) struct HQMGame {
 }
 
 impl HQMGame {
-    pub(crate) fn new (game_id: u32) -> Self {
+    pub(crate) fn new (game_id: u32, config: &HQMServerConfiguration) -> Self {
         let mut object_vec = Vec::with_capacity(32);
         for _ in 0..32 {
             object_vec.push(HQMGameObject::None);
@@ -70,7 +72,8 @@ impl HQMGame {
             world: HQMGameWorld {
                 objects: object_vec,
                 rink: HQMRink::new(30.0, 61.0, 8.5),
-                gravity: 0.000680
+                gravity: 0.000680,
+                limit_jump_speed: config.limit_jump_speed
             },
             global_messages: vec![],
             red_score: 0,

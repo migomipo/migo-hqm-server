@@ -1364,7 +1364,7 @@ impl HQMServer {
 
     fn new_game(&mut self) {
         self.game_alloc += 1;
-        self.game = HQMGame::new(self.game_alloc);
+        self.game = HQMGame::new(self.game_alloc, &self.config);
 
         let puck_line_start= self.game.world.rink.width / 2.0 - 0.4 * ((self.config.warmup_pucks - 1) as f32);
 
@@ -1708,7 +1708,7 @@ impl HQMServer {
             players: player_vec,
             ban_list: HashSet::new(),
             allow_join:true,
-            game: HQMGame::new(1),
+            game: HQMGame::new(1, &config),
             game_alloc: 1,
             is_muted:false,
             config
@@ -1802,6 +1802,7 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) time_warmup: u32,
     pub(crate) time_intermission: u32,
     pub(crate) warmup_pucks: u32,
+    pub(crate) limit_jump_speed: bool,
 
     pub(crate) faceoff_positions: Vec<HQMFaceoffPosition>,
 

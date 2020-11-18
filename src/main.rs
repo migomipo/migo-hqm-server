@@ -80,6 +80,11 @@ async fn main() -> std::io::Result<()> {
         blue_game_entry_offset[2] = blue_offset_parts[2].parse::<f32>().unwrap();
         let blue_game_entry_rotation = blue_offset_parts[3].parse::<f32>().unwrap() * (std::f32::consts::PI/180.0);
 
+        let limit_jump_speed = match game_section.get("limit_jump_speed") {
+            Some(s) => s.eq_ignore_ascii_case("true"),
+            None => false
+        };
+
         // Roles
         let roles_section = conf.section(Some("Roles")).unwrap();
         for (k, v) in roles_section.iter() {
@@ -116,6 +121,8 @@ async fn main() -> std::io::Result<()> {
             time_warmup: rules_time_warmup, 
             time_intermission: rules_time_intermission,
             warmup_pucks,
+            force_team_size_parity,
+            limit_jump_speed,
 
             entry_point_red:red_game_entry_offset,
             entry_rotation_red:red_game_entry_rotation,
@@ -125,7 +132,6 @@ async fn main() -> std::io::Result<()> {
 
             faceoff_positions: rolevec,
             welcome: welcome_str,
-            force_team_size_parity
         };
         // Config file didn't exist; use defaults as described
         return HQMServer::new(config).run().await;
