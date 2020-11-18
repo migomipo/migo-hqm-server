@@ -11,6 +11,7 @@ use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGa
 use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 
 const GAME_HEADER: &[u8] = b"Hock";
@@ -948,7 +949,7 @@ impl HQMServer {
         }
 
         let player_name_bytes = parser.read_bytes_aligned(32);
-        let player_name = HQMServer::get_player_name(player_name_bytes);
+        let player_name = get_player_name(player_name_bytes);
         match player_name {
             Some(name) => {
                 if self.add_player(name.clone(), &addr) {
@@ -975,18 +976,6 @@ impl HQMServer {
         }
     }
 
-    fn get_player_name(bytes: Vec<u8>) -> Option<String> {
-        let first_null = bytes.iter().position(|x| *x == 0);
-
-        let bytes = match first_null {
-            Some(x) => &bytes[0..x],
-            None => &bytes[..]
-        }.to_vec();
-        return match String::from_utf8(bytes) {
-            Ok(s) => Some(s),
-            Err(_) => None
-        };
-    }
 
     fn find_player_slot(&self, addr: &SocketAddr) -> Option<usize> {
         return self.players.iter().position(|x| {
@@ -1681,19 +1670,26 @@ impl HQMServer {
 
         // Set up timers
         let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
-        let mut public_timer = tokio::time::interval(Duration::from_secs(2));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.port));
-        let socket = tokio::net::UdpSocket::bind(& addr).await?;
+
+        let socket = Arc::new (tokio::net::UdpSocket::bind(& addr).await?);
         let mut read_buf = [0u8;1024];
         let mut write_buf = [0u8;4096];
+        if self.config.public {
+            let socket = socket.clone();
+            tokio::spawn(async move {
+                let mut public_timer = tokio::time::interval(Duration::from_secs(2));
+                loop {
+                    let _ = notify_master_server(&socket).await;
+                    public_timer.tick().await;
+                }
+            });
+        }
         loop {
             tokio::select! {
                 _ = tick_timer.tick() => {
                     self.tick(& socket, & mut write_buf).await;
-                }
-                _ = public_timer.tick(), if self.config.public => {
-                    let _ = notify_master_server(& socket).await;
                 }
                 Ok((size, addr)) = socket.recv_from(&mut read_buf) => {
                     self.handle_message(addr, & socket, & read_buf[0..size], & mut write_buf).await;
@@ -1718,6 +1714,19 @@ impl HQMServer {
             config
         }
     }
+}
+
+fn get_player_name(bytes: Vec<u8>) -> Option<String> {
+    let first_null = bytes.iter().position(|x| *x == 0);
+
+    let bytes = match first_null {
+        Some(x) => &bytes[0..x],
+        None => &bytes[..]
+    }.to_vec();
+    return match String::from_utf8(bytes) {
+        Ok(s) => Some(s),
+        Err(_) => None
+    };
 }
 
 async fn notify_master_server(socket: & UdpSocket) -> std::io::Result<usize> {
