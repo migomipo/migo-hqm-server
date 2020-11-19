@@ -1115,96 +1115,12 @@ impl HQMServer {
             self.move_players_between_teams();
             self.copy_player_input_to_object();
             let events = self.game.world.simulate_step();
-            for event in events {
-                match event {
-                    HQMSimulationEvent::EnteredNet {
-                        team, net: _, puck
-                    } => {
-                        if self.game.period > 0 &&
-                            self.game.time > 0 &&
-                            self.game.timeout == 0 {
-                            let scoring_team = if team == HQMTeam::Red {
-                                self.game.blue_score += 1;
-                                HQMTeam::Blue
-                            } else if team == HQMTeam::Blue {
-                                self.game.red_score += 1;
-                                HQMTeam::Red
-                            } else {
-                                panic!();
-                            };
-                            self.game.timeout = 700;
-                            if self.game.period > 3 {
-                                self.game.intermission = 2000;
-                                self.game.game_over = true;
-                            }
-
-                            let mut goal_scorer_index = None;
-                            let mut assist_index = None;
-
-                            if let HQMGameObject::Puck(this_puck) = & mut self.game.world.objects[puck] {
-                                let list = &this_puck.last_player_index;
-
-                                for i in 0..4 {
-                                    if let Some(player_index) = list[i] {
-                                        if let Some(player) = &self.players[player_index] {
-                                            if player.team == scoring_team {
-
-                                                if goal_scorer_index.is_none() {
-                                                    goal_scorer_index = Some(player_index);
-                                                } else if assist_index.is_none() && Some(player_index) != goal_scorer_index {
-                                                    assist_index = Some(player_index);
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                            }
-
-                            let message = HQMMessage::Goal {
-                                team: scoring_team,
-                                goal_player_index: goal_scorer_index,
-                                assist_player_index: assist_index
-                            };
-                            self.add_global_message(message, true);
-
-                        }
-                    },
-                    HQMSimulationEvent::Touch {
-                        player, puck
-                    } => {
-                        // Get connected player index from skater
-                        if let HQMGameObject::Player(this_skater) = & mut self.game.world.objects[player] {
-                            let this_connected_player_index = this_skater.connected_player_index;
-
-                            // Store player index in queue for awarding goals/assists
-                            if let HQMGameObject::Puck(this_puck) = & mut self.game.world.objects[puck] {
-                                if Some(this_connected_player_index) != this_puck.last_player_index[0] {
-                                    this_puck.last_player_index[3] = this_puck.last_player_index[2];
-                                    this_puck.last_player_index[2] = this_puck.last_player_index[1];
-                                    this_puck.last_player_index[1] = this_puck.last_player_index[0];
-                                    this_puck.last_player_index[0] = Some(this_connected_player_index);
-                                }
-                            }
-                        }
-
-                    }
-                }
-            }
+            self.handle_events(events);
             self.update_clock();
 
             self.update_game_state();
 
-            let mut packets: Vec<HQMObjectPacket> = Vec::with_capacity(32);
-            for i in 0usize..32 {
-                let packet = match &self.game.world.objects[i] {
-                    HQMGameObject::Puck(puck) => HQMObjectPacket::Puck(puck.get_packet()),
-                    HQMGameObject::Player(player) => HQMObjectPacket::Skater(player.get_packet()),
-                    HQMGameObject::None => HQMObjectPacket::None
-                };
-                packets.push(packet);
-            }
+            let packets = get_packets(& self.game.world.objects);
 
             for (i, x) in self.players.iter().enumerate() {
                 if let Some(p) = x {
@@ -1218,6 +1134,86 @@ impl HQMServer {
             self.allow_join=true;
         }
 
+    }
+
+    fn handle_events (& mut self, events: Vec<HQMSimulationEvent>) {
+        for event in events {
+            match event {
+                HQMSimulationEvent::EnteredNet {
+                    team, net: _, puck
+                } => {
+                    if self.game.period > 0 &&
+                        self.game.time > 0 &&
+                        self.game.timeout == 0 {
+                        let scoring_team = if team == HQMTeam::Red {
+                            self.game.blue_score += 1;
+                            HQMTeam::Blue
+                        } else if team == HQMTeam::Blue {
+                            self.game.red_score += 1;
+                            HQMTeam::Red
+                        } else {
+                            panic!();
+                        };
+                        self.game.timeout = 700;
+                        if self.game.period > 3 {
+                            self.game.intermission = 2000;
+                            self.game.game_over = true;
+                        }
+
+                        let mut goal_scorer_index = None;
+                        let mut assist_index = None;
+
+                        if let HQMGameObject::Puck(this_puck) = & mut self.game.world.objects[puck] {
+                            let list = &this_puck.last_player_index;
+
+                            for i in 0..4 {
+                                if let Some(player_index) = list[i] {
+                                    if let Some(player) = &self.players[player_index] {
+                                        if player.team == scoring_team {
+
+                                            if goal_scorer_index.is_none() {
+                                                goal_scorer_index = Some(player_index);
+                                            } else if assist_index.is_none() && Some(player_index) != goal_scorer_index {
+                                                assist_index = Some(player_index);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                        }
+
+                        let message = HQMMessage::Goal {
+                            team: scoring_team,
+                            goal_player_index: goal_scorer_index,
+                            assist_player_index: assist_index
+                        };
+                        self.add_global_message(message, true);
+
+                    }
+                },
+                HQMSimulationEvent::Touch {
+                    player, puck
+                } => {
+                    // Get connected player index from skater
+                    if let HQMGameObject::Player(this_skater) = & mut self.game.world.objects[player] {
+                        let this_connected_player_index = this_skater.connected_player_index;
+
+                        // Store player index in queue for awarding goals/assists
+                        if let HQMGameObject::Puck(this_puck) = & mut self.game.world.objects[puck] {
+                            if Some(this_connected_player_index) != this_puck.last_player_index[0] {
+                                this_puck.last_player_index[3] = this_puck.last_player_index[2];
+                                this_puck.last_player_index[2] = this_puck.last_player_index[1];
+                                this_puck.last_player_index[1] = this_puck.last_player_index[0];
+                                this_puck.last_player_index[0] = Some(this_connected_player_index);
+                            }
+                        }
+                    }
+
+                }
+            }
+        }
     }
 
     async fn send_update(&self, player: &HQMConnectedPlayer, i: usize, socket: & UdpSocket, packets: &[HQMObjectPacket], write_buf: & mut [u8]) {
@@ -1714,6 +1710,19 @@ impl HQMServer {
             config
         }
     }
+}
+
+fn get_packets (objects: & Vec<HQMGameObject>) -> Vec<HQMObjectPacket> {
+    let mut packets: Vec<HQMObjectPacket> = Vec::with_capacity(32);
+    for i in 0usize..32 {
+        let packet = match &objects[i] {
+            HQMGameObject::Puck(puck) => HQMObjectPacket::Puck(puck.get_packet()),
+            HQMGameObject::Player(player) => HQMObjectPacket::Skater(player.get_packet()),
+            HQMGameObject::None => HQMObjectPacket::None
+        };
+        packets.push(packet);
+    }
+    packets
 }
 
 fn get_player_name(bytes: Vec<u8>) -> Option<String> {
