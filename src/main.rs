@@ -12,6 +12,7 @@ mod hqm_parse;
 mod hqm_simulate;
 mod hqm_game;
 mod hqm_server;
+mod hqm_admin_commands;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {

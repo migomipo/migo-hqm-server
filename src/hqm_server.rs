@@ -19,13 +19,13 @@ const GAME_HEADER: &[u8] = b"Hock";
 const MASTER_SERVER: &str = "66.226.72.227:27590";
 
 pub(crate) struct HQMServer {
-    players: Vec<Option<HQMConnectedPlayer>>,
-    ban_list: HashSet<std::net::IpAddr>,
-    allow_join: bool,
-    config: HQMServerConfiguration,
-    game: HQMGame,
+    pub(crate) players: Vec<Option<HQMConnectedPlayer>>,
+    pub(crate) ban_list: HashSet<std::net::IpAddr>,
+    pub(crate) allow_join: bool,
+    pub(crate) config: HQMServerConfiguration,
+    pub(crate) game: HQMGame,
     game_alloc: u32,
-    is_muted:bool,
+    pub(crate) is_muted:bool,
 }
 
 impl HQMServer {
@@ -167,411 +167,6 @@ impl HQMServer {
         }
     }
 
-    fn admin_deny_message (& mut self, player_index: usize) {
-        let msg = format!("Please log in before using that command");
-        self.add_directed_server_chat_message(msg,player_index);
-
-    }
-
-    fn set_allow_join (& mut self, player_index: usize, allowed: bool) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                self.allow_join=allowed;
-
-                if allowed {
-                    let msg = format!("Joins enabled by {}",player.player_name);
-                    self.add_server_chat_message(msg);
-                } else {
-                    let msg = format!("Joins disabled by {}",player.player_name);
-                    self.add_server_chat_message(msg);
-                }
-
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    fn mute_player (& mut self, player_index: usize, mute_player: String) {
-        if let Some(player) = & self.players[player_index]{
-            if player.is_admin {
-                let admin_player_name = player.player_name.clone();
-                let mut player_found:bool = false;
-
-                for p in self.players.iter_mut() {
-                    if let Some(player) = p {
-                        if player.player_name == mute_player{
-                            player.is_muted=true;
-                            player_found=true;
-                        }
-                    }
-                }
-
-                if player_found{
-                    let msg = format!("{} muted by {}",mute_player,admin_player_name);
-                    self.add_server_chat_message(msg);
-                }
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-
-    }
-
-    fn unmute_player (& mut self, player_index: usize, mute_player: String) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin {
-                let admin_player_name = player.player_name.clone();
-                let mut player_found:bool = false;
-
-                for p in self.players.iter_mut() {
-                    if let Some(player) = p {
-                        if player.player_name == mute_player{
-                            player.is_muted=false;
-                            player_found=true;
-                        }
-                    }
-                }
-
-                if player_found{
-                    let msg = format!("{} unmuted by {}",mute_player,admin_player_name);
-                    self.add_server_chat_message(msg);
-                }
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    fn mute_chat (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                self.is_muted=true;
-
-                let msg = format!("Chat muted by {}",player.player_name);
-                self.add_server_chat_message(msg);
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    fn unmute_chat (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                self.is_muted=false;
-
-                let msg = format!("Chat unmuted by {}",player.player_name);
-                self.add_server_chat_message(msg);
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    fn force_player_off_ice (& mut self, player_index: usize, force_player_off_number: u32) {
-
-        let mut admin_player_name = "".to_string();
-
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin {
-                admin_player_name = player.player_name.clone();
-            } else {
-                self.admin_deny_message(player_index);
-                return;
-            }
-        }
-
-        let force_player_index_number = force_player_off_number - 1;
-
-        if force_player_index_number as usize <= self.players.len()-1{
-            if let Some(force_player) = & mut self.players[force_player_index_number as usize] {
-                force_player.team = HQMTeam::Spec;
-                force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
-                if let Some (i) = force_player.skater {
-                    self.game.world.objects[i] = HQMGameObject::None;
-                    force_player.skater = None;
-                }
-                let force_player_name = force_player.player_name.clone();
-                let force_player_name_bytes = force_player.player_name.clone().into_bytes();
-                self.add_global_message(HQMMessage::PlayerUpdate {
-                    player_name: force_player_name_bytes,
-                    team: HQMTeam::Spec,
-                    player_index: force_player_index_number as usize,
-                    object_index: None,
-                    in_server: true
-                },true);
-
-                let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
-                self.add_server_chat_message(msg);
-            }
-        }
-
-
-    }
-
-    fn set_role (& mut self, player_index: usize, input_position:&str) {
-        let found_position = self.config.faceoff_positions.iter().enumerate().find(|(_, position) | {
-            position.abbreviation.to_lowercase() == input_position.to_lowercase()
-        } );
-        if let Some((role_index, position)) = found_position {
-            if let Some(player) = & mut self.players[player_index] {
-                player.faceoff_position_index = role_index;
-
-                let msg = format!("{} position {}", player.player_name, position.abbreviation.to_uppercase());
-                self.add_server_chat_message(msg);
-
-            }
-        }
-
-    }
-
-    fn admin_login (& mut self, player_index: usize, password:&str) {
-        if let Some(player) = & mut self.players[player_index] {
-
-            if self.config.password == password{
-                player.is_admin = true;
-
-                let msg = format!("{} admin", player.player_name);
-                self.add_server_chat_message(msg);
-            } else {
-
-                let msg = format!("Incorrect password");
-                self.add_directed_server_chat_message(msg,player_index);
-
-            }
-        }
-    }
-
-    fn kick_player (& mut self, admin_player_index: usize, kick_player_name: String, ban_player: bool) {
-
-        if let Some(player) = & self.players[admin_player_index]{
-            if player.is_admin {
-                let admin_player_name = player.player_name.clone();
-
-                // 0 full string | 1 begins with | 2 ends with | 3 contains
-                let match_mode = if kick_player_name.starts_with("%"){
-                    if kick_player_name.ends_with("%"){
-                        3// %contains%
-                    }else{
-                        2// %ends with
-                    }
-                }else if kick_player_name.ends_with("%"){
-                    1// begins with%
-                } else {
-                    0
-                };
-
-                // Because we allow matching using wildcards, we use vectors for multiple instances found
-                let mut kick_player_list: Vec<(usize, String, SocketAddr)> = Vec::new();
-
-                for (player_index, p) in self.players.iter_mut().enumerate() {
-                    if let Some(player) = p {
-
-                        match match_mode {
-                            0 => { // full string
-                                if player.player_name == kick_player_name{
-                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
-                                }
-                            },
-                            1 => { // begins with%
-                                let match_string: String = kick_player_name.chars().take(kick_player_name.len()-1).collect();
-
-                                if player.player_name.starts_with(&match_string) || player.player_name == kick_player_name{
-                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
-                                }
-                            },
-                            2 => { // %ends with
-                                let match_string: String = kick_player_name.chars().skip(1).take(kick_player_name.len()-1).collect();
-
-                                if player.player_name.ends_with(&match_string) || player.player_name == kick_player_name{
-                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
-                                }
-                            },
-                            3 => { // %contains%
-                                let match_string: String = kick_player_name.chars().skip(1).take(kick_player_name.len()-2).collect();
-
-                                if player.player_name.contains(&match_string) || player.player_name == kick_player_name{
-                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
-                                }
-                            },
-                            _=>{}
-                        }
-                    }
-                }
-                if !kick_player_list.is_empty() {
-                    for (player_index, player_name, player_addr) in kick_player_list {
-                        if player_index != admin_player_index {
-                            self.remove_player(player_index);
-
-                            if ban_player{
-                                self.ban_list.insert(player_addr.ip());
-
-                                let msg = format!("{} banned by {}",player_name, admin_player_name);
-                                self.add_server_chat_message(msg);
-                            } else {
-                                let msg = format!("{} kicked by {}",player_name, admin_player_name);
-                                self.add_server_chat_message(msg);
-                            }
-                        } else {
-                            if ban_player{
-                                let msg = format!("You cannot ban yourself");
-                                self.add_directed_server_chat_message(msg,admin_player_index);
-                            } else {
-                                let msg = format!("You cannot kick yourself");
-                                self.add_directed_server_chat_message(msg,admin_player_index);
-                            }
-                        }
-                    }
-
-                } else {
-                    match match_mode {
-                        0 =>{ // full string
-                            let msg = format!("No player names match {}",kick_player_name);
-                            self.add_directed_server_chat_message(msg,admin_player_index);
-                        },
-                        1 =>{ // begins with%
-                            let msg = format!("No player names begin with {}",kick_player_name);
-                            self.add_directed_server_chat_message(msg,admin_player_index);
-                        },
-                        2 =>{ // %ends with
-                            let msg = format!("No player names end with {}",kick_player_name);
-                            self.add_directed_server_chat_message(msg,admin_player_index);
-                        },
-                        3 =>{ // %contains%
-                            let msg = format!("No player names contain {}",kick_player_name);
-                            self.add_directed_server_chat_message(msg,admin_player_index);
-                        },
-                        _=>{}
-                    }
-                }
-
-            } else{
-                self.admin_deny_message(admin_player_index);
-                return;
-            }
-        }
-
-    }
-
-    fn clear_bans (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                self.ban_list.clear();
-
-                let msg = format!("Bans cleared by {}",player.player_name);
-                self.add_server_chat_message(msg);
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    fn set_clock (& mut self, input_minutes: u32, input_seconds: u32, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                self.game.time = (input_minutes * 60 * 100)+ (input_seconds * 100);
-
-                let msg = format!("Clock set by {}", player.player_name);
-                self.add_server_chat_message(msg);
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-
-    }
-
-    fn set_score (& mut self, input_team: HQMTeam, input_score: u32,player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                match input_team {
-                    HQMTeam::Red =>{
-                        self.game.red_score = input_score;
-
-                        let msg = format!("Red score changed by {}",player.player_name);
-                        self.add_server_chat_message(msg);
-                    },
-                    HQMTeam::Blue =>{
-                        self.game.blue_score = input_score;
-
-                        let msg = format!("Blue score changed by {}",player.player_name);
-                        self.add_server_chat_message(msg);
-                    },
-                    _=>{}
-                }
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    fn set_period (& mut self, input_period: u32,player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-
-                self.game.period = input_period;
-
-                let msg = format!("Period set by {}",player.player_name);
-                self.add_server_chat_message(msg);
-
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    fn faceoff (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                self.game.timeout = 5*100;
-
-                let msg = format!("Faceoff initiated by {}",player.player_name);
-                self.add_server_chat_message(msg);
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    fn reset_game (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                let msg = format!("Game reset by {}",player.player_name);
-
-                self.new_game();
-
-                self.add_server_chat_message(msg);
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    fn pause (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                self.game.paused=true;
-
-                let msg = format!("Game paused by {}",player.player_name);
-                self.add_server_chat_message(msg);
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    fn unpause (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                self.game.paused=false;
-
-                let msg = format!("Game resumed by {}",player.player_name);
-                self.add_server_chat_message(msg);
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
 
     fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
         if let Some(player) = & mut self.players[player_index] {
@@ -590,7 +185,6 @@ impl HQMServer {
                 }
             }
         }
-
     }
 
     fn process_command (&mut self, command: &str, args: &[&str], player_index: usize) {
@@ -637,9 +231,7 @@ impl HQMServer {
                 self.clear_bans(player_index);
             },
             "set" => {
-
                 if args.len() > 1{
-
                     match args[0]{
                         "redscore" =>{
 
@@ -651,7 +243,6 @@ impl HQMServer {
                             if input_score >= 0{
                                 self.set_score(HQMTeam::Red,input_score as u32,player_index)
                             }
-
                         },
                         "bluescore" =>{
                             let input_score = match args[1].parse::<i32>() {
@@ -672,7 +263,6 @@ impl HQMServer {
                             if input_period >= 0{
                                 self.set_period(input_period as u32,player_index)
                             }
-
                         },
                         "clock" =>{
 
@@ -699,12 +289,9 @@ impl HQMServer {
                                 }
 
                                 self.set_clock(time_minutes as u32,time_seconds as u32, player_index);
-
                             }
-
                         },
                         "hand" =>{
-
                             match args[1]{
                                 "left" =>{
                                     self.set_hand(HQMSkaterHand::Left, player_index);
@@ -712,18 +299,12 @@ impl HQMServer {
                                 "right" =>{
                                     self.set_hand(HQMSkaterHand::Right, player_index);
                                 },
-                                _=>{
-
-                                }
+                                _=>{}
                             }
-
                         },
-                        _ => {
-
-                        }
+                        _ => {}
                     }
                 }
-
             },
             "sp" => {
                 if args.len() == 1{
@@ -840,7 +421,7 @@ impl HQMServer {
         }
     }
 
-    fn remove_player(&mut self, player_index: usize) {
+    pub(crate) fn remove_player(&mut self, player_index: usize) {
 
         let mut admin_check:bool = false;
 
@@ -902,7 +483,7 @@ impl HQMServer {
 
     }
 
-    fn add_server_chat_message(&mut self, message: String) {
+    pub(crate) fn add_server_chat_message(&mut self, message: String) {
         println!("{}", &message);
         let chat = HQMMessage::Chat {
             player_index: None,
@@ -911,7 +492,7 @@ impl HQMServer {
         self.add_global_message(chat, false);
     }
 
-    fn add_directed_server_chat_message(&mut self, message: String, player_receiving_index: usize) {
+    pub(crate) fn add_directed_server_chat_message(&mut self, message: String, player_receiving_index: usize) {
         println!("{}", &message);
         // This message will only be visible to a single player
         let chat = HQMMessage::Chat {
@@ -961,7 +542,7 @@ impl HQMServer {
         };
     }
 
-    fn add_global_message(&mut self, message: HQMMessage, persistent: bool) {
+    pub(crate) fn add_global_message(&mut self, message: HQMMessage, persistent: bool) {
         let rc = Rc::new(message);
         if persistent {
             self.game.global_messages.push(rc.clone());
@@ -1359,7 +940,7 @@ impl HQMServer {
         let _ = socket.send_to(slice, player.addr).await;
     }
 
-    fn new_game(&mut self) {
+    pub(crate) fn new_game(&mut self) {
         self.game_alloc += 1;
         self.game = HQMGame::new(self.game_alloc, &self.config);
 
@@ -1715,13 +1296,13 @@ async fn notify_master_server(socket: & UdpSocket) -> std::io::Result<usize> {
     socket.send_to(msg, server_addr).await
 }
 
-struct HQMConnectedPlayer {
-    player_name: String,
-    addr: SocketAddr,
+pub(crate) struct HQMConnectedPlayer {
+    pub(crate) player_name: String,
+    pub(crate) addr: SocketAddr,
     client_version: u8,
-    team: HQMTeam,
-    faceoff_position_index: usize,
-    skater: Option<usize>,
+    pub(crate) team: HQMTeam,
+    pub(crate) faceoff_position_index: usize,
+    pub(crate) skater: Option<usize>,
     game_id: u32,
     input: HQMPlayerInput,
     packet: u32,
@@ -1729,9 +1310,9 @@ struct HQMConnectedPlayer {
     chat_rep: u32,
     messages: Vec<Rc<HQMMessage>>,
     inactivity: u32,
-    is_admin: bool,
-    is_muted:bool,
-    team_switch_timer: u32,
+    pub(crate) is_admin: bool,
+    pub(crate) is_muted:bool,
+    pub(crate) team_switch_timer: u32,
     hand: HQMSkaterHand,
     deltatime: u32
 }
