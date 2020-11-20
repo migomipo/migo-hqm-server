@@ -1072,7 +1072,8 @@ impl HQMServer {
                             player_index,
                             object_index: player.skater,
                             in_server: true
-                        })
+                        });
+                        println! ("{} {}", player_index, player.team);
                     }
                 } else if player.input.spectate() && player.team != HQMTeam::Spec {
                     player.team = HQMTeam::Spec;
@@ -1111,14 +1112,14 @@ impl HQMServer {
     async fn tick(&mut self, socket: & UdpSocket, write_buf: & mut [u8]) {
         if self.player_count() != 0 {
             self.game.active = true;
-            self.remove_inactive_players ();
+            self.remove_inactive_players (); // connected players and objects
             self.move_players_between_teams();
             self.copy_player_input_to_object();
             let events = self.game.world.simulate_step();
             self.handle_events(events);
             self.update_clock();
 
-            self.update_game_state();
+            self.game.update_game_state();
 
             let packets = get_packets(& self.game.world.objects);
 
@@ -1570,36 +1571,6 @@ impl HQMServer {
 
         for message in messages {
             self.add_global_message(message, true);
-        }
-
-    }
-
-    fn update_game_state(&mut self){
-
-        if !self.game.paused {
-
-            if self.game.period == 0 {
-                self.game.state = HQMGameState::Warmup;
-            } else {
-                self.game.state = HQMGameState::Game;
-            }
-
-            if self.game.intermission > 0 {
-                self.game.state = HQMGameState::Intermission;
-            }
-
-            if self.game.timeout > 0 {
-                self.game.state = HQMGameState::Timeout;
-            }
-
-            if self.game.game_over {
-                self.game.state = HQMGameState::GameOver;
-            }
-
-
-
-        } else{
-            self.game.state = HQMGameState::Paused;
         }
 
     }

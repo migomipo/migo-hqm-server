@@ -91,6 +91,30 @@ impl HQMGame {
             active: false,
         }
     }
+
+    pub(crate) fn update_game_state(&mut self){
+        if !self.paused {
+            if self.period == 0 {
+                self.state = HQMGameState::Warmup;
+            } else {
+                self.state = HQMGameState::Game;
+            }
+
+            if self.intermission > 0 {
+                self.state = HQMGameState::Intermission;
+            }
+
+            if self.timeout > 0 {
+                self.state = HQMGameState::Timeout;
+            }
+
+            if self.game_over {
+                self.state = HQMGameState::GameOver;
+            }
+        } else {
+            self.state = HQMGameState::Paused;
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -482,9 +506,6 @@ impl Display for HQMGameState {
         }
     }
 }
-
-
-
 
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
