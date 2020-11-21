@@ -454,8 +454,6 @@ fn do_puck_post_forces(puck: & mut HQMPuck, rink: & HQMRink, puck_vertices: & Ve
             for post in net.posts.iter() {
                 let broad_check = collision_between_sphere_and_post(&puck.body.pos, 2.0 * puck.radius, post).is_some();
                 if broad_check {
-                    let puck_linear_velocity = puck.body.linear_velocity.clone_owned();
-                    let puck_angular_velocity = puck.body.angular_velocity.clone_owned();
                     for puck_vertex in puck_vertices.iter() {
                         let collision = collision_between_puck_vertex_and_post(&puck.body.pos, puck_vertex, post);
                         if let Some((overlap, normal)) = collision {
