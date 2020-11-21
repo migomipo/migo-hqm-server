@@ -985,7 +985,7 @@ impl HQMServer {
         for i in 0..self.config.warmup_pucks {
             let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, self.game.world.rink.length / 2.0);
             let rot = Matrix3::identity();
-            self.game.world.create_puck_object(pos, rot);
+            self.game.world.create_puck_object(pos, rot, self.config.cylinder_puck_post_collision);
         }
 
         let mut messages = Vec::new();
@@ -1140,7 +1140,7 @@ impl HQMServer {
         let mid = Point3::new (self.game.world.rink.width / 2.0, 0.0, self.game.world.rink.length / 2.0);
 
         self.game.world.objects = vec![HQMGameObject::None; 32];
-        self.game.world.create_puck_object(Point3::new (mid.x, 1.5, mid.z), Matrix3::identity());
+        self.game.world.create_puck_object(Point3::new (mid.x, 1.5, mid.z), Matrix3::identity(), self.config.cylinder_puck_post_collision);
 
         let mut messages = Vec::new();
 
@@ -1406,5 +1406,6 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) entry_point_red: Vector3<f32>,
     pub(crate) entry_point_blue: Vector3<f32>,
     pub(crate) entry_rotation_red: f32,
-    pub(crate) entry_rotation_blue: f32
+    pub(crate) entry_rotation_blue: f32,
+    pub(crate) cylinder_puck_post_collision: bool
 }

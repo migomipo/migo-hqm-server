@@ -86,6 +86,11 @@ async fn main() -> std::io::Result<()> {
             None => false
         };
 
+        let cylinder_puck_post_collision = match game_section.get("cylinder_puck_post_collision") {
+            Some(s) => s.eq_ignore_ascii_case("true"),
+            None => false
+        };
+
         // Roles
         let roles_section = conf.section(Some("Roles")).unwrap();
         for (k, v) in roles_section.iter() {
@@ -124,6 +129,7 @@ async fn main() -> std::io::Result<()> {
             warmup_pucks,
             force_team_size_parity,
             limit_jump_speed,
+            cylinder_puck_post_collision,
 
             entry_point_red:red_game_entry_offset,
             entry_rotation_red:red_game_entry_rotation,
