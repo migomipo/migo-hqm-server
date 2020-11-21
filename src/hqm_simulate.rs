@@ -459,7 +459,7 @@ fn do_puck_post_forces(puck: & mut HQMPuck, rink: & HQMRink, puck_vertices: & Ve
                         if let Some((overlap, normal)) = collision {
                             let puck_vertex_speed = speed_of_point_including_rotation(&puck_vertex, & puck.body.pos, &puck_linear_velocity, &puck_angular_velocity);
 
-                            let mut puck_force = (normal.scale(overlap * 0.5) - puck_vertex_speed).scale(0.125);
+                            let mut puck_force = (normal.scale(overlap * 0.5) - puck_vertex_speed).scale(0.125 * 0.5);
                             if puck_force.dot(&normal) > 0.0 {
                                 limit_rejection(& mut puck_force, &normal, 0.5);
                                 apply_acceleration_to_object(& mut puck.body, &puck_force, & puck_vertex);
