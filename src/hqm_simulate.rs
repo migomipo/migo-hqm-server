@@ -16,7 +16,6 @@ enum HQMCollision {
 pub enum HQMSimulationEvent {
     PuckEnteredNet {
         team: HQMTeam,
-        net: usize,
         puck: usize
     },
     PuckPassedGoalLine {
@@ -39,14 +38,6 @@ pub enum HQMSimulationEvent {
         team: HQMTeam,
         puck: usize
     },
-    PlayerEnteredOffensiveZone {
-        team: HQMTeam,
-        player: usize,
-    },
-    PlayerLeftOffensiveZone {
-        team: HQMTeam,
-        player: usize,
-    }
 
 }
 
@@ -66,7 +57,6 @@ impl HQMGameWorld {
 
         let mut collisions = vec![];
         for (i, player) in players.iter_mut().enumerate() {
-            let old_player_pos = player.body.pos.clone ();
             update_player(player, self.gravity, self.limit_jump_speed);
 
             for (ib, collision_ball) in player.collision_balls.iter().enumerate() {
@@ -80,24 +70,6 @@ impl HQMGameWorld {
 
             update_player2(player);
             update_stick(player, &linear_velocity_before, &angular_velocity_before, & self.rink);
-            for (team, line) in self.rink.blue_lines.iter() {
-                let old_dot = (&old_player_pos - &line.point).dot (&line.normal);
-                let new_dot = (&player.body.pos - &line.point).dot (&line.normal);
-                let leading_edge = -(line.width/2.0);
-                if new_dot < leading_edge && old_dot >= leading_edge {
-                    let event = HQMSimulationEvent::PlayerEnteredOffensiveZone {
-                        team: *team,
-                        player: player.index
-                    };
-                    events.push (event);
-                } else if new_dot > leading_edge && old_dot < leading_edge {
-                    let event = HQMSimulationEvent::PlayerLeftOffensiveZone {
-                        team: *team,
-                        player: player.index
-                    };
-                    events.push (event);
-                }
-            }
         }
 
         for i in 0..players.len() {
@@ -453,27 +425,33 @@ fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: & Vec<HQMC
 }
 
 fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<f32>, rink: & HQMRink, events: & mut Vec<HQMSimulationEvent>) {
-    for (team, line) in rink.mid_lines.iter() {
+    for (team, line) in vec![
+        (HQMTeam::Red, & rink.red_lines_and_net.mid_line),
+        (HQMTeam::Blue, & rink.blue_lines_and_net.mid_line)
+    ] {
         let old_dot = (old_puck_pos - &line.point).dot (&line.normal);
         let new_dot = (&puck.body.pos - &line.point).dot (&line.normal);
         let edge = (line.width / 2.0) + puck.radius;
         if new_dot < edge && old_dot >= edge {
             let event = HQMSimulationEvent::PuckEnteredOtherHalf {
-                team: *team,
+                team,
                 puck: puck_index
             };
             events.push(event);
         }
 
     }
-    for (team, line) in rink.blue_lines.iter() {
+    for (team, line) in vec![
+        (HQMTeam::Red, & rink.red_lines_and_net.offensive_line),
+        (HQMTeam::Blue, & rink.blue_lines_and_net.offensive_line)
+    ] {
         let old_dot = (old_puck_pos - &line.point).dot (&line.normal);
         let new_dot = (&puck.body.pos - &line.point).dot (&line.normal);
 
         let edge1 = (line.width / 2.0) + puck.radius;
         if new_dot > edge1 && old_dot <= edge1 {
             let event = HQMSimulationEvent::PuckLeftOffensiveZone {
-                team: *team,
+                team,
                 puck: puck_index
             };
             events.push(event);
@@ -481,28 +459,31 @@ fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<
             let edge2 = -(line.width / 2.0) - puck.radius;
             if new_dot < edge2 && old_dot >= edge2 {
                 let event = HQMSimulationEvent::PuckEnteredOffensiveZone {
-                    team: *team,
+                    team,
                     puck: puck_index
                 };
                 events.push(event);
             }
         }
     }
-    for (net_index, net) in rink.nets.iter().enumerate() {
+
+    for (team, net) in vec![
+        (HQMTeam::Red, & rink.red_lines_and_net.net),
+        (HQMTeam::Blue, & rink.blue_lines_and_net.net)
+    ] {
         if (&net.left_post - &puck.body.pos).dot(&net.normal) >= 0.0 {
             if (&net.left_post - old_puck_pos).dot(&net.normal) < 0.0 {
                 if (&net.left_post - &puck.body.pos).dot(&net.left_post_inside) < 0.0 &&
                     (&net.right_post - &puck.body.pos).dot(&net.right_post_inside) < 0.0
                     && puck.body.pos.y < 1.0 {
                     let event = HQMSimulationEvent::PuckEnteredNet {
-                        team: net.team,
-                        net: net_index,
+                        team,
                         puck: puck_index
                     };
                     events.push(event);
                 } else {
                     let event = HQMSimulationEvent::PuckPassedGoalLine {
-                        team: net.team,
+                        team,
                         puck: puck_index
                     };
                     events.push(event);
@@ -515,7 +496,10 @@ fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<
 
 fn do_puck_post_forces(puck: & mut HQMPuck, rink: & HQMRink, puck_vertices: & Vec<Point3<f32>>, puck_linear_velocity: & Vector3<f32>, puck_angular_velocity: & Vector3<f32>) {
     if !puck.cylinder_puck_post_collision {
-        for net in rink.nets.iter() {
+        for net in vec![
+            (& rink.red_lines_and_net.net),
+            (& rink.blue_lines_and_net.net)
+        ] {
             for post in net.posts.iter() {
                 let collision = collision_between_sphere_and_post(&puck.body.pos, puck.radius, post);
                 if let Some((overlap, normal)) = collision {
@@ -531,7 +515,10 @@ fn do_puck_post_forces(puck: & mut HQMPuck, rink: & HQMRink, puck_vertices: & Ve
             }
         }
     } else {
-        for net in rink.nets.iter() {
+        for net in vec![
+            (& rink.red_lines_and_net.net),
+            (& rink.blue_lines_and_net.net)
+        ] {
             for post in net.posts.iter() {
                 let broad_check = collision_between_sphere_and_post(&puck.body.pos, 2.0 * puck.radius, post).is_some();
                 if broad_check {
@@ -624,7 +611,10 @@ fn inside_surface(pos: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3
 fn collision_between_sphere_and_nets(pos: &Point3<f32>, radius: f32, rink: & HQMRink) -> Option<(Point3<f32>, f32, Vector3<f32>)> {
     let mut max_overlap = 0.0;
     let mut res: Option<(Point3<f32>, f32, Vector3<f32>)> = None;
-    for net in rink.nets.iter() {
+    for net in vec![
+        (& rink.red_lines_and_net.net),
+        (& rink.blue_lines_and_net.net)
+    ] {
         for surface in net.surfaces.iter() {
             let normal = (&surface.3 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
 

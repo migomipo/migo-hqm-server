@@ -38,10 +38,20 @@ impl HQMGameWorld {
     }
 }
 
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub(crate) enum HQMIcingStatus {
+    No,
+    NotTouched,
+    Warning,
+    Icing
+}
+
 pub(crate) struct HQMGame {
 
     pub(crate) state: HQMGameState,
     pub(crate) rules_state: HQMRulesState,
+    pub(crate) red_icing_status: HQMIcingStatus,
+    pub(crate) blue_icing_status: HQMIcingStatus,
     pub(crate) world: HQMGameWorld,
     pub(crate) global_messages: Vec<Rc<HQMMessage>>,
     pub(crate) red_score: u32,
@@ -69,6 +79,8 @@ impl HQMGame {
         HQMGame {
             state:HQMGameState::Warmup,
             rules_state:HQMRulesState::None,
+            red_icing_status: HQMIcingStatus::No,
+            blue_icing_status: HQMIcingStatus::No,
             world: HQMGameWorld {
                 objects: object_vec,
                 rink: HQMRink::new(30.0, 61.0, 8.5),
@@ -134,7 +146,7 @@ impl HQMRinkLine {
             HQMTeam::Blue => -Vector3::z(),
             _ => panic!()
         };
-        let point = midline_point - 8.8*normal;
+        let point = midline_point - 8.883333*normal;
         HQMRinkLine {
             point,
             width: 0.3,
@@ -161,7 +173,6 @@ impl HQMRinkLine {
 
 #[derive(Debug, Clone)]
 pub(crate) struct HQMRinkNet {
-    pub(crate) team: HQMTeam,
     pub(crate) posts: Vec<(Point3<f32>, Point3<f32>, f32)>,
     pub(crate) surfaces: Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)>,
     pub(crate) left_post: Point3<f32>,
@@ -176,8 +187,8 @@ impl HQMRinkNet {
         let mid_x = rink_width / 2.0;
 
         let (pos, rot) = match team {
-            HQMTeam::Blue => (Point3::new (mid_x, 0.0, 3.5), Matrix3::identity()),
-            HQMTeam::Red => (Point3::new (mid_x, 0.0, rink_length - 3.5), Matrix3::from_columns (& [-Vector3::x(), Vector3::y(), -Vector3::z()])),
+            HQMTeam::Red => (Point3::new (mid_x, 0.0, 3.5), Matrix3::identity()),
+            HQMTeam::Blue => (Point3::new (mid_x, 0.0, rink_length - 3.5), Matrix3::from_columns (& [-Vector3::x(), Vector3::y(), -Vector3::z()])),
             _ => panic!()
         };
         let (front_upper_left, front_upper_right, front_lower_left, front_lower_right,
@@ -194,7 +205,6 @@ impl HQMRinkNet {
             );
 
         HQMRinkNet {
-            team,
             posts: vec![
                 (front_lower_right.clone(), front_upper_right.clone(), 0.1875),
                 (front_lower_left.clone(), front_upper_left.clone(), 0.1875),
@@ -232,12 +242,18 @@ impl HQMRinkNet {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct LinesAndNet {
+    pub(crate) net: HQMRinkNet,
+    pub(crate) mid_line: HQMRinkLine,
+    pub(crate) offensive_line: HQMRinkLine
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct HQMRink {
     pub(crate) planes: Vec<(Point3<f32>, Vector3<f32>)>,
     pub(crate) corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
-    pub(crate) nets: Vec<HQMRinkNet>,
-    pub(crate) blue_lines: Vec<(HQMTeam, HQMRinkLine)>,
-    pub(crate) mid_lines: Vec<(HQMTeam, HQMRinkLine)>,
+    pub(crate) red_lines_and_net: LinesAndNet,
+    pub(crate) blue_lines_and_net: LinesAndNet,
     pub(crate) width:f32,
     pub(crate) length:f32
 }
@@ -271,11 +287,16 @@ impl HQMRink {
         HQMRink {
             planes,
             corners,
-            nets: vec![red_net, blue_net],
-            blue_lines: vec![(HQMTeam::Red, red_blueline),
-                             (HQMTeam::Blue, blue_blueline)],
-            mid_lines: vec![(HQMTeam::Red, red_midline),
-                            (HQMTeam::Blue, blue_midline)],
+            red_lines_and_net: LinesAndNet {
+                net: red_net,
+                offensive_line: red_blueline,
+                mid_line: red_midline
+            },
+            blue_lines_and_net: LinesAndNet {
+                net: blue_net,
+                offensive_line: blue_blueline,
+                mid_line: blue_midline
+            },
             width,
             length
         }

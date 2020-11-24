@@ -6,7 +6,7 @@ extern crate ini;
 use ini::Ini;
 use std::env;
 use crate::hqm_game::HQMFaceoffPosition;
-use crate::hqm_server::{HQMServer, HQMServerConfiguration};
+use crate::hqm_server::{HQMServer, HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration};
 
 mod hqm_parse;
 mod hqm_simulate;
@@ -91,6 +91,17 @@ async fn main() -> std::io::Result<()> {
             None => false
         };
 
+        let icing = game_section.get("icing").map_or(HQMIcingConfiguration::Off, |x| match x {
+            "on" | "touch" => HQMIcingConfiguration::Touch,
+            "notouch" => HQMIcingConfiguration::NoTouch,
+            _ => HQMIcingConfiguration::Off
+        });
+
+        let offside = game_section.get("offside").map_or(HQMOffsideConfiguration::Off, |x| match x {
+            "on" => HQMOffsideConfiguration::On,
+            _ => HQMOffsideConfiguration::Off
+        });
+
         // Roles
         let roles_section = conf.section(Some("Roles")).unwrap();
         for (k, v) in roles_section.iter() {
@@ -126,6 +137,8 @@ async fn main() -> std::io::Result<()> {
             time_period: rules_time_period, 
             time_warmup: rules_time_warmup, 
             time_intermission: rules_time_intermission,
+            icing,
+            offside,
             warmup_pucks,
             force_team_size_parity,
             limit_jump_speed,

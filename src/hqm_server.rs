@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::hqm_parse::{HQMClientParser, HQMServerWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
-use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMFaceoffPosition};
+use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMFaceoffPosition, HQMIcingStatus};
 use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::collections::HashSet;
@@ -758,17 +758,17 @@ impl HQMServer {
         for event in events {
             match event {
                 HQMSimulationEvent::PuckEnteredNet {
-                    team, net: _, puck
+                    team, puck
                 } => {
                     if self.game.period > 0 &&
                         self.game.time > 0 &&
                         self.game.timeout == 0 {
                         let scoring_team = if team == HQMTeam::Red {
-                            self.game.blue_score += 1;
-                            HQMTeam::Blue
-                        } else if team == HQMTeam::Blue {
                             self.game.red_score += 1;
                             HQMTeam::Red
+                        } else if team == HQMTeam::Blue {
+                            self.game.blue_score += 1;
+                            HQMTeam::Blue
                         } else {
                             panic!();
                         };
@@ -827,12 +827,59 @@ impl HQMServer {
                                 this_puck.last_player_index[0] = Some(this_connected_player_index);
                             }
                         }
+                        if let Some(player) = & self.players[this_connected_player_index] {
+                            let team = player.team;
+                            let red_icing_status = & mut self.game.red_icing_status;
+                            let blue_icing_status = & mut self.game.blue_icing_status;
+                            let (icing_status, other_icing_status) = match team {
+                                HQMTeam::Red => (red_icing_status, blue_icing_status),
+                                HQMTeam::Blue => (blue_icing_status, red_icing_status),
+                                _ => panic!()
+                            };
+
+                            if (*icing_status == HQMIcingStatus::NotTouched) || (*icing_status == HQMIcingStatus::Warning) {
+                                *icing_status = HQMIcingStatus::No
+                            } else if *other_icing_status == HQMIcingStatus::Warning {
+                                *icing_status = HQMIcingStatus::Icing
+                            }
+                        }
                     }
-
                 },
-                _ => {
+                HQMSimulationEvent::PuckEnteredOtherHalf {
+                    team, ..
+                } => {
+                    let icing_status = match team {
+                        HQMTeam::Red => & mut self.game.red_icing_status,
+                        HQMTeam::Blue => & mut self.game.blue_icing_status,
+                        _ => panic!()
+                    };
+                    if *icing_status == HQMIcingStatus::No {
+                        *icing_status = HQMIcingStatus::NotTouched
+                    }
+                },
+                HQMSimulationEvent::PuckPassedGoalLine {
+                    team, ..
+                } => {
+                    let icing_status = match team {
+                        HQMTeam::Red => & mut self.game.red_icing_status,
+                        HQMTeam::Blue => & mut self.game.blue_icing_status,
+                        _ => panic!()
+                    };
+                    if *icing_status == HQMIcingStatus::NotTouched {
+                        match self.config.icing {
+                            HQMIcingConfiguration::Touch => {
+                                *icing_status = HQMIcingStatus::Warning
+                            }
+                            HQMIcingConfiguration::NoTouch => {
+                                *icing_status = HQMIcingStatus::Icing
+                            }
+                            HQMIcingConfiguration::Off => {
 
-                }
+                            }
+                        }
+                    }
+                },
+                _ => {}
             }
         }
     }
@@ -1189,6 +1236,9 @@ impl HQMServer {
             }
         }
 
+        self.game.red_icing_status = HQMIcingStatus::No;
+        self.game.blue_icing_status = HQMIcingStatus::No;
+
         for message in messages {
             self.add_global_message(message, true);
         }
@@ -1386,6 +1436,18 @@ impl HQMConnectedPlayer {
     }
 }
 
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum HQMIcingConfiguration {
+    Off,
+    Touch,
+    NoTouch
+}
+
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum HQMOffsideConfiguration {
+    Off,
+    On
+}
 
 pub(crate) struct HQMServerConfiguration {
     pub(crate) server_name: String,
@@ -1401,6 +1463,8 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) time_period: u32,
     pub(crate) time_warmup: u32,
     pub(crate) time_intermission: u32,
+    pub(crate) offside: HQMOffsideConfiguration,
+    pub(crate) icing: HQMIcingConfiguration,
     pub(crate) warmup_pucks: u32,
     pub(crate) limit_jump_speed: bool,
 
