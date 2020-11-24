@@ -118,6 +118,48 @@ impl HQMGame {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct HQMRinkLine {
+    pub(crate) point: Point3<f32>,
+    pub(crate) width: f32,
+    pub(crate) normal: Vector3<f32>,
+}
+
+impl HQMRinkLine {
+    fn new_blueline(team: HQMTeam, rink_length: f32) -> Self {
+        let mid_z = rink_length / 2.0;
+        let midline_point = Point3::new(0.0, 0.0, mid_z);
+
+        let normal = match team {
+            HQMTeam::Red => Vector3::z(),
+            HQMTeam::Blue => -Vector3::z(),
+            _ => panic!()
+        };
+        let point = midline_point - 8.8*normal;
+        HQMRinkLine {
+            point,
+            width: 0.3,
+            normal
+        }
+    }
+
+    fn new_midline(team: HQMTeam, rink_length: f32) -> Self {
+        let mid_z = rink_length / 2.0;
+        let point = Point3::new(0.0, 0.0, mid_z);
+        let normal = match team {
+            HQMTeam::Red => Vector3::z(),
+            HQMTeam::Blue => -Vector3::z(),
+            _ => panic!()
+        };
+        HQMRinkLine {
+            point,
+            width: 0.3,
+            normal
+        }
+    }
+}
+
+
+#[derive(Debug, Clone)]
 pub(crate) struct HQMRinkNet {
     pub(crate) team: HQMTeam,
     pub(crate) posts: Vec<(Point3<f32>, Point3<f32>, f32)>,
@@ -194,6 +236,8 @@ pub(crate) struct HQMRink {
     pub(crate) planes: Vec<(Point3<f32>, Vector3<f32>)>,
     pub(crate) corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
     pub(crate) nets: Vec<HQMRinkNet>,
+    pub(crate) blue_lines: Vec<(HQMTeam, HQMRinkLine)>,
+    pub(crate) mid_lines: Vec<(HQMTeam, HQMRinkLine)>,
     pub(crate) width:f32,
     pub(crate) length:f32
 }
@@ -220,10 +264,18 @@ impl HQMRink {
         ];
         let red_net = HQMRinkNet::new(HQMTeam::Red, width, length);
         let blue_net = HQMRinkNet::new(HQMTeam::Blue, width, length);
+        let red_blueline = HQMRinkLine::new_blueline(HQMTeam::Red, length);
+        let blue_blueline = HQMRinkLine::new_blueline(HQMTeam::Blue, length);
+        let red_midline = HQMRinkLine::new_midline(HQMTeam::Red, length);
+        let blue_midline = HQMRinkLine::new_midline(HQMTeam::Blue, length);
         HQMRink {
             planes,
             corners,
             nets: vec![red_net, blue_net],
+            blue_lines: vec![(HQMTeam::Red, red_blueline),
+                             (HQMTeam::Blue, blue_blueline)],
+            mid_lines: vec![(HQMTeam::Red, red_midline),
+                            (HQMTeam::Blue, blue_midline)],
             width,
             length
         }

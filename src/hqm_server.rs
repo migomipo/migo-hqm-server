@@ -757,7 +757,7 @@ impl HQMServer {
     fn handle_events (& mut self, events: Vec<HQMSimulationEvent>) {
         for event in events {
             match event {
-                HQMSimulationEvent::EnteredNet {
+                HQMSimulationEvent::PuckEnteredNet {
                     team, net: _, puck
                 } => {
                     if self.game.period > 0 &&
@@ -811,7 +811,7 @@ impl HQMServer {
 
                     }
                 },
-                HQMSimulationEvent::Touch {
+                HQMSimulationEvent::PuckTouch {
                     player, puck
                 } => {
                     // Get connected player index from skater
@@ -828,6 +828,9 @@ impl HQMServer {
                             }
                         }
                     }
+
+                },
+                _ => {
 
                 }
             }

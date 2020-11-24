@@ -12,16 +12,42 @@ enum HQMCollision {
     PlayerPlayer((usize, usize), (usize, usize), f32, Vector3<f32>)
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum HQMSimulationEvent {
-    EnteredNet {
+    PuckEnteredNet {
         team: HQMTeam,
         net: usize,
         puck: usize
     },
-    Touch {
+    PuckPassedGoalLine {
+        team: HQMTeam,
+        puck: usize
+    },
+    PuckTouch {
         player: usize,
         puck: usize
+    },
+    PuckEnteredOffensiveZone {
+        team: HQMTeam,
+        puck: usize
+    },
+    PuckEnteredOtherHalf {
+        team: HQMTeam,
+        puck: usize
+    },
+    PuckLeftOffensiveZone {
+        team: HQMTeam,
+        puck: usize
+    },
+    PlayerEnteredOffensiveZone {
+        team: HQMTeam,
+        player: usize,
+    },
+    PlayerLeftOffensiveZone {
+        team: HQMTeam,
+        player: usize,
     }
+
 }
 
 impl HQMGameWorld {
@@ -40,6 +66,7 @@ impl HQMGameWorld {
 
         let mut collisions = vec![];
         for (i, player) in players.iter_mut().enumerate() {
+            let old_player_pos = player.body.pos.clone ();
             update_player(player, self.gravity, self.limit_jump_speed);
 
             for (ib, collision_ball) in player.collision_balls.iter().enumerate() {
@@ -53,6 +80,24 @@ impl HQMGameWorld {
 
             update_player2(player);
             update_stick(player, &linear_velocity_before, &angular_velocity_before, & self.rink);
+            for (team, line) in self.rink.blue_lines.iter() {
+                let old_dot = (&old_player_pos - &line.point).dot (&line.normal);
+                let new_dot = (&player.body.pos - &line.point).dot (&line.normal);
+                let leading_edge = -(line.width/2.0);
+                if new_dot < leading_edge && old_dot >= leading_edge {
+                    let event = HQMSimulationEvent::PlayerEnteredOffensiveZone {
+                        team: *team,
+                        player: player.index
+                    };
+                    events.push (event);
+                } else if new_dot > leading_edge && old_dot < leading_edge {
+                    let event = HQMSimulationEvent::PlayerLeftOffensiveZone {
+                        team: *team,
+                        player: player.index
+                    };
+                    events.push (event);
+                }
+            }
         }
 
         for i in 0..players.len() {
@@ -104,7 +149,7 @@ impl HQMGameWorld {
             if puck.body.angular_velocity.norm() > 1.0/65536.0 {
                 rotate_matrix_around_axis(& mut puck.body.rot, &puck.body.angular_velocity.normalize(), puck.body.angular_velocity.norm())
             }
-            puck_goal_detection(puck, puck.index, &old_puck_pos, & self.rink, & mut events);
+            puck_detection(puck, puck.index, &old_puck_pos, & self.rink, & mut events);
         }
 
         apply_collisions (& mut players, & collisions);
@@ -134,7 +179,7 @@ fn update_sticks_and_pucks (players: & mut Vec<& mut HQMSkater>,
                 if (&puck.body.pos - &player.stick_pos).norm() < 1.0 {
                     let has_touched = do_puck_stick_forces(puck, player, & puck_vertices, &puck_linear_velocity_before, &puck_angular_velocity_before, &old_stick_velocity);
                     if has_touched {
-                        events.push(HQMSimulationEvent::Touch {
+                        events.push(HQMSimulationEvent::PuckTouch {
                             puck: puck.index,
                             player: player.index,
                         })
@@ -407,27 +452,63 @@ fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: & Vec<HQMC
     }
 }
 
-fn puck_goal_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<f32>, rink: & HQMRink, events: & mut Vec<HQMSimulationEvent>) {
+fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<f32>, rink: & HQMRink, events: & mut Vec<HQMSimulationEvent>) {
+    for (team, line) in rink.mid_lines.iter() {
+        let old_dot = (old_puck_pos - &line.point).dot (&line.normal);
+        let new_dot = (&puck.body.pos - &line.point).dot (&line.normal);
+        let edge = (line.width / 2.0) + puck.radius;
+        if new_dot < edge && old_dot >= edge {
+            let event = HQMSimulationEvent::PuckEnteredOtherHalf {
+                team: *team,
+                puck: puck_index
+            };
+            events.push(event);
+        }
+
+    }
+    for (team, line) in rink.blue_lines.iter() {
+        let old_dot = (old_puck_pos - &line.point).dot (&line.normal);
+        let new_dot = (&puck.body.pos - &line.point).dot (&line.normal);
+
+        let edge1 = (line.width / 2.0) + puck.radius;
+        if new_dot > edge1 && old_dot <= edge1 {
+            let event = HQMSimulationEvent::PuckLeftOffensiveZone {
+                team: *team,
+                puck: puck_index
+            };
+            events.push(event);
+        } else {
+            let edge2 = -(line.width / 2.0) - puck.radius;
+            if new_dot < edge2 && old_dot >= edge2 {
+                let event = HQMSimulationEvent::PuckEnteredOffensiveZone {
+                    team: *team,
+                    puck: puck_index
+                };
+                events.push(event);
+            }
+        }
+    }
     for (net_index, net) in rink.nets.iter().enumerate() {
         if (&net.left_post - &puck.body.pos).dot(&net.normal) >= 0.0 {
             if (&net.left_post - old_puck_pos).dot(&net.normal) < 0.0 {
                 if (&net.left_post - &puck.body.pos).dot(&net.left_post_inside) < 0.0 &&
                     (&net.right_post - &puck.body.pos).dot(&net.right_post_inside) < 0.0
                     && puck.body.pos.y < 1.0 {
-                    let event = HQMSimulationEvent::EnteredNet {
+                    let event = HQMSimulationEvent::PuckEnteredNet {
                         team: net.team,
                         net: net_index,
                         puck: puck_index
                     };
                     events.push(event);
-                    //println! ("Puck entered net");
-                } /*else {
-                    println! ("Puck passed behind goal plane");
-                } */
+                } else {
+                    let event = HQMSimulationEvent::PuckPassedGoalLine {
+                        team: net.team,
+                        puck: puck_index
+                    };
+                    events.push(event);
+                }
             }
-        } /*else if (&net.left_post - old_puck_pos).dot(&net.normal) >= 0.0 {
-            println! ("Puck passed in front of goal plane");
-        }*/
+        }
 
     }
 }
