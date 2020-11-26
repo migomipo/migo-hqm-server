@@ -98,7 +98,8 @@ async fn main() -> std::io::Result<()> {
         });
 
         let offside = game_section.get("offside").map_or(HQMOffsideConfiguration::Off, |x| match x {
-            "on" => HQMOffsideConfiguration::On,
+            "on" | "delayed" => HQMOffsideConfiguration::Delayed,
+            "immediate" | "imm" => HQMOffsideConfiguration::Immediate,
             _ => HQMOffsideConfiguration::Off
         });
 

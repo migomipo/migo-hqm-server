@@ -128,16 +128,16 @@ impl HQMServer {
                     force_player.skater = None;
                 }
                 let force_player_name = force_player.player_name.clone();
-                let force_player_name_bytes = force_player.player_name.clone().into_bytes();
+                let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
+
                 self.add_global_message(HQMMessage::PlayerUpdate {
-                    player_name: force_player_name_bytes,
+                    player_name: force_player_name,
                     team: HQMTeam::Spec,
                     player_index: force_player_index_number as usize,
                     object_index: None,
                     in_server: true
                 },true);
 
-                let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
                 self.add_server_chat_message(msg);
             }
         }
@@ -358,7 +358,7 @@ impl HQMServer {
     pub(crate) fn faceoff (& mut self, player_index: usize) {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{
-                self.game.timeout = 5*100;
+                self.game.intermission = 5*100;
 
                 let msg = format!("Faceoff initiated by {}",player.player_name);
                 self.add_server_chat_message(msg);

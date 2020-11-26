@@ -40,25 +40,33 @@ impl HQMGameWorld {
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub(crate) enum HQMIcingStatus {
-    No,
-    NotTouched,
-    Warning,
-    Icing
+    No,          // No icing
+    NotTouched,  // Puck has entered offensive half, but not reached the goal line
+    Warning,     // Puck has reached the goal line, delayed icing
+    Icing        // Icing has been called
+}
+
+#[derive(Eq, PartialEq, Debug, Clone)]
+pub(crate) enum HQMOffsideStatus {
+    No,               // No offside
+    Warning,          // Warning, puck is in offensive zone but not touched yet
+    Offside           // Offside has been called
 }
 
 pub(crate) struct HQMGame {
 
     pub(crate) state: HQMGameState,
-    pub(crate) rules_state: HQMRulesState,
     pub(crate) red_icing_status: HQMIcingStatus,
     pub(crate) blue_icing_status: HQMIcingStatus,
+    pub(crate) red_offside_status: HQMOffsideStatus,
+    pub(crate) blue_offside_status: HQMOffsideStatus,
     pub(crate) world: HQMGameWorld,
     pub(crate) global_messages: Vec<Rc<HQMMessage>>,
     pub(crate) red_score: u32,
     pub(crate) blue_score: u32,
     pub(crate) period: u32,
     pub(crate) time: u32,
-    pub(crate) timeout: u32,
+    pub(crate) goal_timer: u32,
     pub(crate) intermission: u32,
     pub(crate) paused: bool,
     pub(crate) game_id: u32,
@@ -78,9 +86,10 @@ impl HQMGame {
 
         HQMGame {
             state:HQMGameState::Warmup,
-            rules_state:HQMRulesState::None,
             red_icing_status: HQMIcingStatus::No,
             blue_icing_status: HQMIcingStatus::No,
+            red_offside_status: HQMOffsideStatus::No,
+            blue_offside_status: HQMOffsideStatus::No,
             world: HQMGameWorld {
                 objects: object_vec,
                 rink: HQMRink::new(30.0, 61.0, 8.5),
@@ -92,7 +101,7 @@ impl HQMGame {
             blue_score: 0,
             period: 0,
             time: 30000,
-            timeout: 0,
+            goal_timer: 0,
             intermission: 0,
             paused: false,
 
@@ -116,7 +125,7 @@ impl HQMGame {
                 self.state = HQMGameState::Intermission;
             }
 
-            if self.timeout > 0 {
+            if self.goal_timer > 0 {
                 self.state = HQMGameState::Timeout;
             }
 
@@ -462,7 +471,7 @@ pub(crate) struct HQMPuck {
     pub(crate) body: HQMBody,
     pub(crate) radius: f32,
     pub(crate) height: f32,
-    pub(crate) last_player_index: [Option<usize>; 4],
+    pub(crate) last_player_index: [Option<(usize, HQMTeam)>; 4],
     pub(crate) cylinder_puck_post_collision: bool
 }
 
@@ -508,7 +517,7 @@ pub(crate) enum HQMGameObject {
 #[derive(Debug, Clone)]
 pub(crate) enum HQMMessage {
     PlayerUpdate {
-        player_name: Vec<u8>,
+        player_name: String,
         team: HQMTeam,
         player_index: usize,
         object_index: Option<usize>,
@@ -521,7 +530,7 @@ pub(crate) enum HQMMessage {
     },
     Chat {
         player_index: Option<usize>,
-        message: Vec<u8>,
+        message: String,
     },
 }
 
@@ -585,40 +594,12 @@ impl Display for HQMGameState {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum HQMRulesState {
-    None,
-    OffsideWarning,
-    IcingWarning,
-    DualWarning,
+    Regular {
+        offside_warning: bool,
+        icing_warning: bool
+    },
     Offside,
     Icing,
-}
-
-impl HQMRulesState {
-    pub(crate) fn update_num(self) -> u32 {
-        match self {
-            HQMRulesState::None => 0,
-            HQMRulesState::OffsideWarning => 1,
-            HQMRulesState::IcingWarning => 2,
-            HQMRulesState::DualWarning => 3,
-            HQMRulesState::Offside => 4,
-            HQMRulesState::Icing => 8,
-
-        }
-    }
-}
-
-impl Display for HQMRulesState {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            HQMRulesState::None => write!(f, "None"),
-            HQMRulesState::OffsideWarning => write!(f, "Offside Warning"),
-            HQMRulesState::IcingWarning => write!(f, "Icing Warning"),
-            HQMRulesState::DualWarning => write!(f, "Offside Warning + Icing Warning"),
-            HQMRulesState::Offside => write!(f, "Offside"),
-            HQMRulesState::Icing => write!(f, "Icing"),
-
-        }
-    }
 }
 
 fn get_position (bits: u32, v: f32) -> u32 {
