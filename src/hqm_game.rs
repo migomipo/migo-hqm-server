@@ -126,7 +126,7 @@ impl HQMGame {
             }
 
             if self.goal_timer > 0 {
-                self.state = HQMGameState::Timeout;
+                self.state = HQMGameState::GoalScored;
             }
 
             if self.game_over {
@@ -384,8 +384,8 @@ impl HQMSkater {
     }
 
     pub(crate) fn get_packet(&self) -> HQMSkaterPacket {
-        let rot = hqm_parse::convert_matrix(31, & self.body.rot);
-        let stick_rot = hqm_parse::convert_matrix(25, & self.stick_rot);
+        let rot = hqm_parse::convert_matrix_to_network(31, & self.body.rot);
+        let stick_rot = hqm_parse::convert_matrix_to_network(25, & self.stick_rot);
 
         HQMSkaterPacket {
             pos: (get_position (17, 1024.0 * self.body.pos.x),
@@ -494,7 +494,7 @@ impl HQMPuck {
     }
 
     pub(crate) fn get_packet(&self) -> HQMPuckPacket {
-        let rot = hqm_parse::convert_matrix(31, & self.body.rot);
+        let rot = hqm_parse::convert_matrix_to_network(31, & self.body.rot);
         HQMPuckPacket {
             pos: (get_position (17, 1024.0 * self.body.pos.x),
                   get_position (17, 1024.0 * self.body.pos.y),
@@ -572,7 +572,7 @@ pub enum HQMGameState {
     Warmup,
     Game,
     Intermission,
-    Timeout,
+    GoalScored,
     Paused,
     GameOver,
 }
@@ -583,7 +583,7 @@ impl Display for HQMGameState {
             HQMGameState::Warmup => write!(f, "Warmup"),
             HQMGameState::Game => write!(f, "Game"),
             HQMGameState::Intermission => write!(f, "Intermission"),
-            HQMGameState::Timeout => write!(f, "Timeout"),
+            HQMGameState::GoalScored => write!(f, "Timeout"),
             HQMGameState::Paused => write!(f, "Paused"),
             HQMGameState::GameOver => write!(f, "Game Over"),
 

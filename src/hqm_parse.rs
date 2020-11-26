@@ -1,14 +1,81 @@
 use std::cmp::min;
 use nalgebra::{Vector3, U1, U3, Matrix3};
 use nalgebra::storage::Storage;
+use std::convert::{TryFrom};
 
-pub fn convert_matrix(n: u8, v: &Matrix3<f32>) -> (u32, u32) {
-    let r1 = convert_rot_row(n, &v.column(1));
-    let r2 = convert_rot_row(n, &v.column(2));
+pub fn convert_matrix_to_network(b: u8, v: &Matrix3<f32>) -> (u32, u32) {
+    let r1 = convert_rot_column_to_network(b, &v.column(1));
+    let r2 = convert_rot_column_to_network(b, &v.column(2));
     (r1, r2)
 }
 
-fn convert_rot_row<S: Storage<f32, U3, U1>>(n: u8, v: &nalgebra::Matrix<f32, U3, U1, S>) -> u32 {
+#[allow(dead_code)]
+pub fn convert_matrix_from_network(b: u8, v1: u32, v2: u32) -> Matrix3<f32>{
+    let r1 = convert_rot_column_from_network(b, v1);
+    let r2 = convert_rot_column_from_network(b, v2);
+    let r0 = r1.cross(&r2);
+    Matrix3::from_columns(&[r0, r1, r2])
+}
+
+#[allow(dead_code)]
+fn convert_rot_column_from_network(b: u8, v: u32) -> Vector3<f32> {
+    let uxp = Vector3::x();
+    let uxn = -uxp;
+    let uyp = Vector3::y();
+    let uyn = -uyp;
+    let uzp = Vector3::z();
+    let uzn = -uzp;
+
+    let a = [
+        [&uyp, &uxp, &uzp],
+        [&uyp, &uzp, &uxn],
+        [&uyp, &uzn, &uxp],
+        [&uyp, &uxn, &uzn],
+        [&uzp, &uxp, &uyn],
+        [&uxn, &uzp, &uyn],
+        [&uxp, &uzn, &uyn],
+        [&uzn, &uxn, &uyn]
+    ];
+
+    let start = v & 7;
+
+    let mut temp1 = a[start as usize][0].clone();
+    let mut temp2 = a[start as usize][1].clone();
+    let mut temp3 = a[start as usize][2].clone();
+    let mut pos = 3;
+    while pos < b {
+        let step = (v >> pos) & 3;
+        let c1 = (temp1 + temp2).normalize();
+        let c2 = (temp2 + temp3).normalize();
+        let c3 = (temp1 + temp2).normalize();
+        match step {
+            0 => {
+                temp2 = c1;
+                temp3 = c3;
+            }
+            1 => {
+                temp1 = c1;
+                temp3 = c2;
+            }
+            2 => {
+                temp1 = c3;
+                temp2 = c2;
+            }
+            3 => {
+                temp1 = c1;
+                temp2 = c2;
+                temp3 = c3;
+            }
+            _ => panic!()
+        }
+
+        pos += 2;
+    }
+    (temp1 + temp2 + temp3).normalize()
+
+}
+
+fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(b: u8, v: &nalgebra::Matrix<f32, U3, U1, S>) -> u32 {
 
     let uxp = Vector3::x();
     let uxn = -uxp;
@@ -42,7 +109,7 @@ fn convert_rot_row<S: Storage<f32, U3, U1>>(n: u8, v: &nalgebra::Matrix<f32, U3,
     let mut temp1 = a[res as usize][0].clone();
     let mut temp2 = a[res as usize][1].clone();
     let mut temp3 = a[res as usize][2].clone();
-    for i in (3..n).step_by(2) {
+    for i in (3..b).step_by(2) {
         let temp4 = (temp1 + temp2).normalize ();
         let temp5 = (temp2 + temp3).normalize ();
         let temp6 = (temp1 + temp3).normalize ();
@@ -74,8 +141,6 @@ fn convert_rot_row<S: Storage<f32, U3, U1>>(n: u8, v: &nalgebra::Matrix<f32, U3,
 
     }
     res
-
-
 }
 
 
@@ -99,13 +164,13 @@ pub struct HQMPuckPacket {
     pub rot: (u32, u32),
 }
 
-pub struct HQMServerWriter<'a> {
+pub struct HQMMessageWriter<'a> {
     buf: &'a mut [u8],
     pos: usize,
     bit_pos: u8,
 }
 
-impl<'a> HQMServerWriter<'a> {
+impl<'a> HQMMessageWriter<'a> {
     pub fn get_slice(&self) -> &[u8] {
         let size = self.get_bytes_written();
         return &self.buf[0..size];
@@ -196,17 +261,17 @@ impl<'a> HQMServerWriter<'a> {
     }
 
     pub fn new(buf: &'a mut [u8]) -> Self {
-        HQMServerWriter { buf, pos: 0, bit_pos: 0 }
+        HQMMessageWriter { buf, pos: 0, bit_pos: 0 }
     }
 }
 
-pub struct HQMClientParser<'a> {
+pub struct HQMMessageReader<'a> {
     buf: &'a [u8],
     pos: usize,
     bit_pos: u8,
 }
 
-impl<'a> HQMClientParser<'a> {
+impl<'a> HQMMessageReader<'a> {
     pub fn read_byte_aligned(&mut self) -> u8 {
         self.align();
         let res = self.buf[self.pos];
@@ -248,6 +313,41 @@ impl<'a> HQMClientParser<'a> {
         return f32::from_bits(i);
     }
 
+    #[allow(dead_code)]
+    pub fn read_pos(&mut self, b: u8, old_value: Option<u32>) -> u32 {
+        let pos_type = self.read_bits(2);
+        match pos_type {
+            0 => {
+                let diff = self.read_bits_signed(3);
+                u32::try_from(diff + i32::try_from(old_value.unwrap()).unwrap()).unwrap()
+            }
+            1 => {
+                let diff = self.read_bits_signed(6);
+                u32::try_from(diff + i32::try_from(old_value.unwrap()).unwrap()).unwrap()
+            },
+            2 => {
+                let diff = self.read_bits_signed(12);
+                u32::try_from(diff + i32::try_from(old_value.unwrap()).unwrap()).unwrap()
+            },
+            3 => {
+                self.read_bits(b)
+            },
+            _ => panic!(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn read_bits_signed(&mut self, b: u8) -> i32 {
+        let a = self.read_bits(b);
+
+        if a >= 1 << (b-1) {
+            (-1 << b) | (a as i32)
+        } else {
+            a as i32
+        }
+
+    }
+
     pub fn read_bits(&mut self, b: u8) -> u32 {
         let mut bits_remaining = b;
         let mut res = 0u32;
@@ -279,7 +379,8 @@ impl<'a> HQMClientParser<'a> {
             self.pos += 1;
         }
     }
+
     pub fn new(buf: &'a [u8]) -> Self {
-        HQMClientParser { buf, pos: 0, bit_pos: 0 }
+        HQMMessageReader { buf, pos: 0, bit_pos: 0 }
     }
 }

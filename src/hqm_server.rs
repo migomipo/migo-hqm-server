@@ -5,7 +5,7 @@ use nalgebra::{Vector3, Point3, Matrix3, Vector2, Rotation3};
 use std::cmp::min;
 use std::time::Duration;
 
-use crate::hqm_parse::{HQMClientParser, HQMServerWriter, HQMObjectPacket};
+use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
 use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMFaceoffPosition, HQMIcingStatus, HQMOffsideStatus, HQMRulesState};
 use tokio::net::UdpSocket;
@@ -30,7 +30,7 @@ pub(crate) struct HQMServer {
 
 impl HQMServer {
     async fn handle_message(&mut self, addr: SocketAddr, socket: & UdpSocket, msg: &[u8], write_buf: & mut [u8]) {
-        let mut parser = HQMClientParser::new(&msg);
+        let mut parser = HQMMessageReader::new(&msg);
         let header = parser.read_bytes_aligned(4);
         if header != GAME_HEADER {
             return;
@@ -55,11 +55,11 @@ impl HQMServer {
         }
     }
 
-    async fn request_info<'a>(&self, socket: & UdpSocket, addr: &SocketAddr, parser: &mut HQMClientParser<'a>, write_buf: & mut [u8]) -> std::io::Result<usize> {
+    async fn request_info<'a>(&self, socket: & UdpSocket, addr: &SocketAddr, parser: &mut HQMMessageReader<'a>, write_buf: & mut [u8]) -> std::io::Result<usize> {
         let _player_version = parser.read_bits(8);
         let ping = parser.read_u32_aligned();
 
-        let mut writer = HQMServerWriter::new(write_buf);
+        let mut writer = HQMMessageWriter::new(write_buf);
         writer.write_bytes_aligned(GAME_HEADER);
         writer.write_byte_aligned(1);
         writer.write_bits(8, 55);
@@ -86,7 +86,7 @@ impl HQMServer {
         player_count
     }
 
-    fn player_update(&mut self, addr: &SocketAddr, parser: &mut HQMClientParser, command: u8) {
+    fn player_update(&mut self, addr: &SocketAddr, parser: &mut HQMMessageReader, command: u8) {
         let current_slot = self.find_player_slot(addr);
         let (player_index, player) = match current_slot {
             Some(x) => {
@@ -167,7 +167,7 @@ impl HQMServer {
         }
     }
 
-    fn player_join(&mut self, addr: &SocketAddr, parser: &mut HQMClientParser) {
+    fn player_join(&mut self, addr: &SocketAddr, parser: &mut HQMMessageReader) {
         let player_count = self.player_count();
         let max_player_count = self.config.player_max;
         if player_count >= max_player_count {
@@ -994,7 +994,7 @@ impl HQMServer {
 
 
     async fn send_update(&self, player: &HQMConnectedPlayer, i: usize, socket: & UdpSocket, packets: &[HQMObjectPacket], write_buf: & mut [u8]) {
-        let mut writer = HQMServerWriter::new(write_buf);
+        let mut writer = HQMMessageWriter::new(write_buf);
 
         let rules_state =
             if self.game.red_offside_status == HQMOffsideStatus::Offside ||
