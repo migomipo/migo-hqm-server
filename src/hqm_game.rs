@@ -6,6 +6,7 @@ use crate::hqm_parse::{HQMSkaterPacket, HQMPuckPacket};
 use std::rc::Rc;
 use crate::hqm_server::HQMServerConfiguration;
 use std::collections::{HashMap, HashSet};
+use std::f32::consts::PI;
 
 pub(crate) struct HQMGameWorld {
     pub(crate) objects: Vec<HQMGameObject>,
@@ -178,6 +179,19 @@ impl HQMRinkLine {
             normal
         }
     }
+
+    pub(crate) fn sphere_reached_line (&self, pos: &Point3<f32>, radius: f32) -> bool {
+        let dot = (pos - &self.point).dot (&self.normal);
+        let edge = self.width / 2.0;
+        dot - radius < edge
+    }
+
+    pub(crate) fn sphere_past_leading_edge (&self, pos: &Point3<f32>, radius: f32) -> bool {
+        let dot = (pos - &self.point).dot (&self.normal);
+        let edge = -(self.width / 2.0);
+        dot + radius < edge
+    }
+
 }
 
 
@@ -571,6 +585,20 @@ impl HQMPuck {
                   get_position (17, 1024.0 * self.body.pos.z)),
             rot
         }
+    }
+
+    pub(crate) fn get_puck_vertices (&self) -> Vec<Point3<f32>> {
+        let mut res = Vec::with_capacity(48);
+        for i in 0..16 {
+
+            let (sin, cos) = ((i as f32)*PI/8.0).sin_cos();
+            for j in -1..=1 {
+                let point = Vector3::new(cos * self.radius, (j as f32)*self.height, sin * self.radius);
+                let point2 = &self.body.rot * point;
+                res.push(&self.body.pos + point2);
+            }
+        }
+        res
     }
 
 }

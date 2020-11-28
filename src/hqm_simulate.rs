@@ -142,7 +142,7 @@ fn update_sticks_and_pucks (players: & mut Vec<& mut HQMSkater>,
 
             let puck_linear_velocity_before = puck.body.linear_velocity.clone_owned();
             let puck_angular_velocity_before = puck.body.angular_velocity.clone_owned();
-            let puck_vertices = get_puck_vertices(&puck.body.pos, &puck.body.rot, puck.height, puck.radius);
+            let puck_vertices = puck.get_puck_vertices();
             if i == 0 {
                 do_puck_rink_forces(puck, & puck_vertices, rink, &puck_linear_velocity_before, &puck_angular_velocity_before);
             }
@@ -429,41 +429,30 @@ fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<
         (HQMTeam::Red, & rink.red_lines_and_net.mid_line),
         (HQMTeam::Blue, & rink.blue_lines_and_net.mid_line)
     ] {
-        let old_dot = (old_puck_pos - &line.point).dot (&line.normal);
-        let new_dot = (&puck.body.pos - &line.point).dot (&line.normal);
-        let edge = (line.width / 2.0) + puck.radius;
-        if new_dot < edge && old_dot >= edge {
+        if line.sphere_reached_line(&puck.body.pos, puck.radius) && !line.sphere_reached_line(&old_puck_pos, puck.radius) {
             let event = HQMSimulationEvent::PuckEnteredOtherHalf {
                 team,
                 puck: puck_index
             };
             events.push(event);
         }
-
     }
     for (team, line) in vec![
         (HQMTeam::Red, & rink.red_lines_and_net.offensive_line),
         (HQMTeam::Blue, & rink.blue_lines_and_net.offensive_line)
     ] {
-        let old_dot = (old_puck_pos - &line.point).dot (&line.normal);
-        let new_dot = (&puck.body.pos - &line.point).dot (&line.normal);
-
-        let edge1 = (line.width / 2.0) + puck.radius;
-        if new_dot > edge1 && old_dot <= edge1 {
+        if !line.sphere_reached_line(&puck.body.pos, puck.radius) && line.sphere_reached_line(old_puck_pos, puck.radius) {
             let event = HQMSimulationEvent::PuckLeftOffensiveZone {
                 team,
                 puck: puck_index
             };
             events.push(event);
-        } else {
-            let edge2 = -(line.width / 2.0) - puck.radius;
-            if new_dot < edge2 && old_dot >= edge2 {
-                let event = HQMSimulationEvent::PuckEnteredOffensiveZone {
-                    team,
-                    puck: puck_index
-                };
-                events.push(event);
-            }
+        } else if line.sphere_past_leading_edge(&puck.body.pos, puck.radius) && !line.sphere_past_leading_edge(old_puck_pos, puck.radius) {
+            let event = HQMSimulationEvent::PuckEnteredOffensiveZone {
+                team,
+                puck: puck_index
+            };
+            events.push(event);
         }
     }
 
@@ -757,20 +746,6 @@ fn collision_between_collision_ball_and_rink(ball: &HQMSkaterCollisionBall, rink
 
 fn collision_between_vertex_and_rink(vertex: &Point3<f32>, rink: & HQMRink) -> Option<(f32, Vector3<f32>)> {
     collision_between_sphere_and_rink(vertex, 0.0, rink)
-}
-
-fn get_puck_vertices (pos: & Point3<f32>, rot: & Matrix3<f32>, height: f32, radius: f32) -> Vec<Point3<f32>> {
-    let mut res = Vec::with_capacity(48);
-    for i in 0..16 {
-
-        let (sin, cos) = ((i as f32)*PI/8.0).sin_cos();
-        for j in -1..=1 {
-            let point = Vector3::new(cos * radius, (j as f32)*height, sin * radius);
-            let point2 = rot * point;
-            res.push(pos + point2);
-        }
-    }
-    res
 }
 
 fn apply_acceleration_to_object(body: & mut HQMBody, change: & Vector3<f32>, point: & Point3<f32>) {
