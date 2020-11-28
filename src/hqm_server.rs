@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
-use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMFaceoffPosition, HQMIcingStatus, HQMOffsideStatus, HQMRulesState};
+use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMIcingStatus, HQMOffsideStatus, HQMRulesState, HQMFaceoffSpot};
 use tokio::net::UdpSocket;
 use std::rc::Rc;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
 
 
@@ -1213,138 +1213,84 @@ impl HQMServer {
 
     }
 
-    fn do_faceoff(&mut self, faceoff_position_index: usize){
+    fn do_faceoff(&mut self, faceoff_spot: &HQMFaceoffSpot){
+        let rink = &self.game.world.rink;
 
-        // For making sure teams have centers
-        let mut red_default_role_found = false;
-        let mut blue_default_role_found = false;
+        let mut red_available_positions = rink.allowed_positions.clone();
+        let mut blue_available_positions = rink.allowed_positions.clone();
+        let mut positions = HashMap::new();
 
-        // Get amount of faceoff positiions, so we don't need to keep calling the function throughout
-        let role_amount = self.config.faceoff_positions.len();
+        for (player_index, player) in self.players.iter().enumerate() {
+            if let Some(player) = player {
+                let available_positions = match player.team {
+                    HQMTeam::Red => & mut red_available_positions,
+                    HQMTeam::Blue => & mut blue_available_positions,
+                    _ => {
+                        continue;
+                    }
+                };
+                if available_positions.contains(&player.faceoff_position) {
+                    positions.insert(player_index, player.faceoff_position.clone());
+                    available_positions.remove(& player.faceoff_position);
+                }
+            }
+        }
+        let c = String::from("C");
+        for (player_index, player) in self.players.iter().enumerate() {
+            if let Some(player) = player {
+                let team = player.team;
+                let available_positions = match team {
+                    HQMTeam::Red => & mut red_available_positions,
+                    HQMTeam::Blue => & mut blue_available_positions,
+                    _ => {
+                        continue;
+                    }
+                };
+                if !positions.contains_key(&player_index) {
 
-        // Make sure positions are good with no doubles (until there are more players than positions to fill)]
-        // Creates a 2 (red,blue) by [amount of positions] boolean array
-        let mut position_filled = vec![vec![0; role_amount]; 2];
-
-        // Keeps track of the amount of players for a team that have been assigned
-        // if this number is higher than the amount of positions/roles, preventing
-        // multiples will be disregarded
-        let mut red_players_found=0;
-        let mut blue_players_found=0;
-
-        // Loop through players
-        for p in self.players.iter_mut() {
-            if let Some(player) = p {
-                if let Some(skater_obj_index) = player.skater {
-                    if let HQMGameObject::Player(_) = & self.game.world.objects[skater_obj_index] {
-
-                        // Check team's "position filled?" array, and if filled, find an untaken position
-                        // otherwise, flip the "position filled?" flag
-                        match player.team {
-                            HQMTeam::Red => {
-                                if position_filled[0][player.faceoff_position_index] == 1 {
-                                    for this_position_index in 0..role_amount {
-                                        if position_filled[0][this_position_index] != 1 {
-                                            position_filled[0][this_position_index]=1;
-                                            player.set_role(this_position_index);
-                                            break;
-                                        }
-                                    }
-                                } else {
-                                    position_filled[0][player.faceoff_position_index] = 1;
-                                }
-                                red_players_found = red_players_found + 1;
-                            },
-                            HQMTeam::Blue => {
-                                if position_filled[1][player.faceoff_position_index] == 1 {
-                                    for this_position_index in 0..role_amount {
-                                        if position_filled[1][this_position_index] != 1 {
-                                            position_filled[1][this_position_index]=1;
-                                            player.set_role(this_position_index);
-                                            break;
-                                        }
-                                    }
-                                }else{
-                                    position_filled[1][player.faceoff_position_index] = 1;
-                                }
-                                blue_players_found = blue_players_found + 1
-                            },
-                            _ => {}
-                        }
-
-                        println!("{} position {}", player.player_name,player.faceoff_position_index);
+                    if available_positions.contains(&c) {
+                        available_positions.remove(&c);
+                        positions.insert(player_index, c.clone());
+                    } else if let Some(x) = available_positions.iter().next().cloned() {
+                        available_positions.remove(&x);
+                        positions.insert(player_index, x);
+                    } else {
+                        positions.insert(player_index, player.faceoff_position.clone());
+                    }
+                }
+            }
+        }
+        if red_available_positions.contains(&c) {
+            for (player_index, player) in self.players.iter().enumerate() {
+                if let Some(player) = player {
+                    if player.team == HQMTeam::Red {
+                        positions.insert(player_index, c.clone());
+                        break;
+                    }
+                }
+            }
+        }
+        if blue_available_positions.contains(&String::from("C")) {
+            for (player_index, player) in self.players.iter().enumerate() {
+                if let Some(player) = player {
+                    if player.team == HQMTeam::Blue {
+                        positions.insert(player_index, c.clone());
+                        break;
                     }
                 }
             }
         }
 
-
-        // Make sure each team has a center
-        for p in self.players.iter() {
-            if let Some(player) = p {
-                if let Some(skater_obj_index) = player.skater {
-                    if let HQMGameObject::Player(_) = & self.game.world.objects[skater_obj_index] {
-                        if player.faceoff_position_index == 0 {
-                            match player.team {
-                                HQMTeam::Red => {
-                                    red_default_role_found=true;
-                                },
-                                HQMTeam::Blue => {
-                                    blue_default_role_found=true;
-                                },
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // One or more do not have a role
-        if !red_default_role_found || !blue_default_role_found {
-            for p in self.players.iter_mut() {
-                if let Some(player) = p {
-                    if let Some(skater_obj_index) = player.skater {
-                        if let HQMGameObject::Player(_) = & self.game.world.objects[skater_obj_index] {
-
-                            match player.team{
-                                HQMTeam::Red => {
-                                    if !red_default_role_found{
-                                        player.faceoff_position_index = 0;
-                                        break;
-                                    }
-                                },
-                                HQMTeam::Blue =>{
-                                    if !blue_default_role_found{
-                                        player.faceoff_position_index = 0;
-                                        break;
-                                    }
-                                },
-                                _=>{
-
-                                }
-                            }
-                        }
-
-                        if red_default_role_found && blue_default_role_found{
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        let mid = Point3::new (self.game.world.rink.width / 2.0, 0.0, self.game.world.rink.length / 2.0);
+        let puck_pos = &faceoff_spot.center_position + &(1.5f32*Vector3::y());
 
         self.game.world.objects = vec![HQMGameObject::None; 32];
-        self.game.world.create_puck_object(Point3::new (mid.x, 1.5, mid.z), Matrix3::identity(), self.config.cylinder_puck_post_collision);
+        self.game.world.create_puck_object(puck_pos, Matrix3::identity(), self.config.cylinder_puck_post_collision);
 
         let mut messages = Vec::new();
 
         fn setup (messages: & mut Vec<HQMMessage>, world: & mut HQMGameWorld,
                   player: & mut HQMConnectedPlayer, player_index: usize, pos: Point3<f32>, rot: Matrix3<f32>) {
-            let new_object_index = world.create_player_object(pos, rot,
-                                                              player.hand, player_index);
+            let new_object_index = world.create_player_object(pos, rot, player.hand, player_index);
             player.skater = new_object_index;
             if new_object_index.is_none() {
                 // Something very strange happened, we have to move the player
@@ -1364,22 +1310,22 @@ impl HQMServer {
 
         for (player_index, p) in self.players.iter_mut().enumerate() {
             if let Some(player) = p {
-                let p = &self.config.faceoff_positions[player.faceoff_position_index].faceoff_offsets[faceoff_position_index];
-                match player.team{
-                    HQMTeam::Red=>{
-                        let player_rotation = Rotation3::from_euler_angles(0.0,0.0,0.0);
-                        let player_position = &mid + &player_rotation * p;
-                        setup (& mut messages, & mut self.game.world, player, player_index, player_position,
-                               player_rotation.matrix().clone_owned())
-                    },
-                    HQMTeam::Blue=>{
-                        let player_rotation = Rotation3::from_euler_angles(0.0,std::f32::consts::PI,0.0);
-                        let player_position = &mid + &player_rotation * p;
-                        setup (& mut messages, & mut self.game.world, player, player_index, player_position,
-                               player_rotation.matrix().clone_owned())
-                    },
-                    _=>{}
-                }
+
+                let (player_position, player_rotation) = match player.team {
+                    HQMTeam::Red => {
+                        let faceoff_position = positions.get(&player_index).unwrap();
+                        faceoff_spot.red_player_positions[faceoff_position].clone()
+                    }
+                    HQMTeam::Blue => {
+                        let faceoff_position = positions.get(&player_index).unwrap();
+                        faceoff_spot.blue_player_positions[faceoff_position].clone()
+                    }
+                    HQMTeam::Spec => {
+                        continue;
+                    }
+                };
+                setup (& mut messages, & mut self.game.world, player, player_index, player_position,
+                       player_rotation.matrix().clone_owned())
             }
         }
 
@@ -1427,14 +1373,14 @@ impl HQMServer {
                         if self.game.time == 0 {
                             self.game.time = self.config.time_period*100;
                         }
-                        self.do_faceoff(0);
+                        self.do_faceoff(& self.game.world.rink.center_faceoff_spot.clone());
                     }
 
                 }
             } else if self.game.goal_timer > 0 {
                 self.game.goal_timer -= 1;
                 if self.game.goal_timer == 0 && !self.game.game_over {
-                    self.do_faceoff(0);
+                    self.do_faceoff(& self.game.world.rink.center_faceoff_spot.clone());
                 }
             } else if self.game.time > 0 {
                 self.game.time -= 1;
@@ -1542,7 +1488,7 @@ pub(crate) struct HQMConnectedPlayer {
     pub(crate) addr: SocketAddr,
     client_version: u8,
     pub(crate) team: HQMTeam,
-    pub(crate) faceoff_position_index: usize,
+    pub(crate) faceoff_position: String,
     pub(crate) skater: Option<usize>,
     game_id: u32,
     input: HQMPlayerInput,
@@ -1565,7 +1511,7 @@ impl HQMConnectedPlayer {
             addr,
             client_version: 0,
             team: HQMTeam::Spec,
-            faceoff_position_index: 0,
+            faceoff_position: String::from("C"),
             skater: None,
             game_id: u32::MAX,
             packet: u32::MAX,
@@ -1583,9 +1529,6 @@ impl HQMConnectedPlayer {
         }
     }
 
-    pub fn set_role(&mut self,input_role:usize){
-        self.faceoff_position_index = input_role;
-    }
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
@@ -1620,8 +1563,6 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) icing: HQMIcingConfiguration,
     pub(crate) warmup_pucks: u32,
     pub(crate) limit_jump_speed: bool,
-
-    pub(crate) faceoff_positions: Vec<HQMFaceoffPosition>,
 
     pub(crate) entry_point_red: Vector3<f32>,
     pub(crate) entry_point_blue: Vector3<f32>,

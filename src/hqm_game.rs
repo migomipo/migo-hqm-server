@@ -1,10 +1,11 @@
-use nalgebra::{Point3, Matrix3, Vector3, Vector2};
+use nalgebra::{Point3, Matrix3, Vector3, Vector2, Rotation3};
 use std::fmt::{Display, Formatter};
 use std::fmt;
 use crate::hqm_parse;
 use crate::hqm_parse::{HQMSkaterPacket, HQMPuckPacket};
 use std::rc::Rc;
 use crate::hqm_server::HQMServerConfiguration;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) struct HQMGameWorld {
     pub(crate) objects: Vec<HQMGameObject>,
@@ -146,7 +147,7 @@ pub(crate) struct HQMRinkLine {
 }
 
 impl HQMRinkLine {
-    fn new_blueline(team: HQMTeam, rink_length: f32) -> Self {
+    fn new_blueline(team: HQMTeam, rink_length: f32, blue_line_distance: f32) -> Self {
         let mid_z = rink_length / 2.0;
         let midline_point = Point3::new(0.0, 0.0, mid_z);
 
@@ -155,7 +156,7 @@ impl HQMRinkLine {
             HQMTeam::Blue => -Vector3::z(),
             _ => panic!()
         };
-        let point = midline_point - 8.883333*normal;
+        let point = midline_point - blue_line_distance*normal;
         HQMRinkLine {
             point,
             width: 0.3,
@@ -258,16 +259,31 @@ pub(crate) struct LinesAndNet {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct HQMFaceoffSpot {
+    pub(crate) center_position: Point3<f32>,
+    pub(crate) red_player_positions: HashMap<String, (Point3<f32>, Rotation3<f32>)>,
+    pub(crate) blue_player_positions: HashMap<String, (Point3<f32>, Rotation3<f32>)>
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct HQMRink {
     pub(crate) planes: Vec<(Point3<f32>, Vector3<f32>)>,
     pub(crate) corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
     pub(crate) red_lines_and_net: LinesAndNet,
     pub(crate) blue_lines_and_net: LinesAndNet,
     pub(crate) width:f32,
-    pub(crate) length:f32
+    pub(crate) length:f32,
+    pub(crate) allowed_positions: HashSet<String>,
+    pub(crate) blue_zone_faceoff_spots: [HQMFaceoffSpot; 2],
+    pub(crate) blue_neutral_faceoff_spots: [HQMFaceoffSpot; 2],
+    pub(crate) center_faceoff_spot: HQMFaceoffSpot,
+    pub(crate) red_neutral_faceoff_spots: [HQMFaceoffSpot; 2],
+    pub(crate) red_zone_faceoff_spots: [HQMFaceoffSpot; 2],
 }
 
 impl HQMRink {
+
+
     fn new(width: f32, length: f32, corner_radius: f32) -> Self {
 
         let zero = Point3::new(0.0,0.0,0.0);
@@ -287,12 +303,16 @@ impl HQMRink {
             (Point3::new(wr, 0.0, lr), Vector3::new( 1.0, 0.0,  1.0), corner_radius),
             (Point3::new(r, 0.0, lr),  Vector3::new(-1.0, 0.0,  1.0), corner_radius)
         ];
+        let blue_line_distance = 8.883333;
         let red_net = HQMRinkNet::new(HQMTeam::Red, width, length);
         let blue_net = HQMRinkNet::new(HQMTeam::Blue, width, length);
-        let red_blueline = HQMRinkLine::new_blueline(HQMTeam::Red, length);
-        let blue_blueline = HQMRinkLine::new_blueline(HQMTeam::Blue, length);
+        let red_blueline = HQMRinkLine::new_blueline(HQMTeam::Red, length, blue_line_distance);
+        let blue_blueline = HQMRinkLine::new_blueline(HQMTeam::Blue, length, blue_line_distance);
         let red_midline = HQMRinkLine::new_midline(HQMTeam::Red, length);
         let blue_midline = HQMRinkLine::new_midline(HQMTeam::Blue, length);
+
+        let left_faceoff_x = width / 2.0 - 7.0;
+        let right_faceoff_x = width / 2.0 + 7.0;
         HQMRink {
             planes,
             corners,
@@ -307,8 +327,58 @@ impl HQMRink {
                 mid_line: blue_midline
             },
             width,
-            length
+            length,
+            allowed_positions: vec!["C", "LW", "RW", "LD", "RD", "G"].into_iter().map(String::from).collect(),
+            blue_zone_faceoff_spots: [
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, 10.0), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, 10.0), width, length)
+            ],
+            blue_neutral_faceoff_spots: [
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length / 2.0 - blue_line_distance + 1.5), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, length / 2.0 - blue_line_distance + 1.5), width, length)
+            ],
+            center_faceoff_spot: create_faceoff_spot(Point3::new (width / 2.0, 0.0, length / 2.0), width, length),
+            red_neutral_faceoff_spots: [
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length / 2.0 + blue_line_distance - 1.5), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, length / 2.0 + blue_line_distance - 1.5), width, length)
+            ],
+            red_zone_faceoff_spots: [
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length - 10.0), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, length - 10.0), width, length)
+            ]
         }
+    }
+}
+
+fn create_faceoff_spot (center_position: Point3<f32>, rink_width: f32, rink_length: f32) -> HQMFaceoffSpot {
+    let mut red_player_positions = HashMap::new();
+    let mut blue_player_positions = HashMap::new();
+
+    let offsets = vec![
+        ("C", Vector3::new (0.0,1.5,2.75)),
+        ("LD", Vector3::new (-2.0,1.5,10.0)),
+            ("RD", Vector3::new (2.0,1.5,10.0)),
+            ("LW", Vector3::new (-5.0,1.5,4.0)),
+            ("RW", Vector3::new (5.0,1.5,4.0)),
+    ];
+    let red_rot = Rotation3::identity();
+    let blue_rot = Rotation3::from_euler_angles(0.0, std::f32::consts::PI, 0.0);
+    for (s, offset) in offsets {
+        let red_pos = &center_position + &red_rot * &offset;
+        let blue_pos = &center_position + &blue_rot * &offset;
+
+        red_player_positions.insert(String::from (s), (red_pos, red_rot.clone()));
+        blue_player_positions.insert( String::from (s), (blue_pos, blue_rot.clone()));
+    }
+
+    let red_goalie_pos = Point3::new (rink_width / 2.0, 1.5, 5.0);
+    let blue_goalie_pos = Point3::new (rink_width / 2.0, 1.5, rink_length - 5.0);
+    red_player_positions.insert(String::from ("G"), (red_goalie_pos, red_rot.clone()));
+    blue_player_positions.insert(String::from ("G"), (blue_goalie_pos, blue_rot.clone()));
+    HQMFaceoffSpot {
+        center_position,
+        red_player_positions,
+        blue_player_positions
     }
 }
 
@@ -534,12 +604,8 @@ pub(crate) enum HQMMessage {
     },
 }
 
-pub(crate) struct HQMFaceoffPosition {
-    pub(crate) abbreviation: String,
-    pub(crate) faceoff_offsets: Vec<Vector3<f32>> // To store multiple faceoff positions as needed
-}
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum HQMTeam {
     Spec,
     Red,

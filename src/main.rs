@@ -5,7 +5,6 @@ use std::path::Path;
 extern crate ini;
 use ini::Ini;
 use std::env;
-use crate::hqm_game::HQMFaceoffPosition;
 use crate::hqm_server::{HQMServer, HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration};
 
 mod hqm_parse;
@@ -23,8 +22,7 @@ async fn main() -> std::io::Result<()> {
     } else {
         "config.ini"
     };
-    // Init vec for roles
-    let mut rolevec:Vec<HQMFaceoffPosition>=Vec::new();
+
 
     // Load configuration (if exists)
     if Path::new(config_path).exists() {
@@ -103,28 +101,6 @@ async fn main() -> std::io::Result<()> {
             _ => HQMOffsideConfiguration::Off
         });
 
-        // Roles
-        let roles_section = conf.section(Some("Roles")).unwrap();
-        for (k, v) in roles_section.iter() {
-            let string_abbreviation = k.parse::<String>().unwrap();
-            let string_offsets = v.parse::<String>().unwrap();
-
-            let mut offsets:Vec<Vector3<f32>>=Vec::new();
-
-            let position_parts: Vec<&str> = string_offsets.split('|').collect();
-            for this_offset in position_parts{
-                let offset_parts: Vec<&str> = this_offset.split(',').collect();
-
-                offsets.push(Vector3::new(offset_parts[0].parse::<f32>().unwrap(),
-                                         offset_parts[1].parse::<f32>().unwrap(),
-                                         offset_parts[2].parse::<f32>().unwrap()));
-            }
-
-            rolevec.push(HQMFaceoffPosition {
-                abbreviation:string_abbreviation,
-                faceoff_offsets:offsets
-            });
-        }
 
         let config = HQMServerConfiguration {
             server_name,
@@ -151,7 +127,6 @@ async fn main() -> std::io::Result<()> {
             entry_point_blue:blue_game_entry_offset,
             entry_rotation_blue:blue_game_entry_rotation,
 
-            faceoff_positions: rolevec,
             welcome: welcome_str,
         };
         // Config file didn't exist; use defaults as described
