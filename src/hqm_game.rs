@@ -5,7 +5,7 @@ use crate::hqm_parse;
 use crate::hqm_parse::{HQMSkaterPacket, HQMPuckPacket};
 use std::rc::Rc;
 use crate::hqm_server::HQMServerConfiguration;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::f32::consts::PI;
 
 pub(crate) struct HQMGameWorld {
@@ -548,6 +548,13 @@ impl HQMPlayerInput {
 pub(crate) enum HQMSkaterHand {
     Left, Right
 }
+#[derive(Debug, Clone)]
+pub(crate) struct HQMPuckTouch {
+    pub(crate) player_index: usize,
+    pub(crate) team: HQMTeam,
+    pub(crate) puck_pos: Point3<f32>,
+    pub(crate) time: u32
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct HQMPuck {
@@ -555,7 +562,7 @@ pub(crate) struct HQMPuck {
     pub(crate) body: HQMBody,
     pub(crate) radius: f32,
     pub(crate) height: f32,
-    pub(crate) last_player_index: [Option<(usize, HQMTeam)>; 4],
+    pub(crate) touches: VecDeque<HQMPuckTouch>,
     pub(crate) cylinder_puck_post_collision: bool
 }
 
@@ -572,7 +579,7 @@ impl HQMPuck {
             },
             radius: 0.125,
             height: 0.0412500016391,
-            last_player_index: [None; 4],
+            touches: VecDeque::new(),
             cylinder_puck_post_collision
         }
     }
