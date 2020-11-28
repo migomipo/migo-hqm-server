@@ -874,15 +874,19 @@ impl HQMServer {
                     }
                 },
                 HQMSimulationEvent::PuckEnteredOtherHalf {
-                    team, ..
+                    team, puck
                 } => {
                     let icing_status = match team {
                         HQMTeam::Red => & mut self.game.red_icing_status,
                         HQMTeam::Blue => & mut self.game.blue_icing_status,
                         _ => panic!()
                     };
-                    if *icing_status == HQMIcingStatus::No {
-                        *icing_status = HQMIcingStatus::NotTouched
+                    if let HQMGameObject::Puck(puck) = & self.game.world.objects[puck] {
+                        if let Some((_, last_touch_team)) = puck.last_player_index[0] {
+                            if team == last_touch_team && *icing_status == HQMIcingStatus::No {
+                                *icing_status = HQMIcingStatus::NotTouched
+                            }
+                        }
                     }
                 },
                 HQMSimulationEvent::PuckPassedGoalLine {
