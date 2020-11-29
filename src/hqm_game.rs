@@ -374,6 +374,8 @@ impl HQMRink {
 
         let left_faceoff_x = width / 2.0 - 7.0;
         let right_faceoff_x = width / 2.0 + 7.0;
+
+        let distance_faceoff_spot_line = 2.0;
         HQMRink {
             planes,
             corners,
@@ -397,13 +399,13 @@ impl HQMRink {
                 create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, 10.0), width, length)
             ],
             blue_neutral_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length / 2.0 - blue_line_distance + 1.5), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, length / 2.0 - blue_line_distance + 1.5), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length / 2.0 - blue_line_distance + distance_faceoff_spot_line), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, length / 2.0 - blue_line_distance + distance_faceoff_spot_line), width, length)
             ],
             center_faceoff_spot: create_faceoff_spot(Point3::new (width / 2.0, 0.0, length / 2.0), width, length),
             red_neutral_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length / 2.0 + blue_line_distance - 1.5), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, length / 2.0 + blue_line_distance - 1.5), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length / 2.0 + blue_line_distance - distance_faceoff_spot_line), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, length / 2.0 + blue_line_distance - distance_faceoff_spot_line), width, length)
             ],
             red_zone_faceoff_spots: [
                 create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length - 10.0), width, length),
@@ -434,8 +436,8 @@ fn create_faceoff_spot (center_position: Point3<f32>, rink_width: f32, rink_leng
         blue_player_positions.insert( String::from (s), (blue_pos, blue_rot.clone()));
     }
 
-    let red_goalie_pos = Point3::new (rink_width / 2.0, 1.5, 5.0);
-    let blue_goalie_pos = Point3::new (rink_width / 2.0, 1.5, rink_length - 5.0);
+    let red_goalie_pos = Point3::new (rink_width / 2.0, 1.5, rink_length - 5.0);
+    let blue_goalie_pos = Point3::new (rink_width / 2.0, 1.5, 5.0);
     red_player_positions.insert(String::from ("G"), (red_goalie_pos, red_rot.clone()));
     blue_player_positions.insert(String::from ("G"), (blue_goalie_pos, blue_rot.clone()));
     HQMFaceoffSpot {
