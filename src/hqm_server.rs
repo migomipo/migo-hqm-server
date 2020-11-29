@@ -873,8 +873,8 @@ impl HQMServer {
                                 }
 
                                 let (other_icing_status, offside_status, other_team) = match team {
-                                    HQMTeam::Red => (& mut self.game.red_icing_status, & mut self.game.red_offside_status, HQMTeam::Blue),
-                                    HQMTeam::Blue => (& mut self.game.blue_icing_status, & mut self.game.blue_offside_status, HQMTeam::Red),
+                                    HQMTeam::Red => (& mut self.game.blue_icing_status, & mut self.game.red_offside_status, HQMTeam::Blue),
+                                    HQMTeam::Blue => (& mut self.game.red_icing_status, & mut self.game.blue_offside_status, HQMTeam::Red),
                                     _ => panic!()
                                 };
 
