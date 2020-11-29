@@ -5,7 +5,7 @@ use crate::hqm_parse;
 use crate::hqm_parse::{HQMSkaterPacket, HQMPuckPacket};
 use std::rc::Rc;
 use crate::hqm_server::HQMServerConfiguration;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
 
 pub(crate) struct HQMGameWorld {
@@ -332,7 +332,7 @@ pub(crate) struct HQMRink {
     pub(crate) blue_lines_and_net: LinesAndNet,
     pub(crate) width:f32,
     pub(crate) length:f32,
-    pub(crate) allowed_positions: HashSet<String>,
+    pub(crate) allowed_positions: Vec<String>,
     pub(crate) blue_zone_faceoff_spots: [HQMFaceoffSpot; 2],
     pub(crate) blue_neutral_faceoff_spots: [HQMFaceoffSpot; 2],
     pub(crate) center_faceoff_spot: HQMFaceoffSpot,

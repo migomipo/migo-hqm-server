@@ -1313,9 +1313,9 @@ impl HQMServer {
                         continue;
                     }
                 };
-                if available_positions.contains(&player.faceoff_position) {
-                    positions.insert(player_index, player.faceoff_position.clone());
-                    available_positions.remove(& player.faceoff_position);
+                if let Some(x) = available_positions.iter().position(|x| *x == player.faceoff_position) {
+                    let s = available_positions.remove(x);
+                    positions.insert(player_index, s);
                 }
             }
         }
@@ -1331,12 +1331,11 @@ impl HQMServer {
                     }
                 };
                 if !positions.contains_key(&player_index) {
-
-                    if available_positions.contains(&c) {
-                        available_positions.remove(&c);
+                    if let Some(x) = available_positions.iter().position(|x| *x == c) {
+                        available_positions.remove(x);
                         positions.insert(player_index, c.clone());
-                    } else if let Some(x) = available_positions.iter().next().cloned() {
-                        available_positions.remove(&x);
+                    } else if !available_positions.is_empty() {
+                        let x = available_positions.remove(0);
                         positions.insert(player_index, x);
                     } else {
                         positions.insert(player_index, player.faceoff_position.clone());
