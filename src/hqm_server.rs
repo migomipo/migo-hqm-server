@@ -858,38 +858,32 @@ impl HQMServer {
                                 let team = player.team;
                                 Self::update_puck_touches(puck, this_connected_player_index, team, self.game.time);
 
-                                let icing_status = match team {
-                                    HQMTeam::Red => & mut self.game.red_icing_status,
-                                    HQMTeam::Blue => & mut self.game.blue_icing_status,
-                                    _ => panic!()
-                                };
-                                let puck_pos = puck.body.pos.clone();
-
-                                if let HQMIcingStatus::NotTouched(_) = icing_status {
-                                    *icing_status = HQMIcingStatus::No;
-                                } else if icing_status.is_warning() {
-                                    *icing_status = HQMIcingStatus::No;
-                                    self.add_server_chat_message(String::from("Icing waved off"));
-                                }
-
-                                let (other_icing_status, offside_status, other_team) = match team {
-                                    HQMTeam::Red => (& mut self.game.blue_icing_status, & mut self.game.red_offside_status, HQMTeam::Blue),
-                                    HQMTeam::Blue => (& mut self.game.red_icing_status, & mut self.game.blue_offside_status, HQMTeam::Red),
+                                let (icing_status, other_icing_status, offside_status, other_team) = match team {
+                                    HQMTeam::Red => (& mut self.game.red_icing_status, & mut self.game.blue_icing_status, & mut self.game.red_offside_status, HQMTeam::Blue),
+                                    HQMTeam::Blue => (& mut self.game.blue_icing_status, & mut self.game.red_icing_status, & mut self.game.blue_offside_status, HQMTeam::Red),
                                     _ => panic!()
                                 };
 
-                                if let HQMIcingStatus::NotTouched(_) = other_icing_status {
-                                    *other_icing_status = HQMIcingStatus::No;
-                                } else if let HQMIcingStatus::Warning(p) = other_icing_status {
-                                    let copy = p.clone();
-                                    self.call_icing(other_team, &copy);
-                                } else if let HQMOffsideStatus::Warning(p, i) = offside_status {
+                                if let HQMOffsideStatus::Warning(p, i) = offside_status {
                                     let pass_origin = if this_connected_player_index == *i {
-                                        puck_pos
+                                        puck.body.pos.clone()
                                     } else {
                                         p.clone()
                                     };
                                     self.call_offside(team, &pass_origin);
+                                } else if let HQMIcingStatus::Warning(p) = other_icing_status {
+                                    let copy = p.clone();
+                                    self.call_icing(other_team, &copy);
+                                } else {
+                                    if let HQMIcingStatus::NotTouched(_) = other_icing_status {
+                                        *other_icing_status = HQMIcingStatus::No;
+                                    }
+                                    if let HQMIcingStatus::NotTouched(_) = icing_status {
+                                        *icing_status = HQMIcingStatus::No;
+                                    } else if icing_status.is_warning() {
+                                        *icing_status = HQMIcingStatus::No;
+                                        self.add_server_chat_message(String::from("Icing waved off"));
+                                    }
                                 }
                             }
                         }
