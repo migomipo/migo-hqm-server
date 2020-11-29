@@ -40,19 +40,37 @@ impl HQMGameWorld {
     }
 }
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone)]
 pub(crate) enum HQMIcingStatus {
     No,          // No icing
-    NotTouched,  // Puck has entered offensive half, but not reached the goal line
-    Warning,     // Puck has reached the goal line, delayed icing
+    NotTouched(Point3<f32>),  // Puck has entered offensive half, but not reached the goal line
+    Warning(Point3<f32>),     // Puck has reached the goal line, delayed icing
     Icing        // Icing has been called
 }
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+impl HQMIcingStatus {
+    pub(crate) fn is_warning(&self) -> bool {
+        match self {
+            HQMIcingStatus::Warning(_) => true,
+            _ => false
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone)]
 pub(crate) enum HQMOffsideStatus {
-    No,               // No offside
-    Warning,          // Warning, puck is in offensive zone but not touched yet
-    Offside           // Offside has been called
+    No,                           // No offside
+    Warning(Point3<f32>, usize),  // Warning, puck is in offensive zone but not touched yet
+    Offside                       // Offside has been called
+}
+
+impl HQMOffsideStatus {
+    pub(crate) fn is_warning(&self) -> bool {
+        match self {
+            HQMOffsideStatus::Warning(_, _) => true,
+            _ => false
+        }
+    }
 }
 
 pub(crate) struct HQMGame {
@@ -62,6 +80,7 @@ pub(crate) struct HQMGame {
     pub(crate) blue_icing_status: HQMIcingStatus,
     pub(crate) red_offside_status: HQMOffsideStatus,
     pub(crate) blue_offside_status: HQMOffsideStatus,
+    pub(crate) next_faceoff_spot: HQMFaceoffSpot,
     pub(crate) world: HQMGameWorld,
     pub(crate) global_messages: Vec<Rc<HQMMessage>>,
     pub(crate) red_score: u32,
@@ -85,6 +104,8 @@ impl HQMGame {
         for _ in 0..32 {
             object_vec.push(HQMGameObject::None);
         }
+        let rink = HQMRink::new(30.0, 61.0, 8.5);
+        let mid_faceoff = rink.center_faceoff_spot.clone();
 
         HQMGame {
             state:HQMGameState::Warmup,
@@ -92,9 +113,10 @@ impl HQMGame {
             blue_icing_status: HQMIcingStatus::No,
             red_offside_status: HQMOffsideStatus::No,
             blue_offside_status: HQMOffsideStatus::No,
+            next_faceoff_spot: mid_faceoff,
             world: HQMGameWorld {
                 objects: object_vec,
-                rink: HQMRink::new(30.0, 61.0, 8.5),
+                rink,
                 gravity: 0.000680,
                 limit_jump_speed: config.limit_jump_speed
             },
@@ -148,7 +170,7 @@ pub(crate) struct HQMRinkLine {
 }
 
 impl HQMRinkLine {
-    fn new_blueline(team: HQMTeam, rink_length: f32, blue_line_distance: f32) -> Self {
+    fn new_offensive_line(team: HQMTeam, rink_length: f32, blue_line_distance: f32) -> Self {
         let mid_z = rink_length / 2.0;
         let midline_point = Point3::new(0.0, 0.0, mid_z);
 
@@ -158,6 +180,23 @@ impl HQMRinkLine {
             _ => panic!()
         };
         let point = midline_point - blue_line_distance*normal;
+        HQMRinkLine {
+            point,
+            width: 0.3,
+            normal
+        }
+    }
+
+    fn new_defensive_line(team: HQMTeam, rink_length: f32, blue_line_distance: f32) -> Self {
+        let mid_z = rink_length / 2.0;
+        let midline_point = Point3::new(0.0, 0.0, mid_z);
+
+        let normal = match team {
+            HQMTeam::Red => Vector3::z(),
+            HQMTeam::Blue => -Vector3::z(),
+            _ => panic!()
+        };
+        let point = midline_point + blue_line_distance*normal;
         HQMRinkLine {
             point,
             width: 0.3,
@@ -190,6 +229,11 @@ impl HQMRinkLine {
         let dot = (pos - &self.point).dot (&self.normal);
         let edge = -(self.width / 2.0);
         dot + radius < edge
+    }
+
+    pub(crate) fn point_past_middle_of_line(&self, pos: &Point3<f32>) -> bool {
+        let dot = (pos - &self.point).dot (&self.normal);
+        dot < 0.0
     }
 
 }
@@ -269,7 +313,8 @@ impl HQMRinkNet {
 pub(crate) struct LinesAndNet {
     pub(crate) net: HQMRinkNet,
     pub(crate) mid_line: HQMRinkLine,
-    pub(crate) offensive_line: HQMRinkLine
+    pub(crate) offensive_line: HQMRinkLine,
+    pub(crate) defensive_line: HQMRinkLine
 }
 
 #[derive(Debug, Clone)]
@@ -320,8 +365,10 @@ impl HQMRink {
         let blue_line_distance = 8.883333;
         let red_net = HQMRinkNet::new(HQMTeam::Red, width, length);
         let blue_net = HQMRinkNet::new(HQMTeam::Blue, width, length);
-        let red_blueline = HQMRinkLine::new_blueline(HQMTeam::Red, length, blue_line_distance);
-        let blue_blueline = HQMRinkLine::new_blueline(HQMTeam::Blue, length, blue_line_distance);
+        let red_offensive_line = HQMRinkLine::new_offensive_line(HQMTeam::Red, length, blue_line_distance);
+        let blue_offensive_line = HQMRinkLine::new_offensive_line(HQMTeam::Blue, length, blue_line_distance);
+        let red_defensive_line = HQMRinkLine::new_defensive_line(HQMTeam::Red, length, blue_line_distance);
+        let blue_defensive_line = HQMRinkLine::new_defensive_line(HQMTeam::Blue, length, blue_line_distance);
         let red_midline = HQMRinkLine::new_midline(HQMTeam::Red, length);
         let blue_midline = HQMRinkLine::new_midline(HQMTeam::Blue, length);
 
@@ -332,12 +379,14 @@ impl HQMRink {
             corners,
             red_lines_and_net: LinesAndNet {
                 net: red_net,
-                offensive_line: red_blueline,
+                offensive_line: red_offensive_line,
+                defensive_line: red_defensive_line,
                 mid_line: red_midline
             },
             blue_lines_and_net: LinesAndNet {
                 net: blue_net,
-                offensive_line: blue_blueline,
+                offensive_line: blue_offensive_line,
+                defensive_line: blue_defensive_line,
                 mid_line: blue_midline
             },
             width,
@@ -553,7 +602,8 @@ pub(crate) struct HQMPuckTouch {
     pub(crate) player_index: usize,
     pub(crate) team: HQMTeam,
     pub(crate) puck_pos: Point3<f32>,
-    pub(crate) time: u32
+    pub(crate) time: u32,
+    pub(crate) is_first_touch: bool
 }
 
 #[derive(Debug, Clone)]
