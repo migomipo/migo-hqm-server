@@ -871,6 +871,10 @@ impl HQMServer {
                                 } else if icing_status.is_warning() {
                                     *icing_status = HQMIcingStatus::No;
                                     self.add_server_chat_message(String::from("Icing waved off"));
+                                }
+
+                                if let HQMIcingStatus::NotTouched(_) = other_icing_status {
+                                    *other_icing_status = HQMIcingStatus::No;
                                 } else if let HQMIcingStatus::Warning(p) = other_icing_status {
                                     let copy = p.clone();
                                     self.call_icing(other_team, &copy);
@@ -1470,6 +1474,7 @@ impl HQMServer {
                 if self.game.time == 0 {
                     self.game.period += 1;
                     self.game.intermission = self.config.time_intermission*100;
+                    self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
                 }
             } else {
                 if self.game.period > 3 && self.game.red_score != self.game.blue_score {
