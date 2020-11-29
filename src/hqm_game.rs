@@ -362,7 +362,7 @@ impl HQMRink {
             (Point3::new(wr, 0.0, lr), Vector3::new( 1.0, 0.0,  1.0), corner_radius),
             (Point3::new(r, 0.0, lr),  Vector3::new(-1.0, 0.0,  1.0), corner_radius)
         ];
-        let blue_line_distance = 8.883333;
+        let blue_line_distance = 8.833333333;
         let red_net = HQMRinkNet::new(HQMTeam::Red, width, length);
         let blue_net = HQMRinkNet::new(HQMTeam::Blue, width, length);
         let red_offensive_line = HQMRinkLine::new_offensive_line(HQMTeam::Red, length, blue_line_distance);
