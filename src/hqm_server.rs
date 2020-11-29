@@ -764,7 +764,7 @@ impl HQMServer {
         } else {
             panic!();
         };
-        self.game.goal_timer = 700;
+        self.game.goal_timer = self.config.time_intermission*100;
         self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
         if self.game.period > 3 && self.game.red_score != self.game.blue_score {
             self.game.intermission = 2000;
@@ -803,7 +803,7 @@ impl HQMServer {
             _ => panic!()
         };
         self.game.next_faceoff_spot = Self::get_offside_faceoff_spot(pass_origin, &self.game.world.rink, team);
-        self.game.intermission = 700;
+        self.game.intermission = self.config.time_intermission*100;
         *offside_status = HQMOffsideStatus::Offside;
         self.add_server_chat_message(String::from("Offside"));
     }
@@ -815,7 +815,7 @@ impl HQMServer {
             _ => panic!()
         };
         self.game.next_faceoff_spot = Self::get_icing_faceoff_spot(pass_origin, &self.game.world.rink, team);
-        self.game.intermission = 700;
+        self.game.intermission = self.config.time_intermission*100;
         *icing_status = HQMIcingStatus::Icing;
         self.add_server_chat_message(String::from("Icing"));
     }
