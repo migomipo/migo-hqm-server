@@ -5,7 +5,7 @@ use std::path::Path;
 extern crate ini;
 use ini::Ini;
 use std::env;
-use crate::hqm_server::{HQMServer, HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration};
+use crate::hqm_server::{HQMServer, HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration, HQMServerMode};
 
 mod hqm_parse;
 mod hqm_simulate;
@@ -42,6 +42,13 @@ async fn main() -> std::io::Result<()> {
             None => false
         };
         let server_password = server_section.get("password").unwrap().parse::<String>().unwrap();
+        let mode = server_section.get("mode").map_or(HQMServerMode::Match, |x| {
+            match x {
+                "warmup" => HQMServerMode::PermanentWarmup,
+                "match" => HQMServerMode::Match,
+                _ => HQMServerMode::Match
+            }
+        });
 
         let welcome = server_section.get("welcome").unwrap_or("");
 
@@ -128,6 +135,7 @@ async fn main() -> std::io::Result<()> {
             entry_rotation_blue:blue_game_entry_rotation,
 
             welcome: welcome_str,
+            mode
         };
         // Config file didn't exist; use defaults as described
         return HQMServer::new(config).run().await;

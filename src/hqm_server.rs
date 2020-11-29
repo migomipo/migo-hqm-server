@@ -729,12 +729,14 @@ impl HQMServer {
     async fn tick(&mut self, socket: & UdpSocket, write_buf: & mut [u8]) {
         if self.player_count() != 0 {
             self.game.active = true;
-            self.remove_inactive_players (); // connected players and objects
+            self.remove_inactive_players(); // connected players and objects
             self.move_players_between_teams();
             self.copy_player_input_to_object();
             let events = self.game.world.simulate_step();
-            self.handle_events(events);
-            self.update_clock();
+            if self.config.mode == HQMServerMode::Match {
+                self.handle_events(events);
+                self.update_clock();
+            }
 
             self.game.update_game_state();
 
@@ -1632,6 +1634,12 @@ pub enum HQMOffsideConfiguration {
     Immediate
 }
 
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum HQMServerMode {
+    Match,
+    PermanentWarmup
+}
+
 pub(crate) struct HQMServerConfiguration {
     pub(crate) server_name: String,
     pub(crate) port: u16,
@@ -1640,6 +1648,7 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) team_max: u32,
     pub(crate) force_team_size_parity: bool,
     pub(crate) welcome: Vec<String>,
+    pub(crate) mode: HQMServerMode,
 
     pub(crate) password: String,
 
