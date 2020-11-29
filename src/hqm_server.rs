@@ -1353,7 +1353,7 @@ impl HQMServer {
                 }
             }
         }
-        if blue_available_positions.contains(&String::from("C")) {
+        if blue_available_positions.contains(&c) {
             for (player_index, player) in self.players.iter().enumerate() {
                 if let Some(player) = player {
                     if player.team == HQMTeam::Blue {
