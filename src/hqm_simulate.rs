@@ -384,7 +384,7 @@ fn update_player2 (player: & mut HQMSkater) {
 
 }
 
-fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: & Vec<HQMCollision>) {
+fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: &[HQMCollision]) {
     for _ in 0..16 {
         let original_ball_velocities = Vec::from_iter(players.iter().map(|y| {
             let m = y.collision_balls.iter().map(|x| x.velocity.clone_owned());
@@ -529,7 +529,7 @@ fn do_puck_post_forces(puck: & mut HQMPuck, rink: & HQMRink, puck_vertices: & Ve
     }
 }
 
-fn do_puck_stick_forces(puck: & mut HQMPuck, player: & mut HQMSkater, puck_vertices: &Vec<Point3<f32>>,
+fn do_puck_stick_forces(puck: & mut HQMPuck, player: & mut HQMSkater, puck_vertices: &[Point3<f32>],
                         puck_linear_velocity: & Vector3<f32>, puck_angular_velocity: & Vector3<f32>, stick_velocity: & Vector3<f32>) -> bool {
     let stick_surfaces = get_stick_surfaces(player);
     let mut res = false;
@@ -551,7 +551,7 @@ fn do_puck_stick_forces(puck: & mut HQMPuck, player: & mut HQMSkater, puck_verti
     res
 }
 
-fn do_puck_rink_forces(puck: & mut HQMPuck, puck_vertices: &Vec<Point3<f32>>, rink: & HQMRink, puck_linear_velocity: & Vector3<f32>, puck_angular_velocity: & Vector3<f32>) {
+fn do_puck_rink_forces(puck: & mut HQMPuck, puck_vertices: &[Point3<f32>], rink: & HQMRink, puck_linear_velocity: & Vector3<f32>, puck_angular_velocity: & Vector3<f32>) {
     for vertex in puck_vertices.iter() {
         let c = collision_between_vertex_and_rink(vertex, rink);
         if let Some((overlap, normal)) = c {
@@ -695,7 +695,7 @@ fn collision_between_puck_and_surface(puck_pos: &Point3<f32>, puck_pos2: &Point3
     None
 }
 
-fn collision_between_puck_vertex_and_stick(puck_pos: &Point3<f32>, puck_vertex: &Point3<f32>, stick_surfaces: &Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)>) -> Option<(f32, Vector3<f32>)> {
+fn collision_between_puck_vertex_and_stick(puck_pos: &Point3<f32>, puck_vertex: &Point3<f32>, stick_surfaces: &[(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)]) -> Option<(f32, Vector3<f32>)> {
     let mut min_intersection = 1f32;
     let mut res = None;
     for stick_surface in stick_surfaces.iter() {

@@ -1054,7 +1054,7 @@ impl HQMServer {
         }
     }
 
-    fn has_players_in_offensive_zone (world: & HQMGameWorld, players: & Vec<Option<HQMConnectedPlayer>>, team: HQMTeam) -> bool {
+    fn has_players_in_offensive_zone (world: & HQMGameWorld, players: &[Option<HQMConnectedPlayer>], team: HQMTeam) -> bool {
         let line = match team {
             HQMTeam::Red => & world.rink.red_lines_and_net.offensive_line,
             HQMTeam::Blue => & world.rink.blue_lines_and_net.offensive_line,
@@ -1540,7 +1540,7 @@ impl HQMServer {
     }
 }
 
-fn get_packets (objects: & Vec<HQMGameObject>) -> Vec<HQMObjectPacket> {
+fn get_packets (objects: &[HQMGameObject]) -> Vec<HQMObjectPacket> {
     let mut packets: Vec<HQMObjectPacket> = Vec::with_capacity(32);
     for i in 0usize..32 {
         let packet = match &objects[i] {
