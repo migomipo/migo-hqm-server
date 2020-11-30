@@ -1,7 +1,6 @@
 use std::cmp::min;
 use nalgebra::{Vector3, U1, U3, Matrix3};
 use nalgebra::storage::Storage;
-use std::convert::{TryFrom};
 
 pub fn convert_matrix_to_network(b: u8, v: &Matrix3<f32>) -> (u32, u32) {
     let r1 = convert_rot_column_to_network(b, &v.column(1));
@@ -220,9 +219,25 @@ impl<'a> HQMMessageWriter<'a> {
         self.write_u32_aligned(f32::to_bits(v));
     }
 
-    pub fn write_pos(&mut self, n: u8, v: u32) {
-        self.write_bits(2, 3);
-        self.write_bits(n, v);
+    pub fn write_pos(&mut self, n: u8, v: u32, old_v: Option<u32>) {
+        let diff = match old_v {
+            Some(old_v) => (v as i32) - (old_v as i32),
+            None => i32::MAX
+        };
+        if diff >= -(2^2) && diff <= 2^2 - 1 {
+            self.write_bits(2, 0);
+            self.write_bits(3, diff as u32);
+        } else if diff >= -(2^5) && diff <= 2^5 - 1 {
+            self.write_bits(2, 1);
+            self.write_bits(6, diff as u32);
+        } else if diff >= -(2^11) && diff <= 2^11 - 1 {
+            self.write_bits(2, 2);
+            self.write_bits(12, diff as u32);
+        } else {
+            self.write_bits(2, 3);
+            self.write_bits(n, v);
+        }
+
     }
 
     pub fn write_bits(&mut self, n: u8, v: u32) {
@@ -319,15 +334,18 @@ impl<'a> HQMMessageReader<'a> {
         match pos_type {
             0 => {
                 let diff = self.read_bits_signed(3);
-                u32::try_from(diff + i32::try_from(old_value.unwrap()).unwrap()).unwrap()
+                let old_value = old_value.unwrap() as i32;
+                (old_value + diff).max(0) as u32
             }
             1 => {
                 let diff = self.read_bits_signed(6);
-                u32::try_from(diff + i32::try_from(old_value.unwrap()).unwrap()).unwrap()
+                let old_value = old_value.unwrap() as i32;
+                (old_value + diff).max(0) as u32
             },
             2 => {
                 let diff = self.read_bits_signed(12);
-                u32::try_from(diff + i32::try_from(old_value.unwrap()).unwrap()).unwrap()
+                let old_value = old_value.unwrap() as i32;
+                (old_value + diff).max(0) as u32
             },
             3 => {
                 self.read_bits(b)

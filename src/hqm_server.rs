@@ -141,7 +141,7 @@ impl HQMServer {
         }
 
         let packet = parser.read_u32_aligned();
-        if packet < player.packet && player.packet - packet < 1000 {
+        if packet < player.known_packet && player.known_packet - packet < 1000 {
             // UDP does not guarantee that the packets arrive in the same order they were sent,
             // or at all. This should prevent packets that are older than the most recent one
             // received from being applied.
@@ -149,10 +149,10 @@ impl HQMServer {
         }
 
         player.inactivity = 0;
-        player.packet = packet;
+        player.known_packet = packet;
         player.input = input;
         player.game_id = current_game_id;
-        player.msgpos = parser.read_u16_aligned() as u32;
+        player.known_msgpos = parser.read_u16_aligned();
 
 
         let has_chat_msg = parser.read_bits(1) == 1;
@@ -742,9 +742,9 @@ impl HQMServer {
 
             let packets = get_packets(& self.game.world.objects);
 
-            for (i, x) in self.players.iter().enumerate() {
-                if let Some(p) = x {
-                    self.send_update(p, i, socket, &packets, write_buf).await;
+            for (player_index, player) in self.players.iter().enumerate() {
+                if let Some(player) = player {
+                    Self::send_update(&self.game, player, player_index, socket, &packets, write_buf).await;
                 }
             }
             self.game.packet += 1;
@@ -1081,44 +1081,44 @@ impl HQMServer {
     }
 
 
-    async fn send_update(&self, player: &HQMConnectedPlayer, i: usize, socket: & UdpSocket, packets: &[HQMObjectPacket], write_buf: & mut [u8]) {
+    async fn send_update(game: &HQMGame, player: &HQMConnectedPlayer, player_index: usize, socket: & UdpSocket, packets: &[HQMObjectPacket], write_buf: & mut [u8]) {
         let mut writer = HQMMessageWriter::new(write_buf);
 
         let rules_state =
-            if self.game.red_offside_status == HQMOffsideStatus::Offside ||
-                self.game.blue_offside_status == HQMOffsideStatus::Offside {
+            if game.red_offside_status == HQMOffsideStatus::Offside ||
+                game.blue_offside_status == HQMOffsideStatus::Offside {
                 HQMRulesState::Offside
-            } else if self.game.red_icing_status == HQMIcingStatus::Icing ||
-                self.game.blue_icing_status == HQMIcingStatus::Icing {
+            } else if game.red_icing_status == HQMIcingStatus::Icing ||
+                game.blue_icing_status == HQMIcingStatus::Icing {
                 HQMRulesState::Icing
             } else {
-                let icing_warning = self.game.red_icing_status.is_warning() ||
-                    self.game.blue_icing_status.is_warning();
-                let offside_warning = self.game.red_offside_status.is_warning() ||
-                    self.game.red_offside_status.is_warning();
+                let icing_warning = game.red_icing_status.is_warning() ||
+                    game.blue_icing_status.is_warning();
+                let offside_warning = game.red_offside_status.is_warning() ||
+                    game.red_offside_status.is_warning();
                 HQMRulesState::Regular {
                     offside_warning, icing_warning
                 }
             };
-        if player.game_id != self.game.game_id {
+        if player.game_id != game.game_id {
             writer.write_bytes_aligned(GAME_HEADER);
             writer.write_byte_aligned(6);
-            writer.write_u32_aligned(self.game.game_id);
+            writer.write_u32_aligned(game.game_id);
         } else {
             writer.write_bytes_aligned(GAME_HEADER);
             writer.write_byte_aligned(5);
-            writer.write_u32_aligned(self.game.game_id);
-            writer.write_u32_aligned(self.game.game_step);
-            writer.write_bits(1, match self.game.game_over {
+            writer.write_u32_aligned(game.game_id);
+            writer.write_u32_aligned(game.game_step);
+            writer.write_bits(1, match game.game_over {
                 true => 1,
                 false => 0
             });
-            writer.write_bits(8, self.game.red_score);
-            writer.write_bits(8, self.game.blue_score);
-            writer.write_bits(16, self.game.time);
-            writer.write_bits(16, self.game.goal_timer);
-            writer.write_bits(8, self.game.period);
-            writer.write_bits(8, i as u32);
+            writer.write_bits(8, game.red_score);
+            writer.write_bits(8, game.blue_score);
+            writer.write_bits(16, game.time);
+            writer.write_bits(16, game.goal_timer);
+            writer.write_bits(8, game.period);
+            writer.write_bits(8, player_index as u32);
 
             // if using a non-cryptic version, send ping
             if player.client_version > 0 {
@@ -1148,35 +1148,35 @@ impl HQMServer {
                 writer.write_u32_aligned(num);
             }
 
-            writer.write_u32_aligned(self.game.packet);
-            writer.write_u32_aligned(player.packet);
+            writer.write_u32_aligned(game.packet);
+            writer.write_u32_aligned(player.known_packet);
 
             for i in 0..32 {
                 match &packets[i] {
                     HQMObjectPacket::Puck(puck) => {
                         writer.write_bits(1, 1);
                         writer.write_bits(2, 1); // Puck type
-                        writer.write_pos(17, puck.pos.0);
-                        writer.write_pos(17, puck.pos.1);
-                        writer.write_pos(17, puck.pos.2);
-                        writer.write_pos(31, puck.rot.0);
-                        writer.write_pos(31, puck.rot.1);
+                        writer.write_pos(17, puck.pos.0, None);
+                        writer.write_pos(17, puck.pos.1, None);
+                        writer.write_pos(17, puck.pos.2, None);
+                        writer.write_pos(31, puck.rot.0, None);
+                        writer.write_pos(31, puck.rot.1, None);
                     } ,
                     HQMObjectPacket::Skater(skater) => {
                         writer.write_bits(1, 1);
                         writer.write_bits(2, 0); // Skater type
-                        writer.write_pos(17, skater.pos.0);
-                        writer.write_pos(17, skater.pos.1);
-                        writer.write_pos(17, skater.pos.2);
-                        writer.write_pos(31, skater.rot.0);
-                        writer.write_pos(31, skater.rot.1);
-                        writer.write_pos(13, skater.stick_pos.0);
-                        writer.write_pos(13, skater.stick_pos.1);
-                        writer.write_pos(13, skater.stick_pos.2);
-                        writer.write_pos(25, skater.stick_rot.0);
-                        writer.write_pos(25, skater.stick_rot.1);
-                        writer.write_pos(16, skater.head_rot);
-                        writer.write_pos(16, skater.body_rot);
+                        writer.write_pos(17, skater.pos.0, None);
+                        writer.write_pos(17, skater.pos.1, None);
+                        writer.write_pos(17, skater.pos.2, None);
+                        writer.write_pos(31, skater.rot.0, None);
+                        writer.write_pos(31, skater.rot.1, None);
+                        writer.write_pos(13, skater.stick_pos.0, None);
+                        writer.write_pos(13, skater.stick_pos.1, None);
+                        writer.write_pos(13, skater.stick_pos.2, None);
+                        writer.write_pos(25, skater.stick_rot.0, None);
+                        writer.write_pos(25, skater.stick_rot.1, None);
+                        writer.write_pos(16, skater.head_rot, None);
+                        writer.write_pos(16, skater.body_rot, None);
                     },
                     HQMObjectPacket::None => {
                         writer.write_bits(1, 0);
@@ -1184,12 +1184,12 @@ impl HQMServer {
                 }
             }
 
-            let remaining_messages = min(player.messages.len() - player.msgpos as usize, 15);
+            let remaining_messages = min(player.messages.len() - player.known_msgpos as usize, 15);
 
             writer.write_bits(4, remaining_messages as u32);
-            writer.write_bits(16, player.msgpos);
+            writer.write_bits(16, player.known_msgpos.into());
 
-            let pos2 = player.msgpos as usize;
+            let pos2 = player.known_msgpos as usize;
 
             for i in pos2..pos2 + remaining_messages {
                 let message = &player.messages[i];
@@ -1278,8 +1278,8 @@ impl HQMServer {
             if let Some(player) = p {
                 player.skater = None;
                 player.team = HQMTeam::Spec;
-                player.msgpos = 0;
-                player.packet = u32::MAX;
+                player.known_msgpos = 0;
+                player.known_packet = u32::MAX;
                 player.messages.clear();
                 let update = HQMMessage::PlayerUpdate {
                     player_name: player.player_name.clone(),
@@ -1581,8 +1581,8 @@ pub(crate) struct HQMConnectedPlayer {
     pub(crate) skater: Option<usize>,
     game_id: u32,
     input: HQMPlayerInput,
-    packet: u32,
-    msgpos: u32,
+    known_packet: u32,
+    known_msgpos: u16,
     chat_rep: u32,
     messages: Vec<Rc<HQMMessage>>,
     inactivity: u32,
@@ -1603,8 +1603,8 @@ impl HQMConnectedPlayer {
             faceoff_position: String::from("C"),
             skater: None,
             game_id: u32::MAX,
-            packet: u32::MAX,
-            msgpos: 0,
+            known_packet: u32::MAX,
+            known_msgpos: 0,
             chat_rep: 0,
             messages: global_messages,
             input: HQMPlayerInput::default(),
