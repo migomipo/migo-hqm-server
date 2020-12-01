@@ -56,15 +56,13 @@ async fn main() -> std::io::Result<()> {
             .map(String::from)
             .filter(|x| !x.is_empty()).collect();
 
-        // Rules
-        let rules_section = conf.section(Some("Rules")).unwrap();
-        let rules_time_period = rules_section.get("time_period").unwrap().parse::<u32>().unwrap();
-        let rules_time_warmup = rules_section.get("time_warmup").unwrap().parse::<u32>().unwrap();
-        let rules_time_intermission = rules_section.get("time_intermission").unwrap().parse::<u32>().unwrap();
-        let warmup_pucks = rules_section.get("warmup_pucks").map_or_else(|| 1, |x| x.parse::<u32>().unwrap());
-
         // Game
         let game_section = conf.section(Some("Game")).unwrap();
+
+        let rules_time_period = game_section.get("time_period").unwrap().parse::<u32>().unwrap();
+        let rules_time_warmup = game_section.get("time_warmup").unwrap().parse::<u32>().unwrap();
+        let rules_time_intermission = game_section.get("time_intermission").unwrap().parse::<u32>().unwrap();
+        let warmup_pucks = game_section.get("warmup_pucks").map_or_else(|| 1, |x| x.parse::<u32>().unwrap());
 
         // Game: Red Entry Offset
         let mut red_game_entry_offset:Vector3<f32>=Vector3::new(15.0,2.75,27.75);
