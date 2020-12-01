@@ -16,10 +16,10 @@ pub(crate) struct HQMGameWorld {
 }
 
 impl HQMGameWorld {
-    pub(crate) fn create_player_object (& mut self, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize) -> Option<usize> {
+    pub(crate) fn create_player_object (& mut self, team: HQMTeam, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize) -> Option<usize> {
         let object_slot = self.find_empty_object_slot();
         if let Some(i) = object_slot {
-            self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, start, rot, hand, connected_player_index));
+            self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, team, start, rot, hand, connected_player_index));
         }
         return object_slot;
     }
@@ -177,7 +177,6 @@ impl HQMRinkLine {
         let normal = match team {
             HQMTeam::Red => Vector3::z(),
             HQMTeam::Blue => -Vector3::z(),
-            _ => panic!()
         };
         let point = midline_point - blue_line_distance*normal;
         HQMRinkLine {
@@ -194,7 +193,6 @@ impl HQMRinkLine {
         let normal = match team {
             HQMTeam::Red => Vector3::z(),
             HQMTeam::Blue => -Vector3::z(),
-            _ => panic!()
         };
         let point = midline_point + blue_line_distance*normal;
         HQMRinkLine {
@@ -210,7 +208,6 @@ impl HQMRinkLine {
         let normal = match team {
             HQMTeam::Red => Vector3::z(),
             HQMTeam::Blue => -Vector3::z(),
-            _ => panic!()
         };
         HQMRinkLine {
             point,
@@ -257,7 +254,6 @@ impl HQMRinkNet {
         let (pos, rot) = match team {
             HQMTeam::Red => (Point3::new (mid_x, 0.0, 3.5), Matrix3::identity()),
             HQMTeam::Blue => (Point3::new (mid_x, 0.0, rink_length - 3.5), Matrix3::from_columns (& [-Vector3::x(), Vector3::y(), -Vector3::z()])),
-            _ => panic!()
         };
         let (front_upper_left, front_upper_right, front_lower_left, front_lower_right,
             back_upper_left, back_upper_right, back_lower_left, back_lower_right) =
@@ -463,6 +459,7 @@ pub(crate) struct HQMSkater {
     pub(crate) index: usize,
     pub(crate) connected_player_index: usize,
     pub(crate) body: HQMBody,
+    pub(crate) team: HQMTeam,
     pub(crate) stick_pos: Point3<f32>,        // Measured in meters
     pub(crate) stick_velocity: Vector3<f32>,  // Measured in meters per hundred of a second
     pub(crate) stick_rot: Matrix3<f32>,       // Rotation matrix
@@ -490,7 +487,7 @@ impl HQMSkater {
         collision_balls
     }
 
-    fn new(object_index: usize, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize) -> Self {
+    fn new(object_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize) -> Self {
         let linear_velocity = Vector3::new (0.0, 0.0, 0.0);
         let collision_balls = HQMSkater::get_collision_balls(&pos, &rot, &linear_velocity);
         HQMSkater {
@@ -503,6 +500,7 @@ impl HQMSkater {
                 angular_velocity: Vector3::new (0.0, 0.0, 0.0),
                 rot_mul: Vector3::new (2.75, 6.16, 2.35)
             },
+            team,
             stick_pos: pos.clone(),
             stick_velocity: Vector3::new (0.0, 0.0, 0.0),
             stick_rot: Matrix3::identity(),
@@ -675,7 +673,7 @@ pub(crate) enum HQMGameObject {
 pub(crate) enum HQMMessage {
     PlayerUpdate {
         player_name: String,
-        team: HQMTeam,
+        team: Option<HQMTeam>,
         player_index: usize,
         object_index: Option<usize>,
         in_server: bool,
@@ -694,7 +692,6 @@ pub(crate) enum HQMMessage {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum HQMTeam {
-    Spec,
     Red,
     Blue,
 }
@@ -704,7 +701,6 @@ impl HQMTeam {
         match self {
             HQMTeam::Red => 0,
             HQMTeam::Blue => 1,
-            HQMTeam::Spec => u32::MAX
         }
     }
 }
@@ -714,7 +710,6 @@ impl Display for HQMTeam {
         match self {
             HQMTeam::Red => write!(f, "Red"),
             HQMTeam::Blue => write!(f, "Blue"),
-            HQMTeam::Spec => write!(f, "Spec")
         }
     }
 }

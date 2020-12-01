@@ -119,30 +119,28 @@ impl HQMServer {
 
         let force_player_index_number = force_player_off_number - 1;
 
-        if force_player_index_number as usize <= self.players.len()-1{
+        if (force_player_index_number as usize) < self.players.len() {
             if let Some(force_player) = & mut self.players[force_player_index_number as usize] {
-                force_player.team = HQMTeam::Spec;
+
                 force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
                 if let Some (i) = force_player.skater {
                     self.game.world.objects[i] = HQMGameObject::None;
                     force_player.skater = None;
+                    let force_player_name = force_player.player_name.clone();
+                    let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
+
+                    self.add_global_message(HQMMessage::PlayerUpdate {
+                        player_name: force_player_name,
+                        team: None,
+                        player_index: force_player_index_number as usize,
+                        object_index: None,
+                        in_server: true
+                    },true);
+
+                    self.add_server_chat_message(msg);
                 }
-                let force_player_name = force_player.player_name.clone();
-                let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
-
-                self.add_global_message(HQMMessage::PlayerUpdate {
-                    player_name: force_player_name,
-                    team: HQMTeam::Spec,
-                    player_index: force_player_index_number as usize,
-                    object_index: None,
-                    in_server: true
-                },true);
-
-                self.add_server_chat_message(msg);
             }
         }
-
-
     }
 
     pub(crate) fn set_role (& mut self, player_index: usize, input_position:&str) {
@@ -329,7 +327,6 @@ impl HQMServer {
                         let msg = format!("Blue score changed by {}",player.player_name);
                         self.add_server_chat_message(msg);
                     },
-                    _=>{}
                 }
             } else {
                 self.admin_deny_message(player_index);
