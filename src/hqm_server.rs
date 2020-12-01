@@ -426,7 +426,8 @@ impl HQMServer {
         }
     }
 
-    fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, world: & mut HQMGameWorld, config: & HQMServerConfiguration, team: Option<HQMTeam>) -> bool {
+    fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, world: & mut HQMGameWorld, config: & HQMServerConfiguration, team: Option<HQMTeam>)
+        -> Option<Option<(usize, HQMTeam)>> {
         let current_skater = player.skater.and_then(|skater_index| match & mut world.objects[skater_index] {
             HQMGameObject::Player(skater) => {
                 Some((skater_index, skater))
@@ -439,9 +440,9 @@ impl HQMServer {
                     Some(team) => {
                         if current_skater.team != team {
                             current_skater.team = team;
-                            true
+                            Some(Some((skater_index, team)))
                         } else {
-                            false
+                            None
                         }
                     },
                     None => {
@@ -449,7 +450,7 @@ impl HQMServer {
 
                         world.objects[skater_index] = HQMGameObject::None;
                         player.skater = None;
-                        true
+                        Some(None)
                     }
                 }
             },
@@ -472,36 +473,35 @@ impl HQMServer {
 
                         if let Some(i) = world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index) {
                             player.skater = Some(i);
-                            true
+                            Some(Some((i, team)))
                         } else {
-                            false
+                            None
                         }
                     },
                     None => {
-                        false
+                        None
                     }
                 }
             }
         }
     }
 
-    pub(crate) fn set_team (& mut self, player_index: usize, team: Option<HQMTeam>) -> bool {
+    pub(crate) fn set_team (& mut self, player_index: usize, team: Option<HQMTeam>) -> Option<Option<(usize, HQMTeam)>> {
         match & mut self.players[player_index as usize] {
             Some(player) => {
                 let res = HQMServer::set_team_internal(player_index, player, & mut self.game.world, & self.config, team);
-                if res {
+                if let Some(object) = res {
                     let msg = HQMMessage::PlayerUpdate {
                         player_name: player.player_name.clone(),
-                        team,
+                        object,
                         player_index,
-                        object_index: player.skater,
                         in_server: true
                     };
                     self.add_global_message(msg, true);
                 }
                 res
             }
-            None => { false }
+            None => { None }
         }
     }
 
@@ -511,9 +511,8 @@ impl HQMServer {
             Some(player_index) => {
                 let update = HQMMessage::PlayerUpdate {
                     player_name: player_name.clone(),
-                    team: None,
+                    object: None,
                     player_index,
-                    object_index: None,
                     in_server: true,
                 };
 
@@ -545,9 +544,8 @@ impl HQMServer {
             Some(player) => {
                 let update = HQMMessage::PlayerUpdate {
                     player_name: player.player_name.clone(),
-                    team: None,
+                    object: None,
                     player_index,
-                    object_index: None,
                     in_server: false,
                 };
                 if let Some(object_index) = player.skater {
@@ -694,31 +692,24 @@ impl HQMServer {
                     if *new_team_count + 1 <= self.config.team_max
                         && (!self.config.force_team_size_parity || (*new_team_count <= other_team_count)) {
                         let has_skater = player.skater.is_some();
-                        let can_create_skater = HQMServer::set_team_internal(player_index, player, & mut self.game.world, & self.config, Some(new_team));
-                        if can_create_skater && !has_skater {
+                        let res = HQMServer::set_team_internal(player_index, player, & mut self.game.world, & self.config, Some(new_team));
+                        if res.is_some() && !has_skater {
                             *new_team_count += 1;
-                            Some(Some(new_team))
-                        } else {
-                            None
                         }
+                        res
                     } else {
                         None
                     }
                 } else if player.input.spectate() {
-                    if HQMServer::set_team_internal(player_index, player, & mut self.game.world, & self.config, None) {
-                        Some(None)
-                    } else {
-                        None
-                    }
+                    HQMServer::set_team_internal(player_index, player, & mut self.game.world, & self.config, None)
                 } else {
                     None
                 };
-                if let Some(team) = new_team {
+                if let Some(object) = new_team {
                     let msg = HQMMessage::PlayerUpdate {
                         player_name: player.player_name.clone(),
-                        team,
+                        object,
                         player_index,
-                        object_index: player.skater,
                         in_server: true
                     };
                     new_messages.push(msg);
@@ -777,9 +768,7 @@ impl HQMServer {
             self.game.red_score += 1;
         } else if team == HQMTeam::Blue {
             self.game.blue_score += 1;
-        } else {
-            panic!();
-        };
+        }
         self.game.goal_timer = self.config.time_intermission*100;
         self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
         if self.game.period > 3 && self.game.red_score != self.game.blue_score {
@@ -1227,22 +1216,23 @@ impl HQMServer {
                     }
                     HQMMessage::PlayerUpdate {
                         player_name,
-                        team,
+                        object,
                         player_index,
-                        object_index,
                         in_server,
                     } => {
                         writer.write_bits(6, 0);
                         writer.write_bits(6, *player_index as u32);
                         writer.write_bits(1, if *in_server { 1 } else { 0 });
-                        writer.write_bits(2, match team {
-                            Some(team) => team.get_num(),
-                            None => u32::MAX,
-                        });
-                        writer.write_bits(6, match *object_index {
-                            Some (x) => x as u32,
-                            None => u32::MAX
-                        });
+                        let (object_index, team_num) = match object {
+                            Some((i, team)) => {
+                                (*i as u32, team.get_num ())
+                            },
+                            None => {
+                                (u32::MAX, u32::MAX)
+                            }
+                        };
+                        writer.write_bits(2, team_num);
+                        writer.write_bits(6, object_index);
 
                         let name_bytes = player_name.as_bytes();
                         for i in 0usize..31 {
@@ -1284,9 +1274,8 @@ impl HQMServer {
                 player.messages.clear();
                 let update = HQMMessage::PlayerUpdate {
                     player_name: player.player_name.clone(),
-                    team: None,
+                    object: None,
                     player_index: i,
-                    object_index: None,
                     in_server: true,
                 };
                 messages.push(update);
@@ -1375,13 +1364,9 @@ impl HQMServer {
 
             let update = HQMMessage::PlayerUpdate {
                 player_name: player.player_name.clone(),
-                team: if new_object_index.is_some() {
-                    Some(team)
-                } else {
-                    None
-                },
+                object: new_object_index.map(|x| (x, team)),
                 player_index,
-                object_index: new_object_index,
+
                 in_server: true,
             };
             messages.push(update);

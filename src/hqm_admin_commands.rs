@@ -131,9 +131,8 @@ impl HQMServer {
 
                     self.add_global_message(HQMMessage::PlayerUpdate {
                         player_name: force_player_name,
-                        team: None,
+                        object: None,
                         player_index: force_player_index_number as usize,
-                        object_index: None,
                         in_server: true
                     },true);
 

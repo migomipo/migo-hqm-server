@@ -673,9 +673,8 @@ pub(crate) enum HQMGameObject {
 pub(crate) enum HQMMessage {
     PlayerUpdate {
         player_name: String,
-        team: Option<HQMTeam>,
+        object: Option<(usize, HQMTeam)>,
         player_index: usize,
-        object_index: Option<usize>,
         in_server: bool,
     },
     Goal {
