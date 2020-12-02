@@ -1,5 +1,5 @@
-use crate::hqm_server::HQMServer;
-use crate::hqm_game::{HQMGameObject, HQMMessage, HQMTeam};
+use crate::hqm_server::{HQMServer, HQMServerMode};
+use crate::hqm_game::{HQMGameObject, HQMMessage, HQMTeam, HQMGameState};
 use std::net::SocketAddr;
 
 impl HQMServer {
@@ -349,14 +349,16 @@ impl HQMServer {
     }
 
     pub(crate) fn faceoff (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin{
-                self.game.intermission = 5*100;
+        if self.config.mode == HQMServerMode::Match && self.game.state != HQMGameState::GameOver {
+            if let Some(player) = & self.players[player_index] {
+                if player.is_admin{
+                    self.game.intermission = 5*100;
 
-                let msg = format!("Faceoff initiated by {}",player.player_name);
-                self.add_server_chat_message(msg);
-            } else {
-                self.admin_deny_message(player_index);
+                    let msg = format!("Faceoff initiated by {}",player.player_name);
+                    self.add_server_chat_message(msg);
+                } else {
+                    self.admin_deny_message(player_index);
+                }
             }
         }
     }
@@ -367,6 +369,20 @@ impl HQMServer {
                 let msg = format!("Game reset by {}",player.player_name);
 
                 self.new_game();
+
+                self.add_server_chat_message(msg);
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    pub(crate) fn start_game (& mut self, player_index: usize) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin && self.config.mode == HQMServerMode::Match && self.game.state == HQMGameState::Warmup {
+                let msg = format!("Game started by {}",player.player_name);
+
+                self.game.time = 1;
 
                 self.add_server_chat_message(msg);
             } else {

@@ -361,7 +361,10 @@ impl HQMServer {
             "faceoff" => {
                 self.faceoff(player_index);
             },
-            "resetgame" => {
+            "start" => {
+                self.start_game(player_index);
+            },
+            "reset" => {
                 self.reset_game(player_index);
             },
             "pause" => {
@@ -743,9 +746,8 @@ impl HQMServer {
             if self.config.mode == HQMServerMode::Match {
                 self.handle_events(events);
                 self.update_clock();
+                self.game.update_game_state();
             }
-
-            self.game.update_game_state();
 
             let packets = get_packets(& self.game.world.objects);
 
@@ -831,7 +833,8 @@ impl HQMServer {
         || self.game.period == 0
         || self.game.time == 0
         || self.game.goal_timer > 0
-        || self.game.intermission > 0 {
+        || self.game.intermission > 0
+        || self.game.paused {
             return;
         }
         for event in events {
