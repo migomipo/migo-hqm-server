@@ -113,14 +113,13 @@ impl HQMGameWorld {
         update_sticks_and_pucks (& mut players, & mut pucks, & self.rink, & mut events);
 
         for (puck, old_puck_pos) in pucks.iter_mut().zip(pucks_old_pos.iter()) {
-            if let Some(linear_velocity_normalized) = puck.body.linear_velocity.try_normalize(1e-06) {
-                let linear_velocity_norm = puck.body.linear_velocity.norm ();
-                let scale = linear_velocity_norm.powi(2) * 0.125 * 0.125;
-                let scaled = linear_velocity_normalized.scale(scale);
+            if puck.body.linear_velocity.norm () > 1.0/65536.0 {
+                let scale = puck.body.linear_velocity.norm ().powi(2) * 0.125 * 0.125;
+                let scaled = puck.body.linear_velocity.normalize().scale(scale);
                 puck.body.linear_velocity -= scaled;
             }
-            if let Some(angular_velocity_normalized) = puck.body.angular_velocity.try_normalize(1e-06) {
-                rotate_matrix_around_axis(& mut puck.body.rot, &angular_velocity_normalized, puck.body.angular_velocity.norm())
+            if puck.body.angular_velocity.norm() > 1.0/65536.0 {
+                rotate_matrix_around_axis(& mut puck.body.rot, &puck.body.angular_velocity.normalize(), puck.body.angular_velocity.norm())
             }
             puck_detection(puck, puck.index, &old_puck_pos, & self.rink, & mut events);
         }
@@ -304,8 +303,8 @@ fn update_player(player: & mut HQMSkater, gravity: f32, limit_jump_speed: bool) 
         player.body.angular_velocity += turn_change;
     }
 
-    if let Some(angular_velocity_normalized) = player.body.angular_velocity.try_normalize(1e-06) {
-        rotate_matrix_around_axis(& mut player.body.rot, &angular_velocity_normalized, player.body.angular_velocity.norm())
+    if player.body.angular_velocity.norm() > 1.0/65536.0 {
+        rotate_matrix_around_axis(& mut player.body.rot, &player.body.angular_velocity.normalize(), player.body.angular_velocity.norm());
     }
     adjust_head_body_rot(& mut player.head_rot, player.input.head_rot);
     adjust_head_body_rot(& mut player.body_rot, player.input.body_rot);
@@ -343,20 +342,17 @@ fn update_player2 (player: & mut HQMSkater) {
         let temp1 = -feet_pos[1] * 0.125 * 0.125 * 0.25;
         let unit_y = Vector3::y();
 
-        let mut jump_force = unit_y.scale(temp1) - player.body.linear_velocity.scale(0.25);
-        if jump_force.dot(&unit_y) > 0.0 {
+        let mut temp2 = unit_y.scale(temp1) - player.body.linear_velocity.scale(0.25);
+        if temp2.dot(&unit_y) > 0.0 {
             let (column, rejection_limit) = if player.input.shift() { (Vector3::x(), 0.4) } else { (Vector3::z(), 1.2) };
             let mut temp_v2 = &player.body.rot * column;
             temp_v2[1] = 0.0;
+            normal_or_zero_mut(& mut temp_v2);
 
-            if temp_v2.try_normalize_mut(0.0).is_none () {
-                temp_v2 = Vector3::new (0.0, 0.0, 0.0);
-            }
+            temp2 -= temp_v2.scale(temp2.dot(&temp_v2));
 
-            jump_force -= temp_v2.scale(jump_force.dot(&temp_v2));
-
-            limit_rejection(& mut jump_force, & unit_y, rejection_limit);
-            player.body.linear_velocity += jump_force;
+            limit_rejection(& mut temp2, & unit_y, rejection_limit);
+            player.body.linear_velocity += temp2;
             touches_ice = true;
         }
     }
@@ -370,18 +366,14 @@ fn update_player2 (player: & mut HQMSkater) {
         let mut unit: Vector3<f32> = Vector3::y();
 
         if !player.input.shift() {
-            let leaning_axis = &player.body.rot * Vector3::z();
-            let temp = -player.body.linear_velocity.dot(&leaning_axis) / 0.05;
-            rotate_vector_around_axis(& mut unit, &leaning_axis, 0.225 * turn * temp);
+            let axis = &player.body.rot * Vector3::z();
+            let temp = -player.body.linear_velocity.dot(&axis) / 0.05;
+            rotate_vector_around_axis(& mut unit, &axis, 0.225 * turn * temp);
         }
 
         let mut temp2 = unit.cross(&(&player.body.rot * Vector3::y()));
 
-        let temp2n = if let Some (r) = temp2.try_normalize(0.0) {
-            r
-        } else {
-            Vector3::new (0.0, 0.0, 0.0)
-        };
+        let temp2n = normal_or_zero(&temp2);
         temp2.scale_mut(0.008333333);
 
         let temp3 = -0.25 * temp2n.dot (&player.body.angular_velocity);
@@ -817,11 +809,14 @@ fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     let projection_length = v.dot(&normal);
     let projection = normal.scale(projection_length);
     let rejection = &*v - &projection;
+    let rejection_length = rejection.norm();
     *v = projection.clone_owned();
 
-    if let Some(rejection_normalized) = rejection.try_normalize(1e-06) {
-        let rejection_length2 = rejection.norm().min(projection.norm() * d);
-        *v += rejection_normalized.scale(rejection_length2);
+    if rejection_length > 1.0/65536.0 {
+        let rejection_norm = rejection.normalize();
+
+        let rejection_length2 = rejection_length.min(projection.norm() * d);
+        *v += rejection_norm.scale(rejection_length2);
     }
 }
 
@@ -843,4 +838,22 @@ fn rotate_matrix_around_axis<T: Storage<f32, U3, U1>>(v: & mut Matrix3<f32>, axi
     rotate_vector_around_axis(& mut v.column_mut(0), axis, angle);
     rotate_vector_around_axis(& mut v.column_mut(1), axis, angle);
     rotate_vector_around_axis(& mut v.column_mut(2), axis, angle);
+}
+
+fn normal_or_zero(v: & Vector3<f32>) -> Vector3<f32> {
+    if let Some (r) = v.try_normalize(0.0) {
+        r
+    } else {
+        Vector3::new (0.0, 0.0, 0.0)
+    }
+}
+
+fn normal_or_zero_mut(v: & mut Vector3<f32>) {
+    let res = v.try_normalize_mut(0.0);
+    if res.is_none() {
+        v[0] = 0.0;
+        v[1] = 0.0;
+        v[2] = 0.0;
+    }
+
 }
