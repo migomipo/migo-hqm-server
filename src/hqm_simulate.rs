@@ -539,7 +539,7 @@ fn do_puck_stick_forces(puck: & mut HQMPuck, player: & mut HQMSkater, puck_verti
             res = true;
             let puck_vertex_speed = speed_of_point_including_rotation(&puck_vertex, & puck.body.pos, puck_linear_velocity, puck_angular_velocity);
 
-            let mut puck_force = (normal.scale(dot * 0.5) + (stick_velocity - puck_vertex_speed)).scale(0.125);
+            let mut puck_force = normal.scale(dot * 0.125 * 0.5) + (stick_velocity - puck_vertex_speed).scale(0.125);
             if puck_force.dot(&normal) > 0.0 {
                 limit_rejection(& mut puck_force, &normal, 0.5);
                 player.stick_velocity -= puck_force.scale(0.25);
@@ -678,17 +678,21 @@ fn collision_between_puck_and_surface(puck_pos: &Point3<f32>, puck_pos2: &Point3
     let normal = (&surface.3 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
     let p1 = &surface.0;
     let puck_pos2_projection = (p1 - puck_pos2).dot(&normal);
-    let puck_pos_projection = (p1 - puck_pos).dot(&normal);
-    let diff = puck_pos2 - puck_pos;
-    let diff_projection = diff.dot(&normal);
-    if puck_pos2_projection >= 0.0 && puck_pos_projection <= 0.0 && diff_projection != 0.0 {
-        // puck_pos2 is inside the plane but puck_pos is not inside the plane
-        let intersection = puck_pos_projection / diff_projection;
-        let intersection_pos = puck_pos + diff.scale(intersection);
-        let overlap = (&intersection_pos - puck_pos2).dot(&normal);
+    if puck_pos2_projection >= 0.0 {
+        let puck_pos_projection = (p1 - puck_pos).dot(&normal);
+        if puck_pos_projection <= 0.0 {
+            let diff = puck_pos2 - puck_pos;
+            let diff_projection = diff.dot(&normal);
+            if diff_projection != 0.0 {
+                let intersection = puck_pos_projection / diff_projection;
+                let intersection_pos = puck_pos + diff.scale(intersection);
 
-        if inside_surface(&intersection_pos, surface, &normal) {
-            return Some((intersection, intersection_pos, overlap, normal));
+                let overlap = (&intersection_pos - puck_pos2).dot(&normal);
+
+                if inside_surface(&intersection_pos, surface, &normal) {
+                    return Some((intersection, intersection_pos, overlap, normal));
+                }
+            }
         }
 
     }
