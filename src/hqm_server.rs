@@ -141,19 +141,12 @@ impl HQMServer {
         }
 
         let packet = parser.read_u32_aligned();
-        if packet < player.known_packet && player.known_packet - packet < 1000 {
-            // UDP does not guarantee that the packets arrive in the same order they were sent,
-            // or at all. This should prevent packets that are older than the most recent one
-            // received from being applied.
-            return;
-        }
 
         player.inactivity = 0;
         player.known_packet = packet;
         player.input = input;
         player.game_id = current_game_id;
         player.known_msgpos = parser.read_u16_aligned();
-
 
         let has_chat_msg = parser.read_bits(1) == 1;
         if has_chat_msg {
