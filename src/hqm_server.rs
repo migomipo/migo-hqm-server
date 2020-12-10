@@ -12,6 +12,7 @@ use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
+use tokio::io::Error;
 
 
 const GAME_HEADER: &[u8] = b"Hock";
@@ -26,6 +27,7 @@ pub(crate) struct HQMServer {
     pub(crate) game: HQMGame,
     game_alloc: u32,
     pub(crate) is_muted:bool,
+    alternative_io_loop: bool
 }
 
 impl HQMServer {
@@ -1476,19 +1478,38 @@ impl HQMServer {
                 }
             });
         }
-        loop {
-            tokio::select! {
-                _ = tick_timer.tick() => {
-                    self.tick(& socket, & mut write_buf).await;
+        if self.alternative_io_loop {
+            println! ("Alternative IO loop test");
+            loop {
+                tick_timer.tick().await;
+                loop {
+                    match socket.try_recv_from(&mut read_buf) {
+                        Ok((size, addr)) => {
+                            self.handle_message(addr, & socket, & read_buf[0..size], & mut write_buf).await;
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            break;
+                        }
+                        Err(_) => {}
+                    }
                 }
-                Ok((size, addr)) = socket.recv_from(&mut read_buf) => {
-                    self.handle_message(addr, & socket, & read_buf[0..size], & mut write_buf).await;
+                self.tick(& socket, & mut write_buf).await;
+            }
+        } else {
+            loop {
+                tokio::select! {
+                    _ = tick_timer.tick() => {
+                        self.tick(& socket, & mut write_buf).await;
+                    }
+                    Ok((size, addr)) = socket.recv_from(&mut read_buf) => {
+                        self.handle_message(addr, & socket, & read_buf[0..size], & mut write_buf).await;
+                    }
                 }
             }
         }
     }
 
-    pub fn new(config: HQMServerConfiguration) -> Self {
+    pub fn new(config: HQMServerConfiguration, alternative_io_loop: bool) -> Self {
         let mut player_vec = Vec::with_capacity(64);
         for _ in 0..64 {
             player_vec.push(None);
@@ -1501,7 +1522,8 @@ impl HQMServer {
             game: HQMGame::new(1, &config),
             game_alloc: 1,
             is_muted:false,
-            config
+            config,
+            alternative_io_loop,
         }
     }
 }

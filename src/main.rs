@@ -106,6 +106,7 @@ async fn main() -> std::io::Result<()> {
             _ => HQMOffsideConfiguration::Off
         });
 
+        let alternative_io_loop = server_section.get("altio").map_or(false, |x| x.parse::<bool>().unwrap());
 
         let config = HQMServerConfiguration {
             server_name,
@@ -136,7 +137,7 @@ async fn main() -> std::io::Result<()> {
             mode
         };
         // Config file didn't exist; use defaults as described
-        return HQMServer::new(config).run().await;
+        return HQMServer::new(config, alternative_io_loop).run().await;
     } else {
         println! ("Could not open configuration file {}!", config_path);
         return Ok(())
