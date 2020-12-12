@@ -401,6 +401,39 @@ impl HQMRink {
             ]
         }
     }
+
+    pub fn get_offside_faceoff_spot(& self, pos: &Point3<f32>, team: HQMTeam) -> HQMFaceoffSpot {
+        let left_side = if pos.x <= self.width/2.0 { 0usize } else { 1usize };
+        let (lines_and_net, f1, f2, f3) = match team {
+            HQMTeam::Red => {
+                (& self.red_lines_and_net, &self.blue_neutral_faceoff_spots, &self.red_neutral_faceoff_spots, &self.red_zone_faceoff_spots)
+            }
+            HQMTeam::Blue => {
+                (& self.blue_lines_and_net, &self.red_neutral_faceoff_spots, &self.blue_neutral_faceoff_spots, &self.blue_zone_faceoff_spots)
+            }
+        };
+        if lines_and_net.offensive_line.point_past_middle_of_line(pos) {
+            f1[left_side].clone()
+        } else if lines_and_net.mid_line.point_past_middle_of_line(pos) {
+            self.center_faceoff_spot.clone()
+        } else if lines_and_net.defensive_line.point_past_middle_of_line(pos) {
+            f2[left_side].clone()
+        } else {
+            f3[left_side].clone()
+        }
+    }
+
+    pub fn get_icing_faceoff_spot(& self, pos: &Point3<f32>, team: HQMTeam) -> HQMFaceoffSpot {
+        let left_side = if pos.x <= self.width/2.0 { 0usize } else { 1usize };
+        match team {
+            HQMTeam::Red => {
+                self.red_zone_faceoff_spots[left_side].clone()
+            }
+            HQMTeam::Blue => {
+                self.blue_zone_faceoff_spots[left_side].clone()
+            },
+        }
+    }
 }
 
 fn create_faceoff_spot (center_position: Point3<f32>, rink_width: f32, rink_length: f32) -> HQMFaceoffSpot {

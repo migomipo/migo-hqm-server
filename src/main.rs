@@ -35,8 +35,8 @@ async fn main() -> std::io::Result<()> {
         let server_name = server_section.get("name").unwrap().parse::<String>().unwrap();
         let server_port = server_section.get("port").unwrap().parse::<u16>().unwrap();
         let server_public = server_section.get("public").unwrap().parse::<bool>().unwrap();
-        let server_player_max = server_section.get("player_max").unwrap().parse::<u32>().unwrap();
-        let server_team_max = server_section.get("team_max").unwrap().parse::<u32>().unwrap();
+        let server_player_max = server_section.get("player_max").unwrap().parse::<usize>().unwrap();
+        let server_team_max = server_section.get("team_max").unwrap().parse::<usize>().unwrap();
         let force_team_size_parity = match server_section.get("force_team_size_parity") {
             Some(s) => s.eq_ignore_ascii_case("true"),
             None => false

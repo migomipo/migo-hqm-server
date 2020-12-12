@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
-use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMIcingStatus, HQMOffsideStatus, HQMRulesState, HQMFaceoffSpot, HQMPuckTouch, HQMRink, HQMPuck};
+use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMIcingStatus, HQMOffsideStatus, HQMRulesState, HQMPuckTouch, HQMPuck};
 use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::collections::{HashSet, HashMap};
@@ -68,9 +68,9 @@ impl HQMServer {
         writer.write_u32_aligned(ping);
 
         let player_count  = self.player_count();
-        writer.write_bits(8, player_count);
+        writer.write_bits(8, player_count as u32);
         writer.write_bits(4, 4);
-        writer.write_bits(4, self.config.team_max);
+        writer.write_bits(4, self.config.team_max as u32);
 
         writer.write_bytes_aligned_padded(32, self.config.server_name.as_ref());
 
@@ -84,8 +84,8 @@ impl HQMServer {
 
     }
 
-    fn player_count (& self) -> u32 {
-        let mut player_count = 0u32;
+    fn player_count (& self) -> usize {
+        let mut player_count = 0;
         for player in &self.players {
             if player.is_some() {
                 player_count += 1;
@@ -430,71 +430,12 @@ impl HQMServer {
         }
     }
 
-    fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, world: & mut HQMGameWorld, config: & HQMServerConfiguration, team: Option<HQMTeam>)
-        -> Option<Option<(usize, HQMTeam)>> {
-        let current_skater = player.skater.and_then(|skater_index| match & mut world.objects[skater_index] {
-            HQMGameObject::Player(skater) => {
-                Some((skater_index, skater))
-            }
-            _ => None
-        });
-        match current_skater {
-            Some((skater_index, current_skater)) => {
-                match team {
-                    Some(team) => {
-                        if current_skater.team != team {
-                            current_skater.team = team;
-                            Some(Some((skater_index, team)))
-                        } else {
-                            None
-                        }
-                    },
-                    None => {
-                        player.team_switch_timer = 500; // 500 ticks, 5 seconds
-
-                        world.objects[skater_index] = HQMGameObject::None;
-                        player.skater = None;
-                        Some(None)
-                    }
-                }
-            },
-            None => {
-                match team {
-                    Some(team) => {
-
-                        let (pos, rot) = match team {
-                            HQMTeam::Red=>{
-                                let pos = Point3::new(config.entry_point_red[0],config.entry_point_red[1],config.entry_point_red[2]);
-                                let rot = Rotation3::from_euler_angles(0.0,config.entry_rotation_red,0.0);
-                                (pos, rot)
-                            },
-                            HQMTeam::Blue=>{
-                                let pos = Point3::new(config.entry_point_blue[0],config.entry_point_blue[1],config.entry_point_blue[2]);
-                                let rot = Rotation3::from_euler_angles(0.0,config.entry_rotation_blue,0.0);
-                                (pos, rot)
-                            },
-                        };
-
-                        if let Some(i) = world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index) {
-                            player.skater = Some(i);
-                            Some(Some((i, team)))
-                        } else {
-                            None
-                        }
-                    },
-                    None => {
-                        None
-                    }
-                }
-            }
-        }
-    }
 
     #[allow(dead_code)]
     pub(crate) fn set_team (& mut self, player_index: usize, team: Option<HQMTeam>) -> Option<Option<(usize, HQMTeam)>> {
         match & mut self.players[player_index as usize] {
             Some(player) => {
-                let res = HQMServer::set_team_internal(player_index, player, & mut self.game.world, & self.config, team);
+                let res = set_team_internal(player_index, player, & mut self.game.world, & self.config, team);
                 if let Some(object) = res {
                     let msg = HQMMessage::PlayerUpdate {
                         player_name: player.player_name.clone(),
@@ -648,31 +589,9 @@ impl HQMServer {
         return self.players.iter().position(|x| x.is_none());
     }
 
-    fn remove_inactive_players (& mut self) {
-        for i in 0..self.players.len() {
-            let inactivity = match & mut self.players[i] {
-                Some(p) => {
-                    p.inactivity += 1;
-                    p.inactivity >= 500
-                },
-                None => false
-            };
-            if inactivity {
-                let player_name = {
-                    let player = self.players[i].as_ref().unwrap();
-                    player.player_name.clone()
-                };
-                self.remove_player(i);
-                let msg = format!("{} timed out", player_name);
-                self.add_server_chat_message(msg);
-            }
-        }
-    }
-
-
-    fn move_players_between_teams(&mut self) {
-        let mut red_player_count = 0;
-        let mut blue_player_count = 0;
+    fn update_players_and_input(&mut self) {
+        let mut red_player_count = 0usize;
+        let mut blue_player_count = 0usize;
         for p in self.game.world.objects.iter () {
             if let HQMGameObject::Player(player) = p {
                 if player.team == HQMTeam::Red {
@@ -682,68 +601,108 @@ impl HQMServer {
                 }
             }
         }
-        let mut new_messages = Vec::new();
-        for (player_index, player) in self.players.iter_mut().enumerate() {
-            if let Some(player) = player {
-                player.team_switch_timer = player.team_switch_timer.saturating_sub(1);
-                let new_team = if (player.input.join_red() || player.input.join_blue())
-                    && player.skater.is_none()
-                    && player.team_switch_timer == 0 {
-                    let (new_team, new_team_count, other_team_count) = if player.input.join_red() {
-                        (HQMTeam::Red, & mut red_player_count, blue_player_count)
-                    } else {
-                        (HQMTeam::Blue, & mut blue_player_count, red_player_count)
-                    };
-                    if *new_team_count + 1 <= self.config.team_max
-                        && (!self.config.force_team_size_parity || (*new_team_count <= other_team_count)) {
-                        let has_skater = player.skater.is_some();
-                        let res = HQMServer::set_team_internal(player_index, player, & mut self.game.world, & self.config, Some(new_team));
-                        if res.is_some() && !has_skater {
-                            *new_team_count += 1;
-                        }
-                        res
-                    } else {
-                        None
+
+        let mut messages = vec![];
+        let mut chat_messages = vec![];
+        let players = & mut self.players;
+        let world = & mut self.game.world;
+        for (player_index, player_option) in players.iter_mut().enumerate() {
+
+            if let Some(player) = player_option {
+                player.inactivity += 1;
+                if player.inactivity > 500 {
+                    if let Some(object_index) = player.skater {
+                       world.objects[object_index] = HQMGameObject::None;
                     }
-                } else if player.input.spectate() {
-                    HQMServer::set_team_internal(player_index, player, & mut self.game.world, & self.config, None)
-                } else {
-                    None
-                };
-                if let Some(object) = new_team {
-                    let msg = HQMMessage::PlayerUpdate {
+                    messages.push(HQMMessage::PlayerUpdate {
                         player_name: player.player_name.clone(),
-                        object,
+                        object: None,
+                        player_index,
+                        in_server: false
+                    });
+                    let chat_msg = format!("{} timed out", player.player_name);
+                    chat_messages.push(chat_msg);
+
+                    *player_option = None;
+
+                    continue;
+                }
+
+                player.team_switch_timer = player.team_switch_timer.saturating_sub(1);
+                let skater_object = player.skater.and_then(|x| match & mut world.objects[x] {
+
+                    HQMGameObject::Player(player) => { Some(player)}
+                    _ => None,
+                });
+                let change = match skater_object {
+                    Some(skater_object) => {
+
+                        if player.input.spectate() {
+                            let team_player_count = match skater_object.team {
+                                HQMTeam::Red => & mut red_player_count,
+                                HQMTeam::Blue => & mut blue_player_count
+                            };
+                            let res = set_team_internal(player_index, player, world, & self.config, None);
+                            if res.is_some() {
+                                *team_player_count -= 1;
+                                player.team_switch_timer = 500;
+                            }
+                            res
+
+                        } else {
+                            skater_object.input = player.input.clone();
+                            None
+                        }
+                    }
+                    None => {
+                        let new_team =
+                            if player.input.join_red() {
+                                Some ((HQMTeam::Red, & mut red_player_count, blue_player_count))
+                            } else if player.input.join_blue() {
+                                Some ((HQMTeam::Blue, & mut blue_player_count, red_player_count))
+                            } else {
+                                None
+                            };
+                        if let Some((new_team, new_team_count, other_team_count)) = new_team {
+                            if player.team_switch_timer == 0 && *new_team_count + 1 <= self.config.team_max && (!self.config.force_team_size_parity || (*new_team_count <= other_team_count)) {
+                                let res = set_team_internal(player_index, player, world, & self.config, Some(new_team));
+                                if res.is_some() {
+                                    *new_team_count += 1;
+                                }
+                                res
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                };
+                if let Some(change) = change  {
+                    messages.push(HQMMessage::PlayerUpdate {
+                        player_name: player.player_name.clone(),
+                        object: change,
                         player_index,
                         in_server: true
-                    };
-                    new_messages.push(msg);
+                    });
                 }
+
             }
         }
-        for m in new_messages {
-            self.add_global_message(m, true);
+
+        for message in messages {
+            self.add_global_message(message, true);
+        }
+        for message in chat_messages {
+            self.add_server_chat_message(message);
         }
     }
 
-    fn copy_player_input_to_object(& mut self) {
-        for p in self.players.iter() {
-            if let Some (player) = p {
-                if let Some (object_index) = player.skater {
-                    if let HQMGameObject::Player(player_object) = & mut self.game.world.objects[object_index] {
-                        player_object.input = player.input.clone();
-                    }
-                }
-            }
-        }
-    }
 
     async fn tick(&mut self, socket: & Arc<UdpSocket>) {
         if self.player_count() != 0 {
             self.game.active = true;
-            self.remove_inactive_players(); // connected players and objects
-            self.move_players_between_teams();
-            self.copy_player_input_to_object();
+            self.update_players_and_input();
             let events = self.game.world.simulate_step();
             if self.config.mode == HQMServerMode::Match {
                 self.handle_events(events);
@@ -755,7 +714,7 @@ impl HQMServer {
 
             for (player_index, player) in self.players.iter().enumerate() {
                 if let Some(player) = player {
-                    Self::send_update(&self.game, player, player_index, socket, &packets);
+                    send_update(&self.game, player, player_index, socket, &packets);
                 }
             }
             self.game.packet += 1;
@@ -810,7 +769,7 @@ impl HQMServer {
             HQMTeam::Red => & mut self.game.red_offside_status,
             HQMTeam::Blue => & mut self.game.blue_offside_status,
         };
-        self.game.next_faceoff_spot = Self::get_offside_faceoff_spot(pass_origin, &self.game.world.rink, team);
+        self.game.next_faceoff_spot = self.game.world.rink.get_offside_faceoff_spot(pass_origin, team);
         self.game.intermission = self.config.time_intermission*100;
         *offside_status = HQMOffsideStatus::Offside;
         self.add_server_chat_message(String::from("Offside"));
@@ -821,7 +780,7 @@ impl HQMServer {
             HQMTeam::Red => & mut self.game.red_icing_status,
             HQMTeam::Blue => & mut self.game.blue_icing_status,
         };
-        self.game.next_faceoff_spot = Self::get_icing_faceoff_spot(pass_origin, &self.game.world.rink, team);
+        self.game.next_faceoff_spot = self.game.world.rink.get_icing_faceoff_spot(pass_origin, team);
         self.game.intermission = self.config.time_intermission*100;
         *icing_status = HQMIcingStatus::Icing;
         self.add_server_chat_message(String::from("Icing"));
@@ -1016,38 +975,6 @@ impl HQMServer {
         puck.touches.truncate(8);
     }
 
-    fn get_offside_faceoff_spot(pos: &Point3<f32>, rink: & HQMRink, team: HQMTeam) -> HQMFaceoffSpot {
-        let left_side = if pos.x <= rink.width/2.0 { 0usize } else { 1usize };
-        let (lines_and_net, f1, f2, f3) = match team {
-            HQMTeam::Red => {
-                (& rink.red_lines_and_net, &rink.blue_neutral_faceoff_spots, &rink.red_neutral_faceoff_spots, &rink.red_zone_faceoff_spots)
-            }
-            HQMTeam::Blue => {
-                (& rink.blue_lines_and_net, &rink.red_neutral_faceoff_spots, &rink.blue_neutral_faceoff_spots, &rink.blue_zone_faceoff_spots)
-            }
-        };
-        if lines_and_net.offensive_line.point_past_middle_of_line(pos) {
-            f1[left_side].clone()
-        } else if lines_and_net.mid_line.point_past_middle_of_line(pos) {
-            rink.center_faceoff_spot.clone()
-        } else if lines_and_net.defensive_line.point_past_middle_of_line(pos) {
-            f2[left_side].clone()
-        } else {
-            f3[left_side].clone()
-        }
-    }
-
-    fn get_icing_faceoff_spot(pos: &Point3<f32>, rink: & HQMRink, team: HQMTeam) -> HQMFaceoffSpot {
-        let left_side = if pos.x <= rink.width/2.0 { 0usize } else { 1usize };
-        match team {
-            HQMTeam::Red => {
-                rink.red_zone_faceoff_spots[left_side].clone()
-            }
-            HQMTeam::Blue => {
-                rink.blue_zone_faceoff_spots[left_side].clone()
-            },
-        }
-    }
 
     fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool {
         let line = match team {
@@ -1072,196 +999,6 @@ impl HQMServer {
         false
     }
 
-
-    fn send_update(game: &HQMGame, player: &HQMConnectedPlayer, player_index: usize, socket: & Arc<UdpSocket>, packets: &[HQMObjectPacket]) {
-        let mut write_buf = vec![0u8; 4096];
-        let mut writer = HQMMessageWriter::new(& mut write_buf);
-
-        let rules_state =
-            if game.red_offside_status == HQMOffsideStatus::Offside ||
-                game.blue_offside_status == HQMOffsideStatus::Offside {
-                HQMRulesState::Offside
-            } else if game.red_icing_status == HQMIcingStatus::Icing ||
-                game.blue_icing_status == HQMIcingStatus::Icing {
-                HQMRulesState::Icing
-            } else {
-                let icing_warning = game.red_icing_status.is_warning() ||
-                    game.blue_icing_status.is_warning();
-                let offside_warning = game.red_offside_status.is_warning() ||
-                    game.red_offside_status.is_warning();
-                HQMRulesState::Regular {
-                    offside_warning, icing_warning
-                }
-            };
-        if player.game_id != game.game_id {
-            writer.write_bytes_aligned(GAME_HEADER);
-            writer.write_byte_aligned(6);
-            writer.write_u32_aligned(game.game_id);
-        } else {
-            writer.write_bytes_aligned(GAME_HEADER);
-            writer.write_byte_aligned(5);
-            writer.write_u32_aligned(game.game_id);
-            writer.write_u32_aligned(game.game_step);
-            writer.write_bits(1, match game.game_over {
-                true => 1,
-                false => 0
-            });
-            writer.write_bits(8, game.red_score);
-            writer.write_bits(8, game.blue_score);
-            writer.write_bits(16, game.time);
-            writer.write_bits(16, game.goal_timer);
-            writer.write_bits(8, game.period);
-            writer.write_bits(8, player_index as u32);
-
-            // if using a non-cryptic version, send ping
-            if player.client_version > 0 {
-                writer.write_u32_aligned(player.deltatime);
-            }
-
-            // if baba's second version or above, send rules
-            if player.client_version > 1 {
-                let num = match rules_state {
-                    HQMRulesState::Regular { offside_warning, icing_warning } => {
-                        let mut res = 0;
-                        if offside_warning {
-                            res |= 1;
-                        }
-                        if icing_warning {
-                            res |= 2;
-                        }
-                        res
-                    }
-                    HQMRulesState::Offside => {
-                        4
-                    }
-                    HQMRulesState::Icing => {
-                        8
-                    }
-                };
-                writer.write_u32_aligned(num);
-            }
-
-            writer.write_u32_aligned(game.packet);
-            writer.write_u32_aligned(player.known_packet);
-
-            for i in 0..32 {
-                match &packets[i] {
-                    HQMObjectPacket::Puck(puck) => {
-                        writer.write_bits(1, 1);
-                        writer.write_bits(2, 1); // Puck type
-                        writer.write_pos(17, puck.pos.0, None);
-                        writer.write_pos(17, puck.pos.1, None);
-                        writer.write_pos(17, puck.pos.2, None);
-                        writer.write_pos(31, puck.rot.0, None);
-                        writer.write_pos(31, puck.rot.1, None);
-                    } ,
-                    HQMObjectPacket::Skater(skater) => {
-                        writer.write_bits(1, 1);
-                        writer.write_bits(2, 0); // Skater type
-                        writer.write_pos(17, skater.pos.0, None);
-                        writer.write_pos(17, skater.pos.1, None);
-                        writer.write_pos(17, skater.pos.2, None);
-                        writer.write_pos(31, skater.rot.0, None);
-                        writer.write_pos(31, skater.rot.1, None);
-                        writer.write_pos(13, skater.stick_pos.0, None);
-                        writer.write_pos(13, skater.stick_pos.1, None);
-                        writer.write_pos(13, skater.stick_pos.2, None);
-                        writer.write_pos(25, skater.stick_rot.0, None);
-                        writer.write_pos(25, skater.stick_rot.1, None);
-                        writer.write_pos(16, skater.head_rot, None);
-                        writer.write_pos(16, skater.body_rot, None);
-                    },
-                    HQMObjectPacket::None => {
-                        writer.write_bits(1, 0);
-                    }
-                }
-            }
-
-            let remaining_messages = min(player.messages.len() - player.known_msgpos as usize, 15);
-
-            writer.write_bits(4, remaining_messages as u32);
-            writer.write_bits(16, player.known_msgpos.into());
-
-            let pos2 = player.known_msgpos as usize;
-
-            for i in pos2..pos2 + remaining_messages {
-                let message = &player.messages[i];
-                match Rc::as_ref(message) {
-                    HQMMessage::Chat {
-                        player_index,
-                        message
-                    } => {
-                        writer.write_bits(6, 2);
-                        writer.write_bits(6, match *player_index {
-                            Some(x)=> x as u32,
-                            None => u32::MAX
-                        });
-                        let message_bytes = message.as_bytes();
-                        let size = min(63, message_bytes.len());
-                        writer.write_bits(6, size as u32);
-
-                        for i in 0..size {
-                            writer.write_bits(7, message_bytes[i] as u32);
-                        }
-                    }
-                    HQMMessage::Goal {
-                        team,
-                        goal_player_index,
-                        assist_player_index
-                    } => {
-                        writer.write_bits(6, 1);
-                        writer.write_bits(2, team.get_num());
-                        writer.write_bits(6, match *goal_player_index {
-                            Some (x) => x as u32,
-                            None => u32::MAX
-                        });
-                        writer.write_bits(6, match *assist_player_index {
-                            Some (x) => x as u32,
-                            None => u32::MAX
-                        });
-                    }
-                    HQMMessage::PlayerUpdate {
-                        player_name,
-                        object,
-                        player_index,
-                        in_server,
-                    } => {
-                        writer.write_bits(6, 0);
-                        writer.write_bits(6, *player_index as u32);
-                        writer.write_bits(1, if *in_server { 1 } else { 0 });
-                        let (object_index, team_num) = match object {
-                            Some((i, team)) => {
-                                (*i as u32, team.get_num ())
-                            },
-                            None => {
-                                (u32::MAX, u32::MAX)
-                            }
-                        };
-                        writer.write_bits(2, team_num);
-                        writer.write_bits(6, object_index);
-
-                        let name_bytes = player_name.as_bytes();
-                        for i in 0usize..31 {
-                            let v = if i < name_bytes.len() {
-                                name_bytes[i]
-                            } else {
-                                0
-                            };
-                            writer.write_bits(7, v as u32);
-                        }
-                    }
-                };
-            }
-        }
-        let socket = socket.clone();
-        let bytes_written = writer.get_bytes_written();
-        let addr = player.addr.clone();
-        tokio::spawn(async move {
-            let slice = &write_buf[0..bytes_written];
-            let _ = socket.send_to(slice, addr).await;
-        });
-
-    }
 
     pub(crate) fn new_game(&mut self) {
         self.game_alloc += 1;
@@ -1543,6 +1280,256 @@ impl HQMServer {
     }
 }
 
+fn send_update(game: &HQMGame, player: &HQMConnectedPlayer, player_index: usize, socket: & Arc<UdpSocket>, packets: &[HQMObjectPacket]) {
+    let mut write_buf = vec![0u8; 4096];
+    let mut writer = HQMMessageWriter::new(& mut write_buf);
+
+    let rules_state =
+        if game.red_offside_status == HQMOffsideStatus::Offside ||
+            game.blue_offside_status == HQMOffsideStatus::Offside {
+            HQMRulesState::Offside
+        } else if game.red_icing_status == HQMIcingStatus::Icing ||
+            game.blue_icing_status == HQMIcingStatus::Icing {
+            HQMRulesState::Icing
+        } else {
+            let icing_warning = game.red_icing_status.is_warning() ||
+                game.blue_icing_status.is_warning();
+            let offside_warning = game.red_offside_status.is_warning() ||
+                game.red_offside_status.is_warning();
+            HQMRulesState::Regular {
+                offside_warning, icing_warning
+            }
+        };
+    if player.game_id != game.game_id {
+        writer.write_bytes_aligned(GAME_HEADER);
+        writer.write_byte_aligned(6);
+        writer.write_u32_aligned(game.game_id);
+    } else {
+        writer.write_bytes_aligned(GAME_HEADER);
+        writer.write_byte_aligned(5);
+        writer.write_u32_aligned(game.game_id);
+        writer.write_u32_aligned(game.game_step);
+        writer.write_bits(1, match game.game_over {
+            true => 1,
+            false => 0
+        });
+        writer.write_bits(8, game.red_score);
+        writer.write_bits(8, game.blue_score);
+        writer.write_bits(16, game.time);
+        writer.write_bits(16, game.goal_timer);
+        writer.write_bits(8, game.period);
+        writer.write_bits(8, player_index as u32);
+
+        // if using a non-cryptic version, send ping
+        if player.client_version > 0 {
+            writer.write_u32_aligned(player.deltatime);
+        }
+
+        // if baba's second version or above, send rules
+        if player.client_version > 1 {
+            let num = match rules_state {
+                HQMRulesState::Regular { offside_warning, icing_warning } => {
+                    let mut res = 0;
+                    if offside_warning {
+                        res |= 1;
+                    }
+                    if icing_warning {
+                        res |= 2;
+                    }
+                    res
+                }
+                HQMRulesState::Offside => {
+                    4
+                }
+                HQMRulesState::Icing => {
+                    8
+                }
+            };
+            writer.write_u32_aligned(num);
+        }
+
+        writer.write_u32_aligned(game.packet);
+        writer.write_u32_aligned(player.known_packet);
+
+        for i in 0..32 {
+            match &packets[i] {
+                HQMObjectPacket::Puck(puck) => {
+                    writer.write_bits(1, 1);
+                    writer.write_bits(2, 1); // Puck type
+                    writer.write_pos(17, puck.pos.0, None);
+                    writer.write_pos(17, puck.pos.1, None);
+                    writer.write_pos(17, puck.pos.2, None);
+                    writer.write_pos(31, puck.rot.0, None);
+                    writer.write_pos(31, puck.rot.1, None);
+                } ,
+                HQMObjectPacket::Skater(skater) => {
+                    writer.write_bits(1, 1);
+                    writer.write_bits(2, 0); // Skater type
+                    writer.write_pos(17, skater.pos.0, None);
+                    writer.write_pos(17, skater.pos.1, None);
+                    writer.write_pos(17, skater.pos.2, None);
+                    writer.write_pos(31, skater.rot.0, None);
+                    writer.write_pos(31, skater.rot.1, None);
+                    writer.write_pos(13, skater.stick_pos.0, None);
+                    writer.write_pos(13, skater.stick_pos.1, None);
+                    writer.write_pos(13, skater.stick_pos.2, None);
+                    writer.write_pos(25, skater.stick_rot.0, None);
+                    writer.write_pos(25, skater.stick_rot.1, None);
+                    writer.write_pos(16, skater.head_rot, None);
+                    writer.write_pos(16, skater.body_rot, None);
+                },
+                HQMObjectPacket::None => {
+                    writer.write_bits(1, 0);
+                }
+            }
+        }
+
+        let remaining_messages = min(player.messages.len() - player.known_msgpos as usize, 15);
+
+        writer.write_bits(4, remaining_messages as u32);
+        writer.write_bits(16, player.known_msgpos.into());
+
+        let pos2 = player.known_msgpos as usize;
+
+        for i in pos2..pos2 + remaining_messages {
+            let message = &player.messages[i];
+            match Rc::as_ref(message) {
+                HQMMessage::Chat {
+                    player_index,
+                    message
+                } => {
+                    writer.write_bits(6, 2);
+                    writer.write_bits(6, match *player_index {
+                        Some(x)=> x as u32,
+                        None => u32::MAX
+                    });
+                    let message_bytes = message.as_bytes();
+                    let size = min(63, message_bytes.len());
+                    writer.write_bits(6, size as u32);
+
+                    for i in 0..size {
+                        writer.write_bits(7, message_bytes[i] as u32);
+                    }
+                }
+                HQMMessage::Goal {
+                    team,
+                    goal_player_index,
+                    assist_player_index
+                } => {
+                    writer.write_bits(6, 1);
+                    writer.write_bits(2, team.get_num());
+                    writer.write_bits(6, match *goal_player_index {
+                        Some (x) => x as u32,
+                        None => u32::MAX
+                    });
+                    writer.write_bits(6, match *assist_player_index {
+                        Some (x) => x as u32,
+                        None => u32::MAX
+                    });
+                }
+                HQMMessage::PlayerUpdate {
+                    player_name,
+                    object,
+                    player_index,
+                    in_server,
+                } => {
+                    writer.write_bits(6, 0);
+                    writer.write_bits(6, *player_index as u32);
+                    writer.write_bits(1, if *in_server { 1 } else { 0 });
+                    let (object_index, team_num) = match object {
+                        Some((i, team)) => {
+                            (*i as u32, team.get_num ())
+                        },
+                        None => {
+                            (u32::MAX, u32::MAX)
+                        }
+                    };
+                    writer.write_bits(2, team_num);
+                    writer.write_bits(6, object_index);
+
+                    let name_bytes = player_name.as_bytes();
+                    for i in 0usize..31 {
+                        let v = if i < name_bytes.len() {
+                            name_bytes[i]
+                        } else {
+                            0
+                        };
+                        writer.write_bits(7, v as u32);
+                    }
+                }
+            };
+        }
+    }
+    let socket = socket.clone();
+    let bytes_written = writer.get_bytes_written();
+    let addr = player.addr.clone();
+    tokio::spawn(async move {
+        let slice = &write_buf[0..bytes_written];
+        let _ = socket.send_to(slice, addr).await;
+    });
+
+}
+
+fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, world: & mut HQMGameWorld, config: & HQMServerConfiguration, team: Option<HQMTeam>)
+                      -> Option<Option<(usize, HQMTeam)>> {
+    let current_skater = player.skater.and_then(|skater_index| match & mut world.objects[skater_index] {
+        HQMGameObject::Player(skater) => {
+            Some((skater_index, skater))
+        }
+        _ => None
+    });
+    match current_skater {
+        Some((skater_index, current_skater)) => {
+            match team {
+                Some(team) => {
+                    if current_skater.team != team {
+                        current_skater.team = team;
+                        Some(Some((skater_index, team)))
+                    } else {
+                        None
+                    }
+                },
+                None => {
+                    player.team_switch_timer = 500; // 500 ticks, 5 seconds
+
+                    world.objects[skater_index] = HQMGameObject::None;
+                    player.skater = None;
+                    Some(None)
+                }
+            }
+        },
+        None => {
+            match team {
+                Some(team) => {
+
+                    let (pos, rot) = match team {
+                        HQMTeam::Red=>{
+                            let pos = Point3::new(config.entry_point_red[0],config.entry_point_red[1],config.entry_point_red[2]);
+                            let rot = Rotation3::from_euler_angles(0.0,config.entry_rotation_red,0.0);
+                            (pos, rot)
+                        },
+                        HQMTeam::Blue=>{
+                            let pos = Point3::new(config.entry_point_blue[0],config.entry_point_blue[1],config.entry_point_blue[2]);
+                            let rot = Rotation3::from_euler_angles(0.0,config.entry_rotation_blue,0.0);
+                            (pos, rot)
+                        },
+                    };
+
+                    if let Some(i) = world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index) {
+                        player.skater = Some(i);
+                        Some(Some((i, team)))
+                    } else {
+                        None
+                    }
+                },
+                None => {
+                    None
+                }
+            }
+        }
+    }
+}
+
 fn get_packets (objects: &[HQMGameObject]) -> Vec<HQMObjectPacket> {
     let mut packets: Vec<HQMObjectPacket> = Vec::with_capacity(32);
     for i in 0usize..32 {
@@ -1645,8 +1632,8 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) server_name: String,
     pub(crate) port: u16,
     pub(crate) public: bool,
-    pub(crate) player_max: u32,
-    pub(crate) team_max: u32,
+    pub(crate) player_max: usize,
+    pub(crate) team_max: usize,
     pub(crate) force_team_size_parity: bool,
     pub(crate) welcome: Vec<String>,
     pub(crate) mode: HQMServerMode,
