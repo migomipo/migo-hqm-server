@@ -12,8 +12,6 @@ use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
-use tokio::io::Error;
-
 
 const GAME_HEADER: &[u8] = b"Hock";
 
@@ -25,13 +23,14 @@ pub(crate) struct HQMServer {
     pub(crate) allow_join: bool,
     pub(crate) config: HQMServerConfiguration,
     pub(crate) game: HQMGame,
+    pub(crate) global_messages: Vec<Rc<HQMMessage>>,
     game_alloc: u32,
     pub(crate) is_muted:bool,
     alternative_io_loop: bool
 }
 
 impl HQMServer {
-    async fn handle_message(&mut self, addr: SocketAddr, socket: & UdpSocket, msg: &[u8], write_buf: & mut [u8]) {
+    async fn handle_message(&mut self, addr: SocketAddr, socket: & Arc<UdpSocket>, msg: &[u8]) {
         let mut parser = HQMMessageReader::new(&msg);
         let header = parser.read_bytes_aligned(4);
         if header != GAME_HEADER {
@@ -41,7 +40,7 @@ impl HQMServer {
         let command = parser.read_byte_aligned();
         match command {
             0 => {
-                let _ = self.request_info(socket, &addr, &mut parser, write_buf).await;
+                self.request_info(socket, &addr, &mut parser);
             },
             2 => {
                 self.player_join(&addr, &mut parser);
@@ -57,11 +56,12 @@ impl HQMServer {
         }
     }
 
-    async fn request_info<'a>(&self, socket: & UdpSocket, addr: &SocketAddr, parser: &mut HQMMessageReader<'a>, write_buf: & mut [u8]) -> std::io::Result<usize> {
+    fn request_info<'a>(&self, socket: & Arc<UdpSocket>, addr: &SocketAddr, parser: &mut HQMMessageReader<'a>) {
+        let mut write_buf = vec![0u8;512];
         let _player_version = parser.read_bits(8);
         let ping = parser.read_u32_aligned();
 
-        let mut writer = HQMMessageWriter::new(write_buf);
+        let mut writer = HQMMessageWriter::new(& mut write_buf);
         writer.write_bytes_aligned(GAME_HEADER);
         writer.write_byte_aligned(1);
         writer.write_bits(8, 55);
@@ -74,8 +74,14 @@ impl HQMServer {
 
         writer.write_bytes_aligned_padded(32, self.config.server_name.as_ref());
 
-        let slice = writer.get_slice();
-        socket.send_to(slice, addr).await
+        let written = writer.get_bytes_written();
+        let socket = socket.clone();
+        let addr = addr.clone();
+        tokio::spawn(async move {
+            let slice= &write_buf[0..written];
+            let _ = socket.send_to(slice, addr).await;
+        });
+
     }
 
     fn player_count (& self) -> u32 {
@@ -484,6 +490,7 @@ impl HQMServer {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_team (& mut self, player_index: usize, team: Option<HQMTeam>) -> Option<Option<(usize, HQMTeam)>> {
         match & mut self.players[player_index as usize] {
             Some(player) => {
@@ -516,7 +523,7 @@ impl HQMServer {
 
                 self.add_global_message(update, true);
 
-                let mut messages = self.game.global_messages.clone();
+                let mut messages = self.global_messages.clone();
                 for welcome_msg in self.config.welcome.iter() {
                     messages.push(Rc::new(HQMMessage::Chat {
                         player_index: None,
@@ -616,7 +623,7 @@ impl HQMServer {
     pub(crate) fn add_global_message(&mut self, message: HQMMessage, persistent: bool) {
         let rc = Rc::new(message);
         if persistent {
-            self.game.global_messages.push(rc.clone());
+            self.global_messages.push(rc.clone());
         }
         for player in self.players.iter_mut() {
             match player {
@@ -731,7 +738,7 @@ impl HQMServer {
         }
     }
 
-    async fn tick(&mut self, socket: & UdpSocket, write_buf: & mut [u8]) {
+    async fn tick(&mut self, socket: & Arc<UdpSocket>) {
         if self.player_count() != 0 {
             self.game.active = true;
             self.remove_inactive_players(); // connected players and objects
@@ -748,7 +755,7 @@ impl HQMServer {
 
             for (player_index, player) in self.players.iter().enumerate() {
                 if let Some(player) = player {
-                    Self::send_update(&self.game, player, player_index, socket, &packets, write_buf).await;
+                    Self::send_update(&self.game, player, player_index, socket, &packets);
                 }
             }
             self.game.packet += 1;
@@ -1066,8 +1073,9 @@ impl HQMServer {
     }
 
 
-    async fn send_update(game: &HQMGame, player: &HQMConnectedPlayer, player_index: usize, socket: & UdpSocket, packets: &[HQMObjectPacket], write_buf: & mut [u8]) {
-        let mut writer = HQMMessageWriter::new(write_buf);
+    fn send_update(game: &HQMGame, player: &HQMConnectedPlayer, player_index: usize, socket: & Arc<UdpSocket>, packets: &[HQMObjectPacket]) {
+        let mut write_buf = vec![0u8; 4096];
+        let mut writer = HQMMessageWriter::new(& mut write_buf);
 
         let rules_state =
             if game.red_offside_status == HQMOffsideStatus::Offside ||
@@ -1245,14 +1253,20 @@ impl HQMServer {
                 };
             }
         }
+        let socket = socket.clone();
+        let bytes_written = writer.get_bytes_written();
+        let addr = player.addr.clone();
+        tokio::spawn(async move {
+            let slice = &write_buf[0..bytes_written];
+            let _ = socket.send_to(slice, addr).await;
+        });
 
-        let slice = writer.get_slice();
-        let _ = socket.send_to(slice, player.addr).await;
     }
 
     pub(crate) fn new_game(&mut self) {
         self.game_alloc += 1;
         self.game = HQMGame::new(self.game_alloc, &self.config);
+        self.global_messages.clear();
 
         let puck_line_start= self.game.world.rink.width / 2.0 - 0.4 * ((self.config.warmup_pucks - 1) as f32);
 
@@ -1467,7 +1481,7 @@ impl HQMServer {
 
         let socket = Arc::new (tokio::net::UdpSocket::bind(& addr).await?);
         let mut read_buf = [0u8;1024];
-        let mut write_buf = [0u8;4096];
+
         if self.config.public {
             let socket = socket.clone();
             tokio::spawn(async move {
@@ -1485,7 +1499,7 @@ impl HQMServer {
                 loop {
                     match socket.try_recv_from(&mut read_buf) {
                         Ok((size, addr)) => {
-                            self.handle_message(addr, & socket, & read_buf[0..size], & mut write_buf).await;
+                            self.handle_message(addr, & socket, & read_buf[0..size]).await;
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             break;
@@ -1493,16 +1507,16 @@ impl HQMServer {
                         Err(_) => {}
                     }
                 }
-                self.tick(& socket, & mut write_buf).await;
+                self.tick(& socket).await;
             }
         } else {
             loop {
                 tokio::select! {
                     _ = tick_timer.tick() => {
-                        self.tick(& socket, & mut write_buf).await;
+                        self.tick(& socket).await;
                     }
                     Ok((size, addr)) = socket.recv_from(&mut read_buf) => {
-                        self.handle_message(addr, & socket, & read_buf[0..size], & mut write_buf).await;
+                        self.handle_message(addr, & socket, & read_buf[0..size]).await;
                     }
                 }
             }
@@ -1520,6 +1534,7 @@ impl HQMServer {
             ban_list: HashSet::new(),
             allow_join:true,
             game: HQMGame::new(1, &config),
+            global_messages: vec![],
             game_alloc: 1,
             is_muted:false,
             config,

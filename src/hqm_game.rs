@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::fmt;
 use crate::hqm_parse;
 use crate::hqm_parse::{HQMSkaterPacket, HQMPuckPacket};
-use std::rc::Rc;
+
 use crate::hqm_server::HQMServerConfiguration;
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
@@ -82,7 +82,6 @@ pub(crate) struct HQMGame {
     pub(crate) blue_offside_status: HQMOffsideStatus,
     pub(crate) next_faceoff_spot: HQMFaceoffSpot,
     pub(crate) world: HQMGameWorld,
-    pub(crate) global_messages: Vec<Rc<HQMMessage>>,
     pub(crate) red_score: u32,
     pub(crate) blue_score: u32,
     pub(crate) period: u32,
@@ -120,7 +119,6 @@ impl HQMGame {
                 gravity: 0.000680,
                 limit_jump_speed: config.limit_jump_speed
             },
-            global_messages: vec![],
             red_score: 0,
             blue_score: 0,
             period: 0,

@@ -1,9 +1,9 @@
 
 
 use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld};
-use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Vector2, Point3};
+use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Point3};
 use std::ops::{AddAssign};
-use std::f32::consts::{PI, FRAC_PI_2, FRAC_PI_4};
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
 use nalgebra::base::storage::{Storage, StorageMut};
 use std::iter::FromIterator;
 
@@ -802,13 +802,6 @@ fn limit_vector_length (v: &Vector3<f32>, max_len: f32) -> Vector3<f32> {
         res.scale_mut(max_len / norm);
     }
     res
-}
-
-fn limit_vector_length_mut2 (v: & mut Vector2<f32>, max_len: f32) {
-    let norm = v.norm();
-    if norm > max_len {
-        v.scale_mut(max_len / norm);
-    }
 }
 
 fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {

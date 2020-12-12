@@ -170,10 +170,6 @@ pub struct HQMMessageWriter<'a> {
 }
 
 impl<'a> HQMMessageWriter<'a> {
-    pub fn get_slice(&self) -> &[u8] {
-        let size = self.get_bytes_written();
-        return &self.buf[0..size];
-    }
 
     pub fn get_bytes_written(&self) -> usize {
         return if self.bit_pos > 0 { self.pos + 1 } else { self.pos };
