@@ -30,7 +30,7 @@ pub(crate) struct HQMServer {
 }
 
 impl HQMServer {
-    async fn handle_message(&mut self, addr: SocketAddr, socket: & Arc<UdpSocket>, msg: &[u8]) {
+    fn handle_message(&mut self, addr: SocketAddr, socket: & Arc<UdpSocket>, msg: &[u8]) {
         let mut parser = HQMMessageReader::new(&msg);
         let header = parser.read_bytes_aligned(4);
         if header != GAME_HEADER {
@@ -699,7 +699,7 @@ impl HQMServer {
     }
 
 
-    async fn tick(&mut self, socket: & Arc<UdpSocket>) {
+    fn tick(&mut self, socket: & Arc<UdpSocket>) {
         if self.player_count() != 0 {
             self.game.active = true;
             self.update_players_and_input();
@@ -1236,7 +1236,7 @@ impl HQMServer {
                 loop {
                     match socket.try_recv_from(&mut read_buf) {
                         Ok((size, addr)) => {
-                            self.handle_message(addr, & socket, & read_buf[0..size]).await;
+                            self.handle_message(addr, & socket, & read_buf[0..size]);
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             break;
@@ -1244,16 +1244,16 @@ impl HQMServer {
                         Err(_) => {}
                     }
                 }
-                self.tick(& socket).await;
+                self.tick(& socket);
             }
         } else {
             loop {
                 tokio::select! {
                     _ = tick_timer.tick() => {
-                        self.tick(& socket).await;
+                        self.tick(& socket);
                     }
                     Ok((size, addr)) = socket.recv_from(&mut read_buf) => {
-                        self.handle_message(addr, & socket, & read_buf[0..size]).await;
+                        self.handle_message(addr, & socket, & read_buf[0..size]);
                     }
                 }
             }
