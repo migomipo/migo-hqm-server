@@ -12,6 +12,7 @@ use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
+use bytes::BytesMut;
 
 const GAME_HEADER: &[u8] = b"Hock";
 
@@ -26,7 +27,6 @@ pub(crate) struct HQMServer {
     pub(crate) global_messages: Vec<Rc<HQMMessage>>,
     game_alloc: u32,
     pub(crate) is_muted:bool,
-    alternative_io_loop: bool
 }
 
 impl HQMServer {
@@ -1218,7 +1218,7 @@ impl HQMServer {
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.port));
 
         let socket = Arc::new (tokio::net::UdpSocket::bind(& addr).await?);
-        let mut read_buf = [0u8;1024];
+
 
         if self.config.public {
             let socket = socket.clone();
@@ -1230,38 +1230,41 @@ impl HQMServer {
                 }
             });
         }
-        if self.alternative_io_loop {
-            println! ("Alternative IO loop test");
-            loop {
-                tick_timer.tick().await;
+        let (msg_sender, mut msg_receiver) = tokio::sync::mpsc::unbounded_channel();
+        {
+            let socket = socket.clone();
+
+            tokio::spawn(async move {
                 loop {
-                    match socket.try_recv_from(&mut read_buf) {
+                    let mut buf = BytesMut::new();
+                    buf.resize(1024, 0u8);
+
+                    match socket.recv_from(&mut buf).await {
                         Ok((size, addr)) => {
-                            self.handle_message(addr, & socket, & read_buf[0..size]).await;
-                        }
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            break;
+                            buf.truncate(size);
+                            let _ = msg_sender.send((addr, buf.freeze()));
                         }
                         Err(_) => {}
                     }
                 }
-                self.tick(& socket).await;
-            }
-        } else {
-            loop {
-                tokio::select! {
-                    _ = tick_timer.tick() => {
-                        self.tick(& socket).await;
-                    }
-                    Ok((size, addr)) = socket.recv_from(&mut read_buf) => {
-                        self.handle_message(addr, & socket, & read_buf[0..size]).await;
+            });
+        };
+
+        loop {
+            tokio::select! {
+                _ = tick_timer.tick() => {
+                    self.tick(& socket).await;
+                }
+                x = msg_receiver.recv() => {
+                    if let Some ((addr, msg)) = x {
+                        self.handle_message(addr, & socket, & msg).await;
                     }
                 }
             }
         }
     }
 
-    pub fn new(config: HQMServerConfiguration, alternative_io_loop: bool) -> Self {
+    pub fn new(config: HQMServerConfiguration) -> Self {
         let mut player_vec = Vec::with_capacity(64);
         for _ in 0..64 {
             player_vec.push(None);
@@ -1276,7 +1279,6 @@ impl HQMServer {
             game_alloc: 1,
             is_muted:false,
             config,
-            alternative_io_loop,
         }
     }
 }
