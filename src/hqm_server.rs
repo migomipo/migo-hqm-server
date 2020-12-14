@@ -902,7 +902,7 @@ impl HQMServer {
                     if let HQMGameObject::Puck(puck) = & self.game.world.objects[puck] {
                         if let Some(touch) = puck.touches.front() {
                             if team == touch.team &&
-                                HQMServer::has_players_in_offensive_zone(& self.game.world, team) {
+                                has_players_in_offensive_zone(& self.game.world, team) {
                                 match self.config.offside {
                                     HQMOffsideConfiguration::Delayed => {
                                         *offside_status = HQMOffsideStatus::Warning(touch.puck_pos.clone(), touch.player_index);
@@ -934,12 +934,12 @@ impl HQMServer {
             }
         }
         if self.game.red_offside_status.is_warning()
-            && !HQMServer::has_players_in_offensive_zone(& self.game.world,HQMTeam::Red) {
+            && !has_players_in_offensive_zone(& self.game.world,HQMTeam::Red) {
             self.game.red_offside_status = HQMOffsideStatus::No;
             self.add_server_chat_message(String::from("Offside waved off"));
         }
         if self.game.blue_offside_status.is_warning()
-            && !HQMServer::has_players_in_offensive_zone(& self.game.world,HQMTeam::Blue) {
+            && !has_players_in_offensive_zone(& self.game.world,HQMTeam::Blue) {
             self.game.blue_offside_status = HQMOffsideStatus::No;
             self.add_server_chat_message(String::from("Offside waved off"));
         }
@@ -974,30 +974,6 @@ impl HQMServer {
         };
 
         puck.touches.truncate(8);
-    }
-
-
-    fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool {
-        let line = match team {
-            HQMTeam::Red => & world.rink.red_lines_and_net.offensive_line,
-            HQMTeam::Blue => & world.rink.blue_lines_and_net.offensive_line,
-        };
-
-        for object in world.objects.iter() {
-            if let HQMGameObject::Player(skater) = object {
-                if skater.team == team {
-                    let feet_pos = &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
-                    let dot = (&feet_pos - &line.point).dot (&line.normal);
-                    let leading_edge = -(line.width/2.0);
-                    if dot < leading_edge {
-                        // Player is offside
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
     }
 
 
@@ -1230,19 +1206,19 @@ impl HQMServer {
                 }
             });
         }
-        let (msg_sender, mut msg_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (msg_sender, mut msg_receiver) = tokio::sync::mpsc::channel(256);
         {
             let socket = socket.clone();
 
             tokio::spawn(async move {
                 loop {
                     let mut buf = BytesMut::new();
-                    buf.resize(1024, 0u8);
+                    buf.resize(512, 0u8);
 
                     match socket.recv_from(&mut buf).await {
                         Ok((size, addr)) => {
                             buf.truncate(size);
-                            let _ = msg_sender.send((addr, buf.freeze()));
+                            let _ = msg_sender.send((addr, buf.freeze())).await;
                         }
                         Err(_) => {}
                     }
@@ -1281,6 +1257,29 @@ impl HQMServer {
             config,
         }
     }
+}
+
+fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool {
+    let line = match team {
+        HQMTeam::Red => & world.rink.red_lines_and_net.offensive_line,
+        HQMTeam::Blue => & world.rink.blue_lines_and_net.offensive_line,
+    };
+
+    for object in world.objects.iter() {
+        if let HQMGameObject::Player(skater) = object {
+            if skater.team == team {
+                let feet_pos = &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
+                let dot = (&feet_pos - &line.point).dot (&line.normal);
+                let leading_edge = -(line.width/2.0);
+                if dot < leading_edge {
+                    // Player is offside
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], socket: & UdpSocket, packets: &[HQMObjectPacket], write_buf: & mut [u8]) {

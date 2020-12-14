@@ -387,7 +387,7 @@ fn update_player2 (player: & mut HQMSkater) {
 
         let temp3 = -0.25 * temp2n.dot (&player.body.angular_velocity);
         temp2 += temp2n.scale(temp3);
-        temp2 = limit_vector_length(&temp2, 0.000347);
+        temp2 = limit_vector_length(&temp2, 0.000347222222);
         player.body.angular_velocity += temp2;
     }
 

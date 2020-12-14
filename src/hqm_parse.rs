@@ -283,11 +283,21 @@ pub struct HQMMessageReader<'a> {
 }
 
 impl<'a> HQMMessageReader<'a> {
+
+    fn safe_get_byte (&self, pos: usize) -> u8 {
+        if pos < self.buf.len () {
+            self.buf[pos]
+        } else {
+            0
+        }
+    }
+
     pub fn read_byte_aligned(&mut self) -> u8 {
         self.align();
-        let res = self.buf[self.pos];
+        let res = self.safe_get_byte(self.pos);
         self.pos = self.pos + 1;
         return res;
+
     }
 
     pub fn read_bytes_aligned(&mut self, n: usize) -> Vec<u8> {
@@ -295,7 +305,7 @@ impl<'a> HQMMessageReader<'a> {
 
         let mut res = Vec::with_capacity(n);
         for i in self.pos..(self.pos + n) {
-            res.push(self.buf[i])
+            res.push(self.safe_get_byte(i))
         }
         self.pos = self.pos + n;
         return res;
@@ -303,18 +313,18 @@ impl<'a> HQMMessageReader<'a> {
 
     pub fn read_u16_aligned(&mut self) -> u16 {
         self.align();
-        let b1 = self.buf[self.pos] as u16;
-        let b2 = self.buf[self.pos + 1] as u16;
+        let b1 = self.safe_get_byte(self.pos) as u16;
+        let b2 = self.safe_get_byte(self.pos + 1) as u16;
         self.pos = self.pos + 2;
         return b1 | b2 << 8;
     }
 
     pub fn read_u32_aligned(&mut self) -> u32 {
         self.align();
-        let b1 = self.buf[self.pos] as u32;
-        let b2 = self.buf[self.pos + 1] as u32;
-        let b3 = self.buf[self.pos + 2] as u32;
-        let b4 = self.buf[self.pos + 3] as u32;
+        let b1 = self.safe_get_byte(self.pos) as u32;
+        let b2 = self.safe_get_byte(self.pos + 1) as u32;
+        let b3 = self.safe_get_byte(self.pos + 2) as u32;
+        let b4 = self.safe_get_byte(self.pos + 3) as u32;
         self.pos = self.pos + 4;
         return b1 | b2 << 8 | b3 << 16 | b4 << 24;
     }
@@ -370,7 +380,7 @@ impl<'a> HQMMessageReader<'a> {
             let bits_possible_to_write = 8 - self.bit_pos;
             let bits = min(bits_remaining, bits_possible_to_write);
             let mask = !(!0u32 << bits);
-            let a = (self.buf[self.pos] as u32 >> self.bit_pos) & mask;
+            let a = (self.safe_get_byte(self.pos) as u32 >> self.bit_pos) & mask;
 
             res = res | (a << p);
 
