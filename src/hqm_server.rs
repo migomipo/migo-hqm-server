@@ -14,6 +14,8 @@ use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
 use bytes::BytesMut;
 
+use tracing::info;
+
 const GAME_HEADER: &[u8] = b"Hock";
 
 const MASTER_SERVER: &str = "66.226.72.227:27590";
@@ -197,7 +199,8 @@ impl HQMServer {
         let player_name = get_player_name(player_name_bytes);
         match player_name {
             Some(name) => {
-                if self.add_player(name.clone(), &addr) {
+                if let Some(player_index) = self.add_player(name.clone(), &addr) {
+                    info!("{} ({}) joined server from address {:?}", name, player_index, addr);
                     let msg = format!("{} joined", name);
                     self.add_server_chat_message(msg);
                 }
@@ -383,7 +386,6 @@ impl HQMServer {
             _ => {}, // matches have to be exhaustive
         }
 
-        println! ("{} {:?}", command, args);
     }
 
     fn process_message(&mut self, bytes: Vec<u8>, player_index: usize) {
@@ -413,19 +415,20 @@ impl HQMServer {
     }
 
     fn player_exit(&mut self, addr: &SocketAddr) {
-        let current_slot = self.find_player_slot(addr);
-        match current_slot {
-            Some(x) => {
+        let player_index = self.find_player_slot(addr);
+        match player_index {
+            Some(player_index) => {
                 let player_name = {
-                    let player = self.players[x].as_ref().unwrap();
+                    let player = self.players[player_index].as_ref().unwrap();
                     player.player_name.clone()
                 };
-                self.remove_player(x);
+                self.remove_player(player_index);
+                info!("{} ({}) exited server", player_name, player_index);
                 let msg = format!("{} exited", player_name);
                 self.add_server_chat_message(msg);
             }
             None => {
-                println!("Player has already exited");
+
             }
         }
     }
@@ -451,7 +454,7 @@ impl HQMServer {
         }
     }
 
-    fn add_player(&mut self, player_name: String, addr: &SocketAddr) -> bool {
+    fn add_player(&mut self, player_name: String, addr: &SocketAddr) -> Option<usize> {
         let player_index = self.find_empty_player_slot();
         match player_index {
             Some(player_index) => {
@@ -476,9 +479,9 @@ impl HQMServer {
 
                 self.players[player_index] = Some(new_player);
 
-                true
+                Some(player_index)
             }
-            _ => false
+            _ => None
         }
     }
 
@@ -507,7 +510,7 @@ impl HQMServer {
                 self.players[player_index as usize] = None;
             }
             None => {
-                println!("Player has already exited");
+
             }
         }
 
@@ -530,7 +533,7 @@ impl HQMServer {
 
     fn add_user_chat_message(&mut self, player_index: usize, message: String) {
         if let Some(player) = & self.players[player_index] {
-            println!("{}: {}", &player.player_name, &message);
+            info!("{} ({}): {}", &player.player_name, player_index, &message);
             let chat = HQMMessage::Chat {
                 player_index: Some(player_index),
                 message,
@@ -541,7 +544,6 @@ impl HQMServer {
     }
 
     pub(crate) fn add_server_chat_message(&mut self, message: String) {
-        println!("{}", &message);
         let chat = HQMMessage::Chat {
             player_index: None,
             message,
@@ -550,7 +552,6 @@ impl HQMServer {
     }
 
     pub(crate) fn add_directed_server_chat_message(&mut self, message: String, player_receiving_index: usize) {
-        println!("{}", &message);
         // This message will only be visible to a single player
         let chat = HQMMessage::Chat {
             player_index: None,
@@ -721,6 +722,7 @@ impl HQMServer {
             self.game.packet += 1;
             self.game.game_step += 1;
         } else if self.game.active {
+            info!("Game {} abandoned", self.game.game_id);
             self.new_game();
             self.allow_join=true;
         }
@@ -978,8 +980,9 @@ impl HQMServer {
 
 
     pub(crate) fn new_game(&mut self) {
-        self.game_alloc += 1;
         self.game = HQMGame::new(self.game_alloc, &self.config);
+        info!("New game {} started", self.game.game_id);
+        self.game_alloc += 1;
         self.global_messages.clear();
 
         let puck_line_start= self.game.world.rink.width / 2.0 - 0.4 * ((self.config.warmup_pucks - 1) as f32);
@@ -1194,7 +1197,7 @@ impl HQMServer {
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.port));
 
         let socket = Arc::new (tokio::net::UdpSocket::bind(& addr).await?);
-
+        info!("Server listening at address {:?}", socket.local_addr().unwrap());
 
         if self.config.public {
             let socket = socket.clone();
@@ -1225,6 +1228,7 @@ impl HQMServer {
                 }
             });
         };
+
 
         loop {
             tokio::select! {
@@ -1492,6 +1496,7 @@ fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, wor
                 Some(team) => {
                     if current_skater.team != team {
                         current_skater.team = team;
+                        info!("{} ({}) has switched to team {:?}", player.player_name, player_index, team);
                         Some(Some((skater_index, team)))
                     } else {
                         None
@@ -1499,7 +1504,7 @@ fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, wor
                 },
                 None => {
                     player.team_switch_timer = 500; // 500 ticks, 5 seconds
-
+                    info!("{} ({}) is spectating", player.player_name, player_index);
                     world.objects[skater_index] = HQMGameObject::None;
                     player.skater = None;
                     Some(None)
@@ -1525,6 +1530,7 @@ fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, wor
 
                     if let Some(i) = world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index) {
                         player.skater = Some(i);
+                        info!("{} ({}) has joined team {:?}", player.player_name, player_index, team);
                         Some(Some((i, team)))
                     } else {
                         None

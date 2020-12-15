@@ -2,6 +2,8 @@ use crate::hqm_server::{HQMServer, HQMServerMode};
 use crate::hqm_game::{HQMGameObject, HQMMessage, HQMTeam, HQMGameState};
 use std::net::SocketAddr;
 
+use tracing::info;
+
 impl HQMServer {
     fn admin_deny_message (& mut self, player_index: usize) {
         let msg = format!("Please log in before using that command");
@@ -14,9 +16,11 @@ impl HQMServer {
                 self.allow_join=allowed;
 
                 if allowed {
+                    info!("{} ({}) enabled joins", player.player_name, player_index);
                     let msg = format!("Joins enabled by {}",player.player_name);
                     self.add_server_chat_message(msg);
                 } else {
+                    info!("{} ({}) disabled joins", player.player_name, player_index);
                     let msg = format!("Joins disabled by {}",player.player_name);
                     self.add_server_chat_message(msg);
                 }
@@ -27,53 +31,49 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn mute_player (& mut self, player_index: usize, mute_player: String) {
-        if let Some(player) = & self.players[player_index]{
-            if player.is_admin {
-                let admin_player_name = player.player_name.clone();
-                let mut player_found:bool = false;
+    pub(crate) fn mute_player (& mut self, admin_player_index: usize, mute_player: String) {
+        if let Some(admin_player) = & self.players[admin_player_index] {
+            if admin_player.is_admin {
+                let admin_player_name = admin_player.player_name.clone();
 
-                for p in self.players.iter_mut() {
+                for (player_index, p) in self.players.iter_mut().enumerate() {
                     if let Some(player) = p {
                         if player.player_name == mute_player{
-                            player.is_muted=true;
-                            player_found=true;
+                            player.is_muted = true;
+                            info!("{} ({}) muted {} ({})", admin_player_name, admin_player_index, player.player_name, player_index);
+                            let msg = format!("{} muted by {}",mute_player,admin_player_name);
+                            self.add_server_chat_message(msg);
+                            break;
                         }
                     }
                 }
 
-                if player_found{
-                    let msg = format!("{} muted by {}",mute_player,admin_player_name);
-                    self.add_server_chat_message(msg);
-                }
             } else {
-                self.admin_deny_message(player_index);
+                self.admin_deny_message(admin_player_index);
             }
         }
 
     }
 
-    pub(crate) fn unmute_player (& mut self, player_index: usize, mute_player: String) {
-        if let Some(player) = & self.players[player_index] {
-            if player.is_admin {
-                let admin_player_name = player.player_name.clone();
-                let mut player_found:bool = false;
+    pub(crate) fn unmute_player (& mut self, admin_player_index: usize, mute_player: String) {
+        if let Some(admin_player) = & self.players[admin_player_index] {
+            if admin_player.is_admin {
+                let admin_player_name = admin_player.player_name.clone();
 
-                for p in self.players.iter_mut() {
+                for (player_index, p) in self.players.iter_mut().enumerate() {
                     if let Some(player) = p {
                         if player.player_name == mute_player{
                             player.is_muted=false;
-                            player_found=true;
+                            info!("{} ({}) unmuted {} ({})", admin_player_name, admin_player_index, player.player_name, player_index);
+                            let msg = format!("{} unmuted by {}",mute_player,admin_player_name);
+                            self.add_server_chat_message(msg);
+                            break;
                         }
                     }
                 }
 
-                if player_found{
-                    let msg = format!("{} unmuted by {}",mute_player,admin_player_name);
-                    self.add_server_chat_message(msg);
-                }
             } else {
-                self.admin_deny_message(player_index);
+                self.admin_deny_message(admin_player_index);
             }
         }
     }
@@ -84,6 +84,7 @@ impl HQMServer {
                 self.is_muted=true;
 
                 let msg = format!("Chat muted by {}",player.player_name);
+                info!("{} ({}) muted chat", player.player_name, player_index);
                 self.add_server_chat_message(msg);
             } else {
                 self.admin_deny_message(player_index);
@@ -97,6 +98,8 @@ impl HQMServer {
                 self.is_muted=false;
 
                 let msg = format!("Chat unmuted by {}",player.player_name);
+                info!("{} ({}) unmuted chat", player.player_name, player_index);
+
                 self.add_server_chat_message(msg);
             } else {
                 self.admin_deny_message(player_index);
@@ -104,23 +107,23 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn force_player_off_ice (& mut self, player_index: usize, force_player_off_number: u32) {
+    pub(crate) fn force_player_off_ice (& mut self, admin_player_index: usize, force_player_off_number: u32) {
 
         let mut admin_player_name = "".to_string();
 
-        if let Some(player) = & self.players[player_index] {
+        if let Some(player) = & self.players[admin_player_index] {
             if player.is_admin {
                 admin_player_name = player.player_name.clone();
             } else {
-                self.admin_deny_message(player_index);
+                self.admin_deny_message(admin_player_index);
                 return;
             }
         }
 
-        let force_player_index_number = force_player_off_number - 1;
+        let force_player_index = force_player_off_number - 1;
 
-        if (force_player_index_number as usize) < self.players.len() {
-            if let Some(force_player) = & mut self.players[force_player_index_number as usize] {
+        if (force_player_index as usize) < self.players.len() {
+            if let Some(force_player) = & mut self.players[force_player_index as usize] {
 
                 force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
                 if let Some (i) = force_player.skater {
@@ -128,11 +131,12 @@ impl HQMServer {
                     force_player.skater = None;
                     let force_player_name = force_player.player_name.clone();
                     let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
+                    info!("{} ({}) forced {} ({}) off ice", admin_player_name, admin_player_index, force_player.player_name, force_player_index);
 
                     self.add_global_message(HQMMessage::PlayerUpdate {
                         player_name: force_player_name,
                         object: None,
-                        player_index: force_player_index_number as usize,
+                        player_index: force_player_index as usize,
                         in_server: true
                     },true);
 
@@ -148,6 +152,8 @@ impl HQMServer {
             if let Some(player) = & mut self.players[player_index] {
                 player.faceoff_position = input_position;
 
+                info!("{} ({}) set position {}", player.player_name, player_index, player.faceoff_position);
+
                 let msg = format!("{} position {}", player.player_name, player.faceoff_position);
                 self.add_server_chat_message(msg);
 
@@ -160,11 +166,11 @@ impl HQMServer {
 
             if self.config.password == password{
                 player.is_admin = true;
-
+                info!("{} ({}) is now admin", player.player_name, player_index);
                 let msg = format!("{} admin", player.player_name);
                 self.add_server_chat_message(msg);
             } else {
-
+                info!("{} ({}) tried to become admin, entered wrong password", player.player_name, player_index);
                 let msg = format!("Incorrect password");
                 self.add_directed_server_chat_message(msg,player_index);
 
@@ -236,9 +242,11 @@ impl HQMServer {
                             if ban_player{
                                 self.ban_list.insert(player_addr.ip());
 
+                                info!("{} ({}) banned {} ({})", admin_player_name, admin_player_index, player_name, player_index);
                                 let msg = format!("{} banned by {}",player_name, admin_player_name);
                                 self.add_server_chat_message(msg);
                             } else {
+                                info!("{} ({}) kicked {} ({})", admin_player_name, admin_player_index, player_name, player_index);
                                 let msg = format!("{} kicked by {}",player_name, admin_player_name);
                                 self.add_server_chat_message(msg);
                             }
@@ -287,6 +295,7 @@ impl HQMServer {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 self.ban_list.clear();
+                info!("{} ({}) cleared bans", player.player_name, player_index);
 
                 let msg = format!("Bans cleared by {}",player.player_name);
                 self.add_server_chat_message(msg);
@@ -301,6 +310,7 @@ impl HQMServer {
             if player.is_admin{
                 self.game.time = (input_minutes * 60 * 100)+ (input_seconds * 100);
 
+                info!("Clock set to {}:{} by {} ({})", input_minutes, input_seconds, player.player_name, player_index);
                 let msg = format!("Clock set by {}", player.player_name);
                 self.add_server_chat_message(msg);
             } else {
@@ -317,12 +327,14 @@ impl HQMServer {
                     HQMTeam::Red =>{
                         self.game.red_score = input_score;
 
+                        info!("{} ({}) changed red score to {}", player.player_name, player_index, input_score);
                         let msg = format!("Red score changed by {}",player.player_name);
                         self.add_server_chat_message(msg);
                     },
                     HQMTeam::Blue =>{
                         self.game.blue_score = input_score;
 
+                        info!("{} ({}) changed blue score to {}", player.player_name, player_index, input_score);
                         let msg = format!("Blue score changed by {}",player.player_name);
                         self.add_server_chat_message(msg);
                     },
@@ -339,6 +351,7 @@ impl HQMServer {
 
                 self.game.period = input_period;
 
+                info!("{} ({}) set period to {}", player.player_name, player_index, input_period);
                 let msg = format!("Period set by {}",player.player_name);
                 self.add_server_chat_message(msg);
 
@@ -355,6 +368,7 @@ impl HQMServer {
                     self.game.intermission = 5*100;
 
                     let msg = format!("Faceoff initiated by {}",player.player_name);
+                    info!("{} ({}) initiated faceoff",player.player_name, player_index);
                     self.add_server_chat_message(msg);
                 } else {
                     self.admin_deny_message(player_index);
@@ -366,6 +380,7 @@ impl HQMServer {
     pub(crate) fn reset_game (& mut self, player_index: usize) {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{
+                info!("{} ({}) reset game",player.player_name, player_index);
                 let msg = format!("Game reset by {}",player.player_name);
 
                 self.new_game();
@@ -380,6 +395,7 @@ impl HQMServer {
     pub(crate) fn start_game (& mut self, player_index: usize) {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin && self.config.mode == HQMServerMode::Match && self.game.state == HQMGameState::Warmup {
+                info!("{} ({}) started game",player.player_name, player_index);
                 let msg = format!("Game started by {}",player.player_name);
 
                 self.game.time = 1;
@@ -395,7 +411,7 @@ impl HQMServer {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 self.game.paused=true;
-
+                info!("{} ({}) paused game",player.player_name, player_index);
                 let msg = format!("Game paused by {}",player.player_name);
                 self.add_server_chat_message(msg);
             } else {
@@ -408,8 +424,9 @@ impl HQMServer {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 self.game.paused=false;
-
+                info!("{} ({}) resumed game",player.player_name, player_index);
                 let msg = format!("Game resumed by {}",player.player_name);
+
                 self.add_server_chat_message(msg);
             } else {
                 self.admin_deny_message(player_index);
