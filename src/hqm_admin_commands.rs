@@ -1,4 +1,4 @@
-use crate::hqm_server::{HQMServer, HQMServerMode};
+use crate::hqm_server::{HQMServer, HQMServerMode, HQMMuteStatus};
 use crate::hqm_game::{HQMGameObject, HQMMessage, HQMTeam, HQMGameState};
 
 use tracing::info;
@@ -38,7 +38,7 @@ impl HQMServer {
 
                 if mute_player_index < self.players.len() {
                     if let Some(mute_player) = & mut self.players[mute_player_index] {
-                        mute_player.is_muted = true;
+                        mute_player.is_muted = HQMMuteStatus::Muted;
                         info!("{} ({}) muted {} ({})", admin_player_name, admin_player_index, mute_player.player_name, mute_player_index);
                         let msg = format!("{} muted by {}", mute_player.player_name ,admin_player_name);
                         self.add_server_chat_message(msg);
@@ -59,13 +59,44 @@ impl HQMServer {
 
                 if mute_player_index < self.players.len() {
                     if let Some(mute_player) = & mut self.players[mute_player_index] {
-                        mute_player.is_muted = false;
+                        let old_status = mute_player.is_muted;
+                        mute_player.is_muted = HQMMuteStatus::NotMuted;
                         info!("{} ({}) unmuted {} ({})", admin_player_name, admin_player_index, mute_player.player_name, mute_player_index);
                         let msg = format!("{} unmuted by {}", mute_player.player_name ,admin_player_name);
-                        self.add_server_chat_message(msg);
+                        if old_status == HQMMuteStatus::Muted {
+                            self.add_server_chat_message(msg);
+                        } else {
+                            self.add_directed_server_chat_message(msg, admin_player_index);
+                        }
+
                     }
                 }
 
+            } else {
+                self.admin_deny_message(admin_player_index);
+            }
+        }
+    }
+
+    pub(crate) fn shadowmute_player (& mut self, admin_player_index: usize, mute_player_index: usize) {
+        if let Some(admin_player) = & self.players[admin_player_index] {
+            if admin_player.is_admin {
+                let admin_player_name = admin_player.player_name.clone();
+
+                if mute_player_index < self.players.len() {
+                    if let Some(mute_player) = & mut self.players[mute_player_index] {
+                        let old_status = mute_player.is_muted;
+                        mute_player.is_muted = HQMMuteStatus::ShadowMuted;
+                        info!("{} ({}) shadowmuted {} ({})", admin_player_name, admin_player_index, mute_player.player_name, mute_player_index);
+                        let msg = format!("{} shadowmuted by {}", mute_player.player_name ,admin_player_name);
+                        if old_status == HQMMuteStatus::Muted {
+                            // Fake "unmuting" message
+                            let msg = format!("{} unmuted by {}", mute_player.player_name ,admin_player_name);
+                            self.add_directed_server_chat_message(msg, mute_player_index);
+                        }
+                        self.add_directed_server_chat_message(msg, admin_player_index);
+                    }
+                }
             } else {
                 self.admin_deny_message(admin_player_index);
             }

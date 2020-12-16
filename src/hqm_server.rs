@@ -247,6 +247,11 @@ impl HQMServer {
                     self.unmute_player(player_index, mute_player_index);
                 }
             },
+            "shadowmute" => {
+                if let Ok(mute_player_index) = arg.parse::<usize>() {
+                    self.shadowmute_player(player_index, mute_player_index);
+                }
+            },
             "mutechat" => {
                 self.mute_chat(player_index);
             },
@@ -418,15 +423,22 @@ impl HQMServer {
                 };
                 self.process_command(command, arg, player_index);
             } else {
-                match &self.players[player_index as usize] {
-                    Some(player) => {
-                        if !player.is_muted && !self.is_muted {
-                            self.add_user_chat_message(player_index, msg);
-                        }
-                    },
-                    _=>{return;}
+                if !self.is_muted {
+                    match &self.players[player_index as usize] {
+                        Some(player) => {
+                            match player.is_muted {
+                                HQMMuteStatus::NotMuted => {
+                                    self.add_user_chat_message(msg, player_index);
+                                }
+                                HQMMuteStatus::ShadowMuted => {
+                                    self.add_directed_user_chat_message(msg, player_index, player_index);
+                                }
+                                HQMMuteStatus::Muted => {}
+                            }
+                        },
+                        _=>{return;}
+                    }
                 }
-
             }
         }
     }
@@ -548,11 +560,11 @@ impl HQMServer {
         }
     }
 
-    fn add_user_chat_message(&mut self, player_index: usize, message: String) {
-        if let Some(player) = & self.players[player_index] {
-            info!("{} ({}): {}", &player.player_name, player_index, &message);
+    fn add_user_chat_message(&mut self, message: String, sender_index: usize) {
+        if let Some(player) = & self.players[sender_index] {
+            info!("{} ({}): {}", &player.player_name, sender_index, &message);
             let chat = HQMMessage::Chat {
-                player_index: Some(player_index),
+                player_index: Some(sender_index),
                 message,
             };
             self.add_global_message(chat, false);
@@ -568,15 +580,19 @@ impl HQMServer {
         self.add_global_message(chat, false);
     }
 
-    pub(crate) fn add_directed_server_chat_message(&mut self, message: String, player_receiving_index: usize) {
+    fn add_directed_user_chat_message2(&mut self, message: String, receiver_index: usize, sender_index: Option<usize>) {
         // This message will only be visible to a single player
-        let chat = HQMMessage::Chat {
-            player_index: None,
-            message,
-        };
-        if let Some(player) = & mut self.players[player_receiving_index] {
-            player.messages.push(Rc::new (chat));
+        if let Some(player) = & mut self.players[receiver_index] {
+            player.add_directed_user_chat_message2(message, sender_index);
         }
+    }
+
+    pub(crate) fn add_directed_user_chat_message(&mut self, message: String, receiver_index: usize, sender_index: usize) {
+        self.add_directed_user_chat_message2(message, receiver_index, Some (sender_index));
+    }
+
+    pub(crate) fn add_directed_server_chat_message(&mut self, message: String, receiver_index: usize) {
+        self.add_directed_user_chat_message2(message, receiver_index, None);
     }
 
     pub(crate) fn add_global_message(&mut self, message: HQMMessage, persistent: bool) {
@@ -1593,6 +1609,13 @@ async fn notify_master_server(socket: & UdpSocket) -> std::io::Result<usize> {
     socket.send_to(msg, server_addr).await
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub(crate) enum HQMMuteStatus {
+    NotMuted,
+    ShadowMuted,
+    Muted
+}
+
 pub(crate) struct HQMConnectedPlayer {
     pub(crate) player_name: String,
     pub(crate) addr: SocketAddr,
@@ -1607,7 +1630,7 @@ pub(crate) struct HQMConnectedPlayer {
     messages: Vec<Rc<HQMMessage>>,
     inactivity: u32,
     pub(crate) is_admin: bool,
-    pub(crate) is_muted:bool,
+    pub(crate) is_muted: HQMMuteStatus,
     pub(crate) team_switch_timer: u32,
     hand: HQMSkaterHand,
     deltatime: u32
@@ -1629,12 +1652,31 @@ impl HQMConnectedPlayer {
             input: HQMPlayerInput::default(),
             inactivity: 0,
             is_admin: false,
-            is_muted:false,
+            is_muted: HQMMuteStatus::NotMuted,
             hand: HQMSkaterHand::Right,
             team_switch_timer: 0,
             // store latest deltime client sends you to respond with it
             deltatime: 0
         }
+    }
+
+    fn add_directed_user_chat_message2(&mut self, message: String, sender_index: Option<usize>) {
+        // This message will only be visible to a single player
+        let chat = HQMMessage::Chat {
+            player_index: sender_index,
+            message,
+        };
+        self.messages.push(Rc::new (chat));
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn add_directed_user_chat_message(&mut self, message: String, sender_index: usize) {
+        self.add_directed_user_chat_message2(message, Some (sender_index));
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn add_directed_server_chat_message(&mut self, message: String) {
+        self.add_directed_user_chat_message2(message, None);
     }
 
 }
