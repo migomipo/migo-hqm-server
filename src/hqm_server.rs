@@ -228,7 +228,7 @@ impl HQMServer {
         }
     }
 
-    fn process_command (&mut self, command: &str, args: &[&str], player_index: usize) {
+    fn process_command (&mut self, command: &str, arg: &str, player_index: usize) {
 
         match command{
             "enablejoin" => {
@@ -237,41 +237,42 @@ impl HQMServer {
             "disablejoin" => {
                 self.set_allow_join(player_index,false);
             },
-            "muteplayer" => {
-                if args.len() > 0{
-                    self.mute_player(player_index,args.join(" "));
+            "mute" => {
+                if let Ok(mute_player_index) = arg.parse::<usize>() {
+                    self.mute_player(player_index, mute_player_index);
                 }
             },
-            "unmuteplayer" => {
-                if args.len() > 0{
-                    self.unmute_player(player_index,args.join(" "));
+            "unmute" => {
+                if let Ok(mute_player_index) = arg.parse::<usize>() {
+                    self.unmute_player(player_index, mute_player_index);
                 }
             },
             "mutechat" => {
                 self.mute_chat(player_index);
             },
-            "unmute" => {
+            "unmutechat" => {
                 self.unmute_chat(player_index);
             },
             "fs" => {
-                if args.len() > 0{
-                    self.force_player_off_ice(player_index,args.join(" ").parse::<u32>().unwrap());
+                if let Ok(force_player_index) = arg.parse::<usize>() {
+                    self.force_player_off_ice(player_index, force_player_index);
                 }
             },
             "kick" => {
-                if args.len() > 0{
-                    self.kick_player(player_index,args.join(" "),false);
+                if let Ok(kick_player_index) = arg.parse::<usize>() {
+                    self.kick_player(player_index, kick_player_index,false);
                 }
             },
             "ban" => {
-                if args.len() > 0{
-                    self.kick_player(player_index,args.join(" "),true);
+                if let Ok(kick_player_index) = arg.parse::<usize>() {
+                    self.kick_player(player_index, kick_player_index,true);
                 }
             },
             "clearbans" => {
                 self.clear_bans(player_index);
             },
             "set" => {
+                let args = arg.split(" ").collect::<Vec<&str>>();
                 if args.len() > 1{
                     match args[0]{
                         "redscore" =>{
@@ -348,19 +349,15 @@ impl HQMServer {
                 }
             },
             "sp" => {
-                if args.len() == 1{
-                    self.set_role(player_index,args[0]);
-                }
+                self.set_role(player_index,arg);
+
             },
             "setposition" => {
-                if args.len() == 1{
-                    self.set_role(player_index,args[0]);
-                }
+                self.set_role(player_index,arg);
+
             },
             "admin" => {
-                if args.len() == 1{
-                    self.admin_login(player_index,args[0]);
-                }
+                self.admin_login(player_index,arg);
             },
             "faceoff" => {
                 self.faceoff(player_index);
@@ -383,6 +380,16 @@ impl HQMServer {
             "righty" => {
                 self.set_hand(HQMSkaterHand::Right, player_index);
             },
+            "list" => {
+                if arg.is_empty() {
+                    self.list_players(player_index, 0);
+                } else if let Ok(first_index) = arg.parse::<usize>() {
+                    self.list_players(player_index, first_index);
+                }
+            },
+            "search" => {
+                self.search_players(player_index, arg);
+            }
             _ => {}, // matches have to be exhaustive
         }
 
@@ -396,10 +403,14 @@ impl HQMServer {
 
         if self.players[player_index].is_some() {
             if msg.starts_with("/") {
-                let split: Vec<&str> = msg.split(" ").collect(); // Temporary comment: this was changed from split_ascii_whitespace so that player names with spaces could be used as an argument for /kick etc (there appears to be no way to reconstruct such a name otherwise)
+                let split: Vec<&str> = msg.splitn(2, " ").collect();
                 let command = &split[0][1..];
-                let args = &split[1..];
-                self.process_command(command, args, player_index);
+                let arg = if split.len() < 2 {
+                    ""
+                } else {
+                    &split[1]
+                };
+                self.process_command(command, arg, player_index);
             } else {
                 match &self.players[player_index as usize] {
                     Some(player) => {

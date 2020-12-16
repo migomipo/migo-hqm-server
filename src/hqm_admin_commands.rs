@@ -1,6 +1,5 @@
 use crate::hqm_server::{HQMServer, HQMServerMode};
 use crate::hqm_game::{HQMGameObject, HQMMessage, HQMTeam, HQMGameState};
-use std::net::SocketAddr;
 
 use tracing::info;
 
@@ -31,20 +30,17 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn mute_player (& mut self, admin_player_index: usize, mute_player: String) {
+    pub(crate) fn mute_player (& mut self, admin_player_index: usize, mute_player_index: usize) {
         if let Some(admin_player) = & self.players[admin_player_index] {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
-                for (player_index, p) in self.players.iter_mut().enumerate() {
-                    if let Some(player) = p {
-                        if player.player_name == mute_player{
-                            player.is_muted = true;
-                            info!("{} ({}) muted {} ({})", admin_player_name, admin_player_index, player.player_name, player_index);
-                            let msg = format!("{} muted by {}",mute_player,admin_player_name);
-                            self.add_server_chat_message(msg);
-                            break;
-                        }
+                if mute_player_index < self.players.len() {
+                    if let Some(mute_player) = & mut self.players[mute_player_index] {
+                        mute_player.is_muted = true;
+                        info!("{} ({}) muted {} ({})", admin_player_name, admin_player_index, mute_player.player_name, mute_player_index);
+                        let msg = format!("{} muted by {}", mute_player.player_name ,admin_player_name);
+                        self.add_server_chat_message(msg);
                     }
                 }
 
@@ -55,20 +51,17 @@ impl HQMServer {
 
     }
 
-    pub(crate) fn unmute_player (& mut self, admin_player_index: usize, mute_player: String) {
+    pub(crate) fn unmute_player (& mut self, admin_player_index: usize, mute_player_index: usize) {
         if let Some(admin_player) = & self.players[admin_player_index] {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
-                for (player_index, p) in self.players.iter_mut().enumerate() {
-                    if let Some(player) = p {
-                        if player.player_name == mute_player{
-                            player.is_muted=false;
-                            info!("{} ({}) unmuted {} ({})", admin_player_name, admin_player_index, player.player_name, player_index);
-                            let msg = format!("{} unmuted by {}",mute_player,admin_player_name);
-                            self.add_server_chat_message(msg);
-                            break;
-                        }
+                if mute_player_index < self.players.len() {
+                    if let Some(mute_player) = & mut self.players[mute_player_index] {
+                        mute_player.is_muted = false;
+                        info!("{} ({}) unmuted {} ({})", admin_player_name, admin_player_index, mute_player.player_name, mute_player_index);
+                        let msg = format!("{} unmuted by {}", mute_player.player_name ,admin_player_name);
+                        self.add_server_chat_message(msg);
                     }
                 }
 
@@ -107,43 +100,40 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn force_player_off_ice (& mut self, admin_player_index: usize, force_player_off_number: u32) {
-
-        let mut admin_player_name = "".to_string();
+    pub(crate) fn force_player_off_ice (& mut self, admin_player_index: usize, force_player_index: usize) {
 
         if let Some(player) = & self.players[admin_player_index] {
             if player.is_admin {
-                admin_player_name = player.player_name.clone();
+                let admin_player_name = player.player_name.clone();
+
+                if force_player_index < self.players.len() {
+                    if let Some(force_player) = & mut self.players[force_player_index] {
+
+                        force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
+                        if let Some (i) = force_player.skater {
+                            self.game.world.objects[i] = HQMGameObject::None;
+                            force_player.skater = None;
+                            let force_player_name = force_player.player_name.clone();
+                            let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
+                            info!("{} ({}) forced {} ({}) off ice", admin_player_name, admin_player_index, force_player.player_name, force_player_index);
+
+                            self.add_global_message(HQMMessage::PlayerUpdate {
+                                player_name: force_player_name,
+                                object: None,
+                                player_index: force_player_index as usize,
+                                in_server: true
+                            },true);
+
+                            self.add_server_chat_message(msg);
+                        }
+                    }
+                }
             } else {
                 self.admin_deny_message(admin_player_index);
                 return;
             }
         }
 
-        let force_player_index = force_player_off_number - 1;
-
-        if (force_player_index as usize) < self.players.len() {
-            if let Some(force_player) = & mut self.players[force_player_index as usize] {
-
-                force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
-                if let Some (i) = force_player.skater {
-                    self.game.world.objects[i] = HQMGameObject::None;
-                    force_player.skater = None;
-                    let force_player_name = force_player.player_name.clone();
-                    let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
-                    info!("{} ({}) forced {} ({}) off ice", admin_player_name, admin_player_index, force_player.player_name, force_player_index);
-
-                    self.add_global_message(HQMMessage::PlayerUpdate {
-                        player_name: force_player_name,
-                        object: None,
-                        player_index: force_player_index as usize,
-                        in_server: true
-                    },true);
-
-                    self.add_server_chat_message(msg);
-                }
-            }
-        }
     }
 
     pub(crate) fn set_role (& mut self, player_index: usize, input_position:&str) {
@@ -178,112 +168,42 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn kick_player (& mut self, admin_player_index: usize, kick_player_name: String, ban_player: bool) {
+    pub(crate) fn kick_player (& mut self, admin_player_index: usize, kick_player_index: usize, ban_player: bool) {
 
         if let Some(player) = & self.players[admin_player_index]{
             if player.is_admin {
                 let admin_player_name = player.player_name.clone();
 
-                // 0 full string | 1 begins with | 2 ends with | 3 contains
-                let match_mode = if kick_player_name.starts_with("%"){
-                    if kick_player_name.ends_with("%"){
-                        3// %contains%
-                    }else{
-                        2// %ends with
-                    }
-                }else if kick_player_name.ends_with("%"){
-                    1// begins with%
-                } else {
-                    0
-                };
+                if kick_player_index != admin_player_index {
+                    if kick_player_index < self.players.len() {
+                        if let Some(kick_player) = & mut self.players[kick_player_index as usize] {
+                            let kick_player_name = kick_player.player_name.clone ();
+                            let kick_ip = kick_player.addr.ip().clone();
+                            self.remove_player(kick_player_index);
 
-                // Because we allow matching using wildcards, we use vectors for multiple instances found
-                let mut kick_player_list: Vec<(usize, String, SocketAddr)> = Vec::new();
+                            if ban_player {
+                                self.ban_list.insert(kick_ip);
 
-                for (player_index, p) in self.players.iter_mut().enumerate() {
-                    if let Some(player) = p {
-
-                        match match_mode {
-                            0 => { // full string
-                                if player.player_name == kick_player_name{
-                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
-                                }
-                            },
-                            1 => { // begins with%
-                                let match_string: String = kick_player_name.chars().take(kick_player_name.len()-1).collect();
-
-                                if player.player_name.starts_with(&match_string) || player.player_name == kick_player_name{
-                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
-                                }
-                            },
-                            2 => { // %ends with
-                                let match_string: String = kick_player_name.chars().skip(1).take(kick_player_name.len()-1).collect();
-
-                                if player.player_name.ends_with(&match_string) || player.player_name == kick_player_name{
-                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
-                                }
-                            },
-                            3 => { // %contains%
-                                let match_string: String = kick_player_name.chars().skip(1).take(kick_player_name.len()-2).collect();
-
-                                if player.player_name.contains(&match_string) || player.player_name == kick_player_name{
-                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
-                                }
-                            },
-                            _=>{}
-                        }
-                    }
-                }
-                if !kick_player_list.is_empty() {
-                    for (player_index, player_name, player_addr) in kick_player_list {
-                        if player_index != admin_player_index {
-                            self.remove_player(player_index);
-
-                            if ban_player{
-                                self.ban_list.insert(player_addr.ip());
-
-                                info!("{} ({}) banned {} ({})", admin_player_name, admin_player_index, player_name, player_index);
-                                let msg = format!("{} banned by {}",player_name, admin_player_name);
+                                info!("{} ({}) banned {} ({})", admin_player_name, admin_player_index, kick_player_name, kick_player_name);
+                                let msg = format!("{} banned by {}", kick_player_name, admin_player_name);
                                 self.add_server_chat_message(msg);
                             } else {
-                                info!("{} ({}) kicked {} ({})", admin_player_name, admin_player_index, player_name, player_index);
-                                let msg = format!("{} kicked by {}",player_name, admin_player_name);
+                                info!("{} ({}) kicked {} ({})", admin_player_name, admin_player_index, kick_player_name, kick_player_name);
+                                let msg = format!("{} kicked by {}", kick_player_name, admin_player_name);
                                 self.add_server_chat_message(msg);
-                            }
-                        } else {
-                            if ban_player{
-                                let msg = format!("You cannot ban yourself");
-                                self.add_directed_server_chat_message(msg,admin_player_index);
-                            } else {
-                                let msg = format!("You cannot kick yourself");
-                                self.add_directed_server_chat_message(msg,admin_player_index);
                             }
                         }
                     }
-
                 } else {
-                    match match_mode {
-                        0 =>{ // full string
-                            let msg = format!("No player names match {}",kick_player_name);
-                            self.add_directed_server_chat_message(msg,admin_player_index);
-                        },
-                        1 =>{ // begins with%
-                            let msg = format!("No player names begin with {}",kick_player_name);
-                            self.add_directed_server_chat_message(msg,admin_player_index);
-                        },
-                        2 =>{ // %ends with
-                            let msg = format!("No player names end with {}",kick_player_name);
-                            self.add_directed_server_chat_message(msg,admin_player_index);
-                        },
-                        3 =>{ // %contains%
-                            let msg = format!("No player names contain {}",kick_player_name);
-                            self.add_directed_server_chat_message(msg,admin_player_index);
-                        },
-                        _=>{}
+                    if ban_player{
+                        let msg = format!("You cannot ban yourself");
+                        self.add_directed_server_chat_message(msg,admin_player_index);
+                    } else {
+                        let msg = format!("You cannot kick yourself");
+                        self.add_directed_server_chat_message(msg,admin_player_index);
                     }
                 }
-
-            } else{
+            } else {
                 self.admin_deny_message(admin_player_index);
                 return;
             }
@@ -431,6 +351,39 @@ impl HQMServer {
             } else {
                 self.admin_deny_message(player_index);
             }
+        }
+    }
+
+    pub(crate) fn list_players (& mut self, player_index: usize, first_index: usize) {
+        let mut found = vec![];
+        for player_index in first_index..self.players.len() {
+            if let Some(player) = & self.players[player_index] {
+                found.push((player_index, player.player_name.clone()));
+                if found.len() >= 5 {
+                    break;
+                }
+            }
+        }
+        for (found_player_index, found_player_name) in found {
+            self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
+        }
+    }
+
+    pub(crate) fn search_players (& mut self, player_index: usize, name: &str) {
+        let name = name.to_lowercase();
+        let mut found = vec![];
+        for (player_index, player) in self.players.iter ().enumerate() {
+            if let Some(player) = player {
+                if player.player_name.to_lowercase().contains(&name) {
+                    found.push((player_index, player.player_name.clone()));
+                    if found.len() >= 5 {
+                        break;
+                    }
+                }
+            }
+        }
+        for (found_player_index, found_player_name) in found {
+            self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
         }
     }
 }
