@@ -263,10 +263,16 @@ impl HQMServer {
                     self.kick_player(player_index, kick_player_index,false);
                 }
             },
+            "kickall" => {
+                self.kick_all_matching(player_index, arg,false);
+            },
             "ban" => {
                 if let Ok(kick_player_index) = arg.parse::<usize>() {
                     self.kick_player(player_index, kick_player_index,true);
                 }
+            },
+            "banall" => {
+                self.kick_all_matching(player_index, arg,true);
             },
             "clearbans" => {
                 self.clear_bans(player_index);

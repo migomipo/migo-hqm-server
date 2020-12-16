@@ -2,6 +2,7 @@ use crate::hqm_server::{HQMServer, HQMServerMode};
 use crate::hqm_game::{HQMGameObject, HQMMessage, HQMTeam, HQMGameState};
 
 use tracing::info;
+use std::net::SocketAddr;
 
 impl HQMServer {
     fn admin_deny_message (& mut self, player_index: usize) {
@@ -166,6 +167,119 @@ impl HQMServer {
 
             }
         }
+    }
+
+    pub(crate) fn kick_all_matching (& mut self, admin_player_index: usize, kick_player_name: &str, ban_player: bool) {
+
+        if let Some(player) = & self.players[admin_player_index]{
+            if player.is_admin {
+                let admin_player_name = player.player_name.clone();
+
+                // 0 full string | 1 begins with | 2 ends with | 3 contains
+                let match_mode = if kick_player_name.starts_with("%"){
+                    if kick_player_name.ends_with("%"){
+                        3// %contains%
+                    }else{
+                        2// %ends with
+                    }
+                }else if kick_player_name.ends_with("%"){
+                    1// begins with%
+                } else {
+                    0
+                };
+
+                // Because we allow matching using wildcards, we use vectors for multiple instances found
+                let mut kick_player_list: Vec<(usize, String, SocketAddr)> = Vec::new();
+
+                for (player_index, p) in self.players.iter_mut().enumerate() {
+                    if let Some(player) = p {
+
+                        match match_mode {
+                            0 => { // full string
+                                if player.player_name == kick_player_name{
+                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
+                                }
+                            },
+                            1 => { // begins with%
+                                let match_string: String = kick_player_name.chars().take(kick_player_name.len()-1).collect();
+
+                                if player.player_name.starts_with(&match_string) || player.player_name == kick_player_name{
+                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
+                                }
+                            },
+                            2 => { // %ends with
+                                let match_string: String = kick_player_name.chars().skip(1).take(kick_player_name.len()-1).collect();
+
+                                if player.player_name.ends_with(&match_string) || player.player_name == kick_player_name{
+                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
+                                }
+                            },
+                            3 => { // %contains%
+                                let match_string: String = kick_player_name.chars().skip(1).take(kick_player_name.len()-2).collect();
+
+                                if player.player_name.contains(&match_string) || player.player_name == kick_player_name{
+                                    kick_player_list.push((player_index, player.player_name.clone(), player.addr));
+                                }
+                            },
+                            _=>{}
+                        }
+                    }
+                }
+                if !kick_player_list.is_empty() {
+                    for (player_index, player_name, player_addr) in kick_player_list {
+                        if player_index != admin_player_index {
+                            self.remove_player(player_index);
+
+                            if ban_player{
+                                self.ban_list.insert(player_addr.ip());
+
+                                info!("{} ({}) banned {} ({})", admin_player_name, admin_player_index, player_name, player_index);
+                                let msg = format!("{} banned by {}",player_name, admin_player_name);
+                                self.add_server_chat_message(msg);
+                            } else {
+                                info!("{} ({}) kicked {} ({})", admin_player_name, admin_player_index, player_name, player_index);
+                                let msg = format!("{} kicked by {}",player_name, admin_player_name);
+                                self.add_server_chat_message(msg);
+                            }
+                        } else {
+                            if ban_player{
+                                let msg = format!("You cannot ban yourself");
+                                self.add_directed_server_chat_message(msg,admin_player_index);
+                            } else {
+                                let msg = format!("You cannot kick yourself");
+                                self.add_directed_server_chat_message(msg,admin_player_index);
+                            }
+                        }
+                    }
+
+                } else {
+                    match match_mode {
+                        0 =>{ // full string
+                            let msg = format!("No player names match {}",kick_player_name);
+                            self.add_directed_server_chat_message(msg,admin_player_index);
+                        },
+                        1 =>{ // begins with%
+                            let msg = format!("No player names begin with {}",kick_player_name);
+                            self.add_directed_server_chat_message(msg,admin_player_index);
+                        },
+                        2 =>{ // %ends with
+                            let msg = format!("No player names end with {}",kick_player_name);
+                            self.add_directed_server_chat_message(msg,admin_player_index);
+                        },
+                        3 =>{ // %contains%
+                            let msg = format!("No player names contain {}",kick_player_name);
+                            self.add_directed_server_chat_message(msg,admin_player_index);
+                        },
+                        _=>{}
+                    }
+                }
+
+            } else{
+                self.admin_deny_message(admin_player_index);
+                return;
+            }
+        }
+
     }
 
     pub(crate) fn kick_player (& mut self, admin_player_index: usize, kick_player_index: usize, ban_player: bool) {
