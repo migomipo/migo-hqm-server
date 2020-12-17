@@ -403,27 +403,39 @@ impl HQMServer {
             },
             "setview" => {
                 if let Ok(view_player_index) = arg.parse::<usize>() {
-                    if let Some(player) = & mut self.players[player_index] {
-                        if view_player_index < 64 {
-                            player.view_player_index = view_player_index;
+                    if let Some(player) = & self.players[view_player_index] {
+                        let view_player_name = player.player_name.clone();
+                        if let Some(player) = & mut self.players[player_index] {
+                            if view_player_index < 64 && view_player_index != player.view_player_index {
+                                player.view_player_index = view_player_index;
+                                if player_index != view_player_index {
+                                    if set_team_internal(player_index, player, & mut self.game.world, &self.config, None).is_some() {
+                                        let msg = HQMMessage::PlayerUpdate {
+                                            player_name: player.player_name.clone(),
+                                            object: None,
+                                            player_index,
+                                            in_server: true
+                                        };
+                                        self.add_global_message(msg, true);
+                                    };
+                                    self.add_directed_server_chat_message(format!("You are now viewing {}", view_player_name), player_index);
+                                } else {
+                                    self.add_directed_server_chat_message("View has been restored".to_string(), player_index);
+                                }
+                            }
                         }
-                        if player_index != view_player_index {
-                            if set_team_internal(player_index, player, & mut self.game.world, &self.config, None).is_some() {
-                                let msg = HQMMessage::PlayerUpdate {
-                                    player_name: player.player_name.clone(),
-                                    object: None,
-                                    player_index,
-                                    in_server: true
-                                };
-                                self.add_global_message(msg, true);
-                            };
-                        }
+                    } else {
+                        self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
                     }
+
                 }
             },
             "restoreview" => {
                 if let Some(player) = & mut self.players[player_index] {
-                    player.view_player_index = player_index;
+                    if player.view_player_index != player_index {
+                        player.view_player_index = player_index;
+                        self.add_directed_server_chat_message("View has been restored".to_string(), player_index);
+                    }
                 }
             }
             _ => {}, // matches have to be exhaustive
