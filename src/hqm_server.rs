@@ -247,11 +247,11 @@ impl HQMServer {
                     self.unmute_player(player_index, mute_player_index);
                 }
             },
-            "shadowmute" => {
+            /*"shadowmute" => {
                 if let Ok(mute_player_index) = arg.parse::<usize>() {
                     self.shadowmute_player(player_index, mute_player_index);
                 }
-            },
+            },*/
             "mutechat" => {
                 self.mute_chat(player_index);
             },

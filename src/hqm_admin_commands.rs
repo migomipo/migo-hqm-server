@@ -78,6 +78,7 @@ impl HQMServer {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn shadowmute_player (& mut self, admin_player_index: usize, mute_player_index: usize) {
         if let Some(admin_player) = & self.players[admin_player_index] {
             if admin_player.is_admin {
