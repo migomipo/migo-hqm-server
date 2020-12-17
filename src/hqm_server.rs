@@ -400,6 +400,31 @@ impl HQMServer {
             },
             "search" => {
                 self.search_players(player_index, arg);
+            },
+            "setview" => {
+                if let Ok(view_player_index) = arg.parse::<usize>() {
+                    if let Some(player) = & mut self.players[player_index] {
+                        if view_player_index < 64 {
+                            player.view_player_index = view_player_index;
+                        }
+                        if player_index != view_player_index {
+                            if set_team_internal(player_index, player, & mut self.game.world, &self.config, None).is_some() {
+                                let msg = HQMMessage::PlayerUpdate {
+                                    player_name: player.player_name.clone(),
+                                    object: None,
+                                    player_index,
+                                    in_server: true
+                                };
+                                self.add_global_message(msg, true);
+                            };
+                        }
+                    }
+                }
+            },
+            "restoreview" => {
+                if let Some(player) = & mut self.players[player_index] {
+                    player.view_player_index = player_index;
+                }
             }
             _ => {}, // matches have to be exhaustive
         }
@@ -504,7 +529,7 @@ impl HQMServer {
                     }));
                 }
 
-                let new_player = HQMConnectedPlayer::new(player_name, *addr, messages);
+                let new_player = HQMConnectedPlayer::new(player_index, player_name, *addr, messages);
 
                 self.players[player_index] = Some(new_player);
 
@@ -1338,10 +1363,9 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
             }
         };
 
-    for (player_index, player) in players.iter().enumerate() {
+    for player in players.iter() {
         if let Some(player) = player {
             let mut writer = HQMMessageWriter::new(write_buf);
-
 
             if player.game_id != game.game_id {
                 writer.write_bytes_aligned(GAME_HEADER);
@@ -1361,7 +1385,7 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
                 writer.write_bits(16, game.time);
                 writer.write_bits(16, game.goal_timer);
                 writer.write_bits(8, game.period);
-                writer.write_bits(8, player_index as u32);
+                writer.write_bits(8, player.view_player_index as u32);
 
                 // if using a non-cryptic version, send ping
                 if player.client_version > 0 {
@@ -1563,6 +1587,7 @@ fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, wor
 
                     if let Some(i) = world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index) {
                         player.skater = Some(i);
+                        player.view_player_index = player_index;
                         info!("{} ({}) has joined team {:?}", player.player_name, player_index, team);
                         Some(Some((i, team)))
                     } else {
@@ -1633,11 +1658,12 @@ pub(crate) struct HQMConnectedPlayer {
     pub(crate) is_muted: HQMMuteStatus,
     pub(crate) team_switch_timer: u32,
     hand: HQMSkaterHand,
-    deltatime: u32
+    deltatime: u32,
+    view_player_index: usize
 }
 
 impl HQMConnectedPlayer {
-    pub fn new(player_name: String, addr: SocketAddr, global_messages: Vec<Rc<HQMMessage>>) -> Self {
+    pub fn new(player_index: usize, player_name: String, addr: SocketAddr, global_messages: Vec<Rc<HQMMessage>>) -> Self {
         HQMConnectedPlayer {
             player_name,
             addr,
@@ -1656,7 +1682,8 @@ impl HQMConnectedPlayer {
             hand: HQMSkaterHand::Right,
             team_switch_timer: 0,
             // store latest deltime client sends you to respond with it
-            deltatime: 0
+            deltatime: 0,
+            view_player_index: player_index
         }
     }
 
