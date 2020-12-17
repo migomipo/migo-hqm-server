@@ -685,6 +685,7 @@ impl HQMServer {
                     if let Some(object_index) = player.skater {
                        world.objects[object_index] = HQMGameObject::None;
                     }
+                    info!("{} ({}) timed out", player.player_name, player_index);
                     messages.push(HQMMessage::PlayerUpdate {
                         player_name: player.player_name.clone(),
                         object: None,
