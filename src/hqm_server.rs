@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
-use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMIcingStatus, HQMOffsideStatus, HQMRulesState, HQMPuckTouch, HQMPuck};
+use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMIcingStatus, HQMOffsideStatus, HQMRulesState};
 use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::collections::{HashSet, HashMap};
@@ -378,13 +378,8 @@ impl HQMServer {
                     }
                 }
             },
-            "sp" => {
-                self.set_role(player_index,arg);
-
-            },
-            "setposition" => {
-                self.set_role(player_index,arg);
-
+            "sp" | "setposition" => {
+                self.set_preferred_faceoff_position(player_index, arg);
             },
             "admin" => {
                 self.admin_login(player_index,arg);
@@ -926,12 +921,13 @@ impl HQMServer {
                     player, puck
                 } => {
                     // Get connected player index from skater
-                    if let HQMGameObject::Player(skater) = & mut self.game.world.objects[player] {
+                    if let HQMGameObject::Player(skater) = & self.game.world.objects[player] {
                         let this_connected_player_index = skater.connected_player_index;
                         let team = skater.team;
+                        let faceoff_position = skater.faceoff_position.clone();
 
                         if let HQMGameObject::Puck(puck) = & mut self.game.world.objects[puck] {
-                            Self::update_puck_touches(puck, this_connected_player_index, team, self.game.time);
+                            puck.add_touch(this_connected_player_index, team, self.game.time);
 
                             let (icing_status, other_icing_status, offside_status, other_team) = match team {
                                 HQMTeam::Red => (& mut self.game.red_icing_status, & mut self.game.blue_icing_status, & mut self.game.red_offside_status, HQMTeam::Blue),
@@ -946,8 +942,13 @@ impl HQMServer {
                                 };
                                 self.call_offside(team, &pass_origin);
                             } else if let HQMIcingStatus::Warning(p) = other_icing_status {
-                                let copy = p.clone();
-                                self.call_icing(other_team, &copy);
+                                if faceoff_position == "G" {
+                                    *other_icing_status = HQMIcingStatus::No;
+                                    self.add_server_chat_message(String::from("Icing waved off"));
+                                } else {
+                                    let copy = p.clone();
+                                    self.call_icing(other_team, &copy);
+                                }
                             } else {
                                 if let HQMIcingStatus::NotTouched(_) = other_icing_status {
                                     *other_icing_status = HQMIcingStatus::No;
@@ -1052,37 +1053,6 @@ impl HQMServer {
         }
     }
 
-    fn update_puck_touches(puck: & mut HQMPuck, player_index: usize, team: HQMTeam, time: u32) {
-        let puck_pos = puck.body.pos.clone();
-        let most_recent_touch = puck.touches.front_mut();
-        if let Some(most_recent_touch) = most_recent_touch {
-            if most_recent_touch.player_index == player_index
-                && most_recent_touch.team == team {
-                most_recent_touch.puck_pos = puck_pos;
-                most_recent_touch.time = time;
-                most_recent_touch.is_first_touch = false;
-            } else {
-                puck.touches.push_front(HQMPuckTouch {
-                    player_index,
-                    team,
-                    puck_pos,
-                    time,
-                    is_first_touch: true
-                });
-            }
-        } else {
-            puck.touches.push_front(HQMPuckTouch {
-                player_index,
-                team,
-                puck_pos,
-                time,
-                is_first_touch: true
-            });
-        };
-
-        puck.touches.truncate(8);
-    }
-
 
     pub(crate) fn new_game(&mut self) {
         self.game = HQMGame::new(self.game_alloc, &self.config);
@@ -1129,8 +1099,8 @@ impl HQMServer {
     fn get_faceoff_positions (players: & [Option<HQMConnectedPlayer>], objects: & [HQMGameObject], allowed_positions: &[String]) -> HashMap<usize, (HQMTeam, String)> {
         let mut res = HashMap::new();
 
-        let mut red_players: Vec<(usize, &str)> = vec![];
-        let mut blue_players: Vec<(usize, &str)> = vec![];
+        let mut red_players= vec![];
+        let mut blue_players = vec![];
         for (player_index, player) in players.iter().enumerate() {
             if let Some(player) = player {
                 let team = player.skater.and_then(|i| match &objects[i] {
@@ -1138,33 +1108,49 @@ impl HQMServer {
                     _ => None
                 });
                 if team == Some(HQMTeam::Red) {
-                    red_players.push((player_index, &player.faceoff_position));
+                    red_players.push((player_index, player.preferred_faceoff_position.as_ref()));
                 } else if team == Some(HQMTeam::Blue) {
-                    blue_players.push((player_index, &player.faceoff_position));
+                    blue_players.push((player_index, player.preferred_faceoff_position.as_ref()));
                 }
+
             }
         }
 
-        fn setup_position (positions: & mut HashMap<usize, (HQMTeam, String)>, players: &[(usize, &str)], allowed_positions: &[String], team: HQMTeam) {
+        fn setup_position (positions: & mut HashMap<usize, (HQMTeam, String)>, players: &[(usize, Option<&String>)], allowed_positions: &[String], team: HQMTeam) {
             let mut available_positions = Vec::from(allowed_positions);
+
+            // First, we try to give each player its preferred position
             for (player_index, player_position) in players.iter() {
-                if let Some(x) = available_positions.iter().position(|x| *x == *player_position) {
-                    let s = available_positions.remove(x);
-                    positions.insert(*player_index, (team, s));
+                if let Some(player_position) = player_position {
+                    if let Some(x) = available_positions.iter().position(|x| *x == **player_position) {
+                        let s = available_positions.remove(x);
+                        positions.insert(*player_index, (team, s));
+                    }
                 }
             }
             let c = String::from("C");
+            // Some players did not get their preferred positions because they didn't have one,
+            // or because it was already taken
             for (player_index, player_position) in players.iter() {
                 if !positions.contains_key(player_index) {
-                    if let Some(x) = available_positions.iter().position(|x| *x == c) {
+
+                    let s = if let Some(x) = available_positions.iter().position(|x| *x == c) {
+                        // Someone needs to be C
                         available_positions.remove(x);
-                        positions.insert(*player_index, (team, c.clone()));
+                        (team, c.clone())
                     } else if !available_positions.is_empty() {
+                        // Give out the remaining positions
                         let x = available_positions.remove(0);
-                        positions.insert(*player_index, (team, x));
+                        (team, x)
                     } else {
-                        positions.insert(*player_index, (team, String::from(*player_position)));
-                    }
+                        // Oh no, we're out of legal starting positions
+                        if let Some(player_position) = player_position {
+                            (team, (*player_position).clone())
+                        } else {
+                            (team, c.clone())
+                        }
+                    };
+                    positions.insert(*player_index, s);
                 }
             }
             if available_positions.contains(&c) && !players.is_empty() {
@@ -1192,10 +1178,9 @@ impl HQMServer {
         let mut messages = Vec::new();
 
         fn setup (messages: & mut Vec<HQMMessage>, world: & mut HQMGameWorld,
-                  player: & mut HQMConnectedPlayer, player_index: usize, pos: Point3<f32>, rot: Matrix3<f32>, team: HQMTeam) {
-            let new_object_index = world.create_player_object(team,pos, rot, player.hand, player_index);
+                  player: & mut HQMConnectedPlayer, player_index: usize, faceoff_position: String, pos: Point3<f32>, rot: Matrix3<f32>, team: HQMTeam) {
+            let new_object_index = world.create_player_object(team,pos, rot, player.hand, player_index, faceoff_position);
             player.skater = new_object_index;
-
 
             let update = HQMMessage::PlayerUpdate {
                 player_name: player.player_name.clone(),
@@ -1217,7 +1202,7 @@ impl HQMServer {
                         faceoff_spot.blue_player_positions[&faceoff_position].clone()
                     }
                 };
-                setup (& mut messages, & mut self.game.world, player, player_index, player_position,
+                setup (& mut messages, & mut self.game.world, player, player_index, faceoff_position, player_position,
                        player_rotation.matrix().clone_owned(), team)
             }
 
@@ -1636,7 +1621,7 @@ fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, wor
                         },
                     };
 
-                    if let Some(i) = world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index) {
+                    if let Some(i) = world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index, "".to_string()) {
                         player.skater = Some(i);
                         player.view_player_index = player_index;
                         info!("{} ({}) has joined team {:?}", player.player_name, player_index, team);
@@ -1696,7 +1681,7 @@ pub(crate) struct HQMConnectedPlayer {
     pub(crate) player_name: String,
     pub(crate) addr: SocketAddr,
     client_version: u8,
-    pub(crate) faceoff_position: String,
+    pub(crate) preferred_faceoff_position: Option<String>,
     pub(crate) skater: Option<usize>,
     game_id: u32,
     input: HQMPlayerInput,
@@ -1720,7 +1705,7 @@ impl HQMConnectedPlayer {
             player_name,
             addr,
             client_version: 0,
-            faceoff_position: String::from("C"),
+            preferred_faceoff_position: None,
             skater: None,
             game_id: u32::MAX,
             known_packet: u32::MAX,

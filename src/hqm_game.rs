@@ -16,10 +16,10 @@ pub(crate) struct HQMGameWorld {
 }
 
 impl HQMGameWorld {
-    pub(crate) fn create_player_object (& mut self, team: HQMTeam, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize) -> Option<usize> {
+    pub(crate) fn create_player_object (& mut self, team: HQMTeam, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize, faceoff_position: String) -> Option<usize> {
         let object_slot = self.find_empty_object_slot();
         if let Some(i) = object_slot {
-            self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, team, start, rot, hand, connected_player_index));
+            self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, team, start, rot, hand, connected_player_index, faceoff_position));
         }
         return object_slot;
     }
@@ -496,7 +496,8 @@ pub(crate) struct HQMSkater {
     pub(crate) stick_placement: Vector2<f32>,      // Azimuth and inclination in radians
     pub(crate) stick_placement_delta: Vector2<f32>, // Change in azimuth and inclination per hundred of a second
     pub(crate) collision_balls: Vec<HQMSkaterCollisionBall>,
-    pub(crate) hand: HQMSkaterHand
+    pub(crate) hand: HQMSkaterHand,
+    pub(crate) faceoff_position: String
 }
 
 impl HQMSkater {
@@ -512,7 +513,7 @@ impl HQMSkater {
         collision_balls
     }
 
-    fn new(object_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize) -> Self {
+    fn new(object_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize, faceoff_position: String) -> Self {
         let linear_velocity = Vector3::new (0.0, 0.0, 0.0);
         let collision_balls = HQMSkater::get_collision_balls(&pos, &rot, &linear_velocity);
         HQMSkater {
@@ -537,7 +538,8 @@ impl HQMSkater {
             stick_placement: Vector2::new(0.0, 0.0),
             stick_placement_delta: Vector2::new(0.0, 0.0),
             hand,
-            collision_balls
+            collision_balls,
+            faceoff_position
         }
     }
 
@@ -681,6 +683,37 @@ impl HQMPuck {
             }
         }
         res
+    }
+
+    pub(crate) fn add_touch(& mut self, player_index: usize, team: HQMTeam, time: u32) {
+        let puck_pos = self.body.pos.clone();
+        let most_recent_touch = self.touches.front_mut();
+        if let Some(most_recent_touch) = most_recent_touch {
+            if most_recent_touch.player_index == player_index
+                && most_recent_touch.team == team {
+                most_recent_touch.puck_pos = puck_pos;
+                most_recent_touch.time = time;
+                most_recent_touch.is_first_touch = false;
+            } else {
+                self.touches.push_front(HQMPuckTouch {
+                    player_index,
+                    team,
+                    puck_pos,
+                    time,
+                    is_first_touch: true
+                });
+            }
+        } else {
+            self.touches.push_front(HQMPuckTouch {
+                player_index,
+                team,
+                puck_pos,
+                time,
+                is_first_touch: true
+            });
+        };
+
+        self.touches.truncate(8);
     }
 
 }
