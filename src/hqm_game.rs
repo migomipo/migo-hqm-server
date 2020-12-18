@@ -129,8 +129,8 @@ impl HQMGame {
 
             game_over: false,
             game_id,
-            game_step: 0,
-            packet: 0,
+            game_step: u32::MAX,
+            packet: u32::MAX,
             active: false,
         }
     }

@@ -3,7 +3,7 @@ use std::net::{SocketAddr};
 use nalgebra::{Vector3, Point3, Matrix3, Vector2, Rotation3};
 
 use std::cmp::min;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
@@ -15,10 +15,16 @@ use std::sync::Arc;
 use bytes::BytesMut;
 
 use tracing::info;
+use std::collections::VecDeque;
 
 const GAME_HEADER: &[u8] = b"Hock";
 
 const MASTER_SERVER: &str = "66.226.72.227:27590";
+
+pub struct HQMSavedTick {
+    packets: Vec<HQMObjectPacket>,
+    time: Instant,
+}
 
 pub(crate) struct HQMServer {
     pub(crate) players: Vec<Option<HQMConnectedPlayer>>,
@@ -27,6 +33,7 @@ pub(crate) struct HQMServer {
     pub(crate) config: HQMServerConfiguration,
     pub(crate) game: HQMGame,
     pub(crate) global_messages: Vec<Rc<HQMMessage>>,
+    pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
     game_alloc: u32,
     pub(crate) is_muted:bool,
 }
@@ -151,6 +158,18 @@ impl HQMServer {
         }
 
         let packet = parser.read_u32_aligned();
+
+        if player.game_id == current_game_id && player.known_packet < packet {
+            if let Some(diff) = self.game.packet.checked_sub(packet) {
+                let diff = diff as usize;
+                let t1 = Instant::now();
+                if let Some (t2) = self.saved_ticks.get(diff).map(|x| x.time) {
+                    if let Some(duration) = t1.checked_duration_since(t2) {
+                        player.last_ping = duration.as_millis() as u32;
+                    }
+                }
+            }
+        }
 
         player.inactivity = 0;
         player.known_packet = packet;
@@ -401,7 +420,7 @@ impl HQMServer {
             "search" => {
                 self.search_players(player_index, arg);
             },
-            "setview" => {
+            "view" => {
                 if let Ok(view_player_index) = arg.parse::<usize>() {
                     if let Some(player) = & self.players[view_player_index] {
                         let view_player_name = player.player_name.clone();
@@ -435,6 +454,16 @@ impl HQMServer {
                     if player.view_player_index != player_index {
                         player.view_player_index = player_index;
                         self.add_directed_server_chat_message("View has been restored".to_string(), player_index);
+                    }
+                }
+            },
+            "ping" => {
+                if let Ok(ping_player_index) = arg.parse::<usize>() {
+                    if let Some(ping_player) = & self.players[ping_player_index] {
+                        let msg = format!("{} ping: {} ms", ping_player.player_name, ping_player.last_ping);
+                        self.add_directed_server_chat_message(msg, player_index);
+                    } else {
+                        self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
                     }
                 }
             }
@@ -787,11 +816,16 @@ impl HQMServer {
             });
 
             let mut write_buf = vec![0u8; 4096];
+            self.saved_ticks.truncate(self.saved_ticks.capacity() - 1);
+            self.saved_ticks.push_front(HQMSavedTick {
+                packets,
+                time: Instant::now()
+            });
 
-            send_updates(&self.game, & self.players, socket, &packets, & mut write_buf).await;
+            self.game.packet = self.game.packet.wrapping_add(1);
+            self.game.game_step = self.game.game_step.wrapping_add(1);
 
-            self.game.packet += 1;
-            self.game.game_step += 1;
+            send_updates(&self.game, & self.players, socket, &self.saved_ticks, & mut write_buf).await;
         } else if self.game.active {
             info!("Game {} abandoned", self.game.game_id);
             self.new_game();
@@ -1055,6 +1089,7 @@ impl HQMServer {
         info!("New game {} started", self.game.game_id);
         self.game_alloc += 1;
         self.global_messages.clear();
+        self.saved_ticks.clear();
 
         let puck_line_start= self.game.world.rink.width / 2.0 - 0.4 * ((self.config.warmup_pucks - 1) as f32);
 
@@ -1327,6 +1362,7 @@ impl HQMServer {
             allow_join:true,
             game: HQMGame::new(1, &config),
             global_messages: vec![],
+            saved_ticks: VecDeque::with_capacity(256),
             game_alloc: 1,
             is_muted:false,
             config,
@@ -1357,7 +1393,9 @@ fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool 
     false
 }
 
-async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], socket: & UdpSocket, packets: &[HQMObjectPacket], write_buf: & mut [u8]) {
+async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], socket: & UdpSocket, packets: &VecDeque<HQMSavedTick>, write_buf: & mut [u8]) {
+
+    let packets = &packets[0].packets;
 
     let rules_state =
         if game.red_offside_status == HQMOffsideStatus::Offside ||
@@ -1672,6 +1710,7 @@ pub(crate) struct HQMConnectedPlayer {
     pub(crate) team_switch_timer: u32,
     hand: HQMSkaterHand,
     deltatime: u32,
+    last_ping: u32,
     view_player_index: usize
 }
 
@@ -1696,6 +1735,7 @@ impl HQMConnectedPlayer {
             team_switch_timer: 0,
             // store latest deltime client sends you to respond with it
             deltatime: 0,
+            last_ping: 1000,
             view_player_index: player_index
         }
     }
