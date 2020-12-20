@@ -258,17 +258,23 @@ impl HQMServer {
             },
             "mute" => {
                 if let Ok(mute_player_index) = arg.parse::<usize>() {
-                    self.mute_player(player_index, mute_player_index);
+                    if mute_player_index < self.players.len() {
+                        self.mute_player(player_index, mute_player_index);
+                    }
                 }
             },
             "unmute" => {
                 if let Ok(mute_player_index) = arg.parse::<usize>() {
-                    self.unmute_player(player_index, mute_player_index);
+                    if mute_player_index < self.players.len() {
+                        self.unmute_player(player_index, mute_player_index);
+                    }
                 }
             },
             /*"shadowmute" => {
                 if let Ok(mute_player_index) = arg.parse::<usize>() {
-                    self.shadowmute_player(player_index, mute_player_index);
+                    if mute_player_index < self.players.len() {
+                        self.shadowmute_player(player_index, mute_player_index);
+                    }
                 }
             },*/
             "mutechat" => {
@@ -279,12 +285,16 @@ impl HQMServer {
             },
             "fs" => {
                 if let Ok(force_player_index) = arg.parse::<usize>() {
-                    self.force_player_off_ice(player_index, force_player_index);
+                    if force_player_index < self.players.len() {
+                        self.force_player_off_ice(player_index, force_player_index);
+                    }
                 }
             },
             "kick" => {
                 if let Ok(kick_player_index) = arg.parse::<usize>() {
-                    self.kick_player(player_index, kick_player_index,false);
+                    if kick_player_index < self.players.len() {
+                        self.kick_player(player_index, kick_player_index, false);
+                    }
                 }
             },
             "kickall" => {
@@ -292,7 +302,9 @@ impl HQMServer {
             },
             "ban" => {
                 if let Ok(kick_player_index) = arg.parse::<usize>() {
-                    self.kick_player(player_index, kick_player_index,true);
+                    if kick_player_index < self.players.len() {
+                        self.kick_player(player_index, kick_player_index, true);
+                    }
                 }
             },
             "banall" => {
@@ -417,31 +429,32 @@ impl HQMServer {
             },
             "view" => {
                 if let Ok(view_player_index) = arg.parse::<usize>() {
-                    if let Some(player) = & self.players[view_player_index] {
-                        let view_player_name = player.player_name.clone();
-                        if let Some(player) = & mut self.players[player_index] {
-                            if view_player_index < 64 && view_player_index != player.view_player_index {
-                                player.view_player_index = view_player_index;
-                                if player_index != view_player_index {
-                                    if set_team_internal(player_index, player, & mut self.game.world, &self.config, None).is_some() {
-                                        let msg = HQMMessage::PlayerUpdate {
-                                            player_name: player.player_name.clone(),
-                                            object: None,
-                                            player_index,
-                                            in_server: true
+                    if view_player_index < self.players.len() {
+                        if let Some(view_player) = &self.players[view_player_index] {
+                            let view_player_name = view_player.player_name.clone();
+                            if let Some(player) = &mut self.players[player_index] {
+                                if view_player_index < 64 && view_player_index != player.view_player_index {
+                                    player.view_player_index = view_player_index;
+                                    if player_index != view_player_index {
+                                        if set_team_internal(player_index, player, &mut self.game.world, &self.config, None).is_some() {
+                                            let msg = HQMMessage::PlayerUpdate {
+                                                player_name: player.player_name.clone(),
+                                                object: None,
+                                                player_index,
+                                                in_server: true
+                                            };
+                                            self.add_global_message(msg, true);
                                         };
-                                        self.add_global_message(msg, true);
-                                    };
-                                    self.add_directed_server_chat_message(format!("You are now viewing {}", view_player_name), player_index);
-                                } else {
-                                    self.add_directed_server_chat_message("View has been restored".to_string(), player_index);
+                                        self.add_directed_server_chat_message(format!("You are now viewing {}", view_player_name), player_index);
+                                    } else {
+                                        self.add_directed_server_chat_message("View has been restored".to_string(), player_index);
+                                    }
                                 }
                             }
+                        } else {
+                            self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
                         }
-                    } else {
-                        self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
                     }
-
                 }
             },
             "restoreview" => {
@@ -454,11 +467,13 @@ impl HQMServer {
             },
             "ping" => {
                 if let Ok(ping_player_index) = arg.parse::<usize>() {
-                    if let Some(ping_player) = & self.players[ping_player_index] {
-                        let msg = format!("{} ping: {} ms", ping_player.player_name, ping_player.last_ping);
-                        self.add_directed_server_chat_message(msg, player_index);
-                    } else {
-                        self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
+                    if ping_player_index < self.players.len() {
+                        if let Some(ping_player) = & self.players[ping_player_index] {
+                            let msg = format!("{} ping: {} ms", ping_player.player_name, ping_player.last_ping);
+                            self.add_directed_server_chat_message(msg, player_index);
+                        } else {
+                            self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
+                        }
                     }
                 }
             }
