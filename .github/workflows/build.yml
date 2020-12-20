@@ -74,7 +74,7 @@ jobs:
       matrix:
         target:
           - x86_64-apple-darwin
-          - aarch64-apple-darwin
+          #- aarch64-apple-darwin  # ARM Mac builds won't work for stable Rust until 1.49
     steps:
       - uses: actions/checkout@v2
       - uses: actions/download-artifact@v1
