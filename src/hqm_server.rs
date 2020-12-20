@@ -165,7 +165,8 @@ impl HQMServer {
                 let t1 = Instant::now();
                 if let Some (t2) = self.saved_ticks.get(diff).map(|x| x.time) {
                     if let Some(duration) = t1.checked_duration_since(t2) {
-                        player.last_ping = duration.as_millis() as u32;
+                        player.last_ping.truncate(100 - 1);
+                        player.last_ping.push_front(duration.as_secs_f32());
                     }
                 }
             }
@@ -469,8 +470,36 @@ impl HQMServer {
                 if let Ok(ping_player_index) = arg.parse::<usize>() {
                     if ping_player_index < self.players.len() {
                         if let Some(ping_player) = & self.players[ping_player_index] {
-                            let msg = format!("{} ping: {} ms", ping_player.player_name, ping_player.last_ping);
-                            self.add_directed_server_chat_message(msg, player_index);
+                            if ping_player.last_ping.is_empty() {
+                                let msg = format!("No ping values found for {}", ping_player.player_name);
+                                self.add_directed_server_chat_message(msg, player_index);
+                            } else {
+                                let n = ping_player.last_ping.len() as f32;
+                                let mut min = f32::INFINITY;
+                                let mut max = f32::NEG_INFINITY;
+                                let mut sum = 0f32;
+                                for i in ping_player.last_ping.iter() {
+                                    min = min.min(*i);
+                                    max = max.max(*i);
+                                    sum += *i;
+                                }
+                                let avg = sum / n;
+                                let dev = {
+                                    let mut s = 0f32;
+                                    for i in ping_player.last_ping.iter() {
+                                        s += (*i - avg).powi(2);
+                                    }
+                                    (s / n).sqrt()
+                                };
+
+                                let msg1 = format!("{} ping: avg {:.0} ms", ping_player.player_name, (avg * 1000f32));
+                                let msg2 = format!("min {:.0} ms, max {:.0} ms, std.dev {:.1}", (min * 1000f32), (max * 1000f32), (dev * 1000f32));
+                                self.add_directed_server_chat_message(msg1, player_index);
+                                self.add_directed_server_chat_message(msg2, player_index);
+                            }
+
+
+
                         } else {
                             self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
                         }
@@ -1710,7 +1739,7 @@ pub(crate) struct HQMConnectedPlayer {
     pub(crate) team_switch_timer: u32,
     hand: HQMSkaterHand,
     deltatime: u32,
-    last_ping: u32,
+    last_ping: VecDeque<f32>,
     view_player_index: usize
 }
 
@@ -1735,7 +1764,7 @@ impl HQMConnectedPlayer {
             team_switch_timer: 0,
             // store latest deltime client sends you to respond with it
             deltatime: 0,
-            last_ping: 1000,
+            last_ping: VecDeque::new (),
             view_player_index: player_index
         }
     }
