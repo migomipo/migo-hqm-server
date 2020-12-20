@@ -434,7 +434,7 @@ impl HQMServer {
                         if let Some(view_player) = &self.players[view_player_index] {
                             let view_player_name = view_player.player_name.clone();
                             if let Some(player) = &mut self.players[player_index] {
-                                if view_player_index < 64 && view_player_index != player.view_player_index {
+                                if view_player_index != player.view_player_index {
                                     player.view_player_index = view_player_index;
                                     if player_index != view_player_index {
                                         if set_team_internal(player_index, player, &mut self.game.world, &self.config, None).is_some() {
