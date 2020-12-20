@@ -220,6 +220,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60302e4db3a61da70c0cb7991976248362f30319e88850c487b9b95bbf059e00"
 
 [[package]]
+name = "migo-hqm-server"
+version = "1.0.0"
+dependencies = [
+ "bytes",
+ "nalgebra",
+ "rust-ini",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "mio"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -479,19 +492,6 @@ checksum = "7a3679dd538c876a7b606f3bb951c8a20fc281a0ff7795f59f7cb490e3f979e1"
 dependencies = [
  "cfg-if 0.1.10",
  "ordered-multimap",
-]
-
-[[package]]
-name = "rust_hqm_server"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "nalgebra",
- "rust-ini",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
 ]
 
 [[package]]

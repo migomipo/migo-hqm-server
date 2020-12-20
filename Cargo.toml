@@ -1,6 +1,6 @@
 [package]
-name = "rust_hqm_server"
-version = "0.1.0"
+name = "migo-hqm-server"
+version = "1.0.0"
 authors = ["John Eriksson <john.eriksson.16@gmail.com>"]
 edition = "2018"
 
