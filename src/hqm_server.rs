@@ -16,6 +16,7 @@ use bytes::BytesMut;
 
 use tracing::info;
 use std::collections::VecDeque;
+use std::f32::consts::{PI, FRAC_PI_2};
 
 const GAME_HEADER: &[u8] = b"Hock";
 
@@ -1652,19 +1653,27 @@ fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, wor
             match team {
                 Some(team) => {
 
-                    let (pos, rot) = match team {
-                        HQMTeam::Red=>{
-                            let pos = Point3::new(config.entry_point_red[0],config.entry_point_red[1],config.entry_point_red[2]);
-                            let rot = Rotation3::from_euler_angles(0.0,config.entry_rotation_red,0.0);
+                    let (pos, rot) = match config.spawn_point {
+                        HQMSpawnPoint::Center => {
+                            let (z, rot) = match team {
+                                HQMTeam::Red => ((world.rink.length/2.0) + 3.0, 0.0),
+                                HQMTeam::Blue => ((world.rink.length/2.0) - 3.0, PI)
+                            };
+                            let pos = Point3::new (world.rink.width / 2.0, 2.0, z);
+                            let rot = Rotation3::from_euler_angles(0.0,rot,0.0);
                             (pos, rot)
-                        },
-                        HQMTeam::Blue=>{
-                            let pos = Point3::new(config.entry_point_blue[0],config.entry_point_blue[1],config.entry_point_blue[2]);
-                            let rot = Rotation3::from_euler_angles(0.0,config.entry_rotation_blue,0.0);
-                            (pos, rot)
-                        },
-                    };
 
+                        }
+                        HQMSpawnPoint::Bench => {
+                            let z = match team {
+                                HQMTeam::Red => (world.rink.length/2.0) + 4.0,
+                                HQMTeam::Blue => (world.rink.length/2.0) - 4.0
+                            };
+                            let pos = Point3::new (0.5, 2.0, z);
+                            let rot = Rotation3::from_euler_angles(0.0,3.0 * FRAC_PI_2,0.0);
+                            (pos, rot)
+                        }
+                    };
                     if let Some(i) = world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index, "".to_string()) {
                         player.skater = Some(i);
                         player.view_player_index = player_index;
@@ -1805,6 +1814,12 @@ pub enum HQMOffsideConfiguration {
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum HQMSpawnPoint {
+    Center,
+    Bench
+}
+
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub enum HQMServerMode {
     Match,
     PermanentWarmup
@@ -1830,9 +1845,6 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) warmup_pucks: u32,
     pub(crate) limit_jump_speed: bool,
 
-    pub(crate) entry_point_red: Vector3<f32>,
-    pub(crate) entry_point_blue: Vector3<f32>,
-    pub(crate) entry_rotation_red: f32,
-    pub(crate) entry_rotation_blue: f32,
+    pub(crate) spawn_point: HQMSpawnPoint,
     pub(crate) cylinder_puck_post_collision: bool
 }

@@ -14,8 +14,6 @@ config.ini is a good starting point, and contains the important available settin
 
 ### Server
 
-#### Server
-
 Property               | Explanation
 -----------------------| -------------
 name                   | Name of the server that will be visible in the server list
@@ -29,9 +27,11 @@ force_team_size_parity | (optional) If true, players will not be able to join th
 password               | Administrator password.
 welcome                | Welcome message that is sent to all players when they're joining. \n will create a new line. The client can only show 7 chat lines at a time, and it is not recommended to have more than three lines.
 
-#### Game
+### Game
+
 Property               | Explanation
 -----------------------| -------------
+spawn                  | Spawn point for players who join a team. Allowed values are "center" (default, spawns players at the center faceoff circle) and "bench" (spawns players right next to the "bench", opposite side of the spectator camera)
 limit_jump_speed       | If true, nerfs jump speed, effectively nerfing double-jumping. If false, it should work like vanilla.
 offside                | Offside setting. Allowed values are "off" (default, no offside), "on", (offside rule enabled) and "immediate", which will call offside immediately instead of warning when the puck has entered the offensive zone in an offside situation.
 icing                  | Icing setting. Allowed values are "off" (default, no icing), "on" (touch icing rule enabled) and "notouch" (no-touch icing rule enabled)

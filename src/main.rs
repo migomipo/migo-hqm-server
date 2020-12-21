@@ -1,11 +1,10 @@
-use nalgebra::Vector3;
 use std::path::Path;
 
 // INI Crate For configuration
 extern crate ini;
 use ini::Ini;
 use std::env;
-use crate::hqm_server::{HQMServer, HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration, HQMServerMode};
+use crate::hqm_server::{HQMServer, HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration, HQMServerMode, HQMSpawnPoint};
 
 mod hqm_parse;
 mod hqm_simulate;
@@ -68,26 +67,6 @@ async fn main() -> std::io::Result<()> {
         let rules_time_intermission = game_section.get("time_intermission").unwrap().parse::<u32>().unwrap();
         let warmup_pucks = game_section.get("warmup_pucks").map_or_else(|| 1, |x| x.parse::<u32>().unwrap());
 
-        // Game: Red Entry Offset
-        let mut red_game_entry_offset:Vector3<f32>=Vector3::new(15.0,2.75,27.75);
-        let red_entry_offset_parts = game_section.get("entry_point_red").unwrap().parse::<String>().unwrap();
-        let red_offset_parts: Vec<&str> = red_entry_offset_parts.split(',').collect();
-
-        red_game_entry_offset[0] = red_offset_parts[0].parse::<f32>().unwrap();
-        red_game_entry_offset[1] = red_offset_parts[1].parse::<f32>().unwrap();
-        red_game_entry_offset[2] = red_offset_parts[2].parse::<f32>().unwrap();
-        let red_game_entry_rotation = red_offset_parts[3].parse::<f32>().unwrap() * (std::f32::consts::PI/180.0);
-
-        // Game: Blue Entry Offset
-        let mut blue_game_entry_offset:Vector3<f32>=Vector3::new(15.0,2.75,33.25);
-        let blue_entry_offset_parts = game_section.get("entry_point_blue").unwrap().parse::<String>().unwrap();
-        let blue_offset_parts: Vec<&str> = blue_entry_offset_parts.split(',').collect();
-
-        blue_game_entry_offset[0] = blue_offset_parts[0].parse::<f32>().unwrap();
-        blue_game_entry_offset[1] = blue_offset_parts[1].parse::<f32>().unwrap();
-        blue_game_entry_offset[2] = blue_offset_parts[2].parse::<f32>().unwrap();
-        let blue_game_entry_rotation = blue_offset_parts[3].parse::<f32>().unwrap() * (std::f32::consts::PI/180.0);
-
         let limit_jump_speed = match game_section.get("limit_jump_speed") {
             Some(s) => s.eq_ignore_ascii_case("true"),
             None => false
@@ -110,6 +89,11 @@ async fn main() -> std::io::Result<()> {
             _ => HQMOffsideConfiguration::Off
         });
 
+        let spawn_point = game_section.get("spawn").map_or(HQMSpawnPoint::Center, |x| match x {
+            "bench" => HQMSpawnPoint::Bench,
+            _ => HQMSpawnPoint::Center
+        });
+
         let config = HQMServerConfiguration {
             server_name,
             port: server_port,
@@ -127,13 +111,8 @@ async fn main() -> std::io::Result<()> {
             warmup_pucks,
             force_team_size_parity,
             limit_jump_speed,
+            spawn_point,
             cylinder_puck_post_collision,
-
-            entry_point_red:red_game_entry_offset,
-            entry_rotation_red:red_game_entry_rotation,
-
-            entry_point_blue:blue_game_entry_offset,
-            entry_rotation_blue:blue_game_entry_rotation,
 
             welcome: welcome_str,
             mode
