@@ -442,8 +442,8 @@ fn create_faceoff_spot (center_position: Point3<f32>, rink_width: f32, rink_leng
 
     let offsets = vec![
         ("C", Vector3::new (0.0,1.5,2.75)),
-        ("LD", Vector3::new (-2.0,1.5,10.0)),
-            ("RD", Vector3::new (2.0,1.5,10.0)),
+        ("LD", Vector3::new (-2.0,1.5,7.25)),
+            ("RD", Vector3::new (2.0,1.5,7.25)),
             ("LW", Vector3::new (-5.0,1.5,4.0)),
             ("RW", Vector3::new (5.0,1.5,4.0)),
     ];
