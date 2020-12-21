@@ -1,6 +1,6 @@
 # Migo HQM Server
 
-This is my own HQM server implementation. It attempts to recreate the physics as accurately as possible, while adding some features and puck fixes. Most notably, it fixes the goal detection glitch, allows for multiple pucks in warmups, has a completely revamped offside+icing implementation, server-side ping and some admin features. Performance may also be slightly better and more consistent.
+This is my own HQM server implementation. It attempts to recreate the physics as accurately as possible, while adding some features and bug fixes. Most notably, it fixes the goal detection glitch, allows for multiple pucks in warmups, has a completely revamped offside+icing implementation, server-side ping and some administrator features. Performance may also be slightly better and more consistent.
 
 ## How to start
 
