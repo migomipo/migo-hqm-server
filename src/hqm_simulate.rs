@@ -57,19 +57,7 @@ impl HQMGameWorld {
 
         let mut collisions = vec![];
         for (i, player) in players.iter_mut().enumerate() {
-            update_player(player, self.gravity, self.limit_jump_speed);
-
-            for (ib, collision_ball) in player.collision_balls.iter().enumerate() {
-                let collision = collision_between_collision_ball_and_rink(collision_ball, & self.rink);
-                if let Some((overlap, normal)) = collision {
-                    collisions.push(HQMCollision::PlayerRink((i, ib), overlap, normal));
-                }
-            }
-            let linear_velocity_before = player.body.linear_velocity.clone_owned();
-            let angular_velocity_before = player.body.angular_velocity.clone_owned();
-
-            update_player2(player);
-            update_stick(player, &linear_velocity_before, &angular_velocity_before, & self.rink);
+            update_player(i, player, self.gravity, self.limit_jump_speed, & self.rink, & mut collisions);
         }
 
         for i in 0..players.len() {
@@ -251,7 +239,7 @@ fn update_stick(player: & mut HQMSkater, linear_velocity_before: & Vector3<f32>,
     }
 }
 
-fn update_player(player: & mut HQMSkater, gravity: f32, limit_jump_speed: bool) {
+fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_speed: bool, rink: & HQMRink, collisions: & mut Vec<HQMCollision>) {
     let linear_velocity_before = player.body.linear_velocity.clone_owned();
     let angular_velocity_before = player.body.angular_velocity.clone_owned();
 
@@ -336,10 +324,15 @@ fn update_player(player: & mut HQMSkater, gravity: f32, limit_jump_speed: bool) 
         apply_acceleration_to_object(& mut player.body, &force.scale(0.9375 - 1.0), &intended_collision_ball_pos);
     }
 
-}
+    for (ib, collision_ball) in player.collision_balls.iter().enumerate() {
+        let collision = collision_between_collision_ball_and_rink(collision_ball, rink);
+        if let Some((overlap, normal)) = collision {
+            collisions.push(HQMCollision::PlayerRink((i, ib), overlap, normal));
+        }
+    }
+    let linear_velocity_before = player.body.linear_velocity.clone_owned();
+    let angular_velocity_before = player.body.angular_velocity.clone_owned();
 
-fn update_player2 (player: & mut HQMSkater) {
-    let turn = clamp(player.input.turn, -1.0, 1.0);
     if player.input.crouch() {
         player.height = (player.height - 0.015625).max(0.25)
     } else {
@@ -392,8 +385,11 @@ fn update_player2 (player: & mut HQMSkater) {
         temp2 = limit_vector_length(&temp2, 0.000347222222);
         player.body.angular_velocity += temp2;
     }
+    update_stick(player, &linear_velocity_before, &angular_velocity_before, rink);
 
 }
+
+
 
 fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: &[HQMCollision]) {
     for _ in 0..16 {

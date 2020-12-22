@@ -181,13 +181,12 @@ impl HQMServer {
 
         let has_chat_msg = parser.read_bits(1) == 1;
         if has_chat_msg {
-            let chat_rep = parser.read_bits(3);
-            if chat_rep != player.chat_rep {
-                player.chat_rep = chat_rep;
-                let byte_num = parser.read_bits(8) as usize;
-                let message = parser.read_bytes_aligned(byte_num);
-                self.process_message(message, player_index);
-            }
+            parser.read_bits(3);
+
+            let byte_num = parser.read_bits(8) as usize;
+            let message = parser.read_bytes_aligned(byte_num);
+            self.process_message(message, player_index);
+
         }
     }
 
@@ -1740,7 +1739,6 @@ pub(crate) struct HQMConnectedPlayer {
     input: HQMPlayerInput,
     known_packet: u32,
     known_msgpos: u16,
-    chat_rep: u32,
     messages: Vec<Rc<HQMMessage>>,
     inactivity: u32,
     pub(crate) is_admin: bool,
@@ -1763,7 +1761,6 @@ impl HQMConnectedPlayer {
             game_id: u32::MAX,
             known_packet: u32::MAX,
             known_msgpos: 0,
-            chat_rep: 0,
             messages: global_messages,
             input: HQMPlayerInput::default(),
             inactivity: 0,
