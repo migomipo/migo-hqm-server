@@ -116,7 +116,7 @@ impl HQMGame {
             world: HQMGameWorld {
                 objects: object_vec,
                 rink,
-                gravity: 0.000680,
+                gravity: 0.000680555,
                 limit_jump_speed: config.limit_jump_speed
             },
             red_score: 0,
