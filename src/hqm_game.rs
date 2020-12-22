@@ -688,6 +688,7 @@ impl HQMPuck {
     pub(crate) fn add_touch(& mut self, player_index: usize, team: HQMTeam, time: u32) {
         let puck_pos = self.body.pos.clone();
         let most_recent_touch = self.touches.front_mut();
+        self.touches.truncate(3);
         if let Some(most_recent_touch) = most_recent_touch {
             if most_recent_touch.player_index == player_index
                 && most_recent_touch.team == team {
@@ -713,7 +714,7 @@ impl HQMPuck {
             });
         };
 
-        self.touches.truncate(8);
+
     }
 
 }
