@@ -431,6 +431,7 @@ impl HQMServer {
             if let Some(player) = & self.players[player_index] {
                 if player.is_admin{
                     self.game.intermission = 5*100;
+                    self.game.goal_timer = 0;
 
                     let msg = format!("Faceoff initiated by {}",player.player_name);
                     info!("{} ({}) initiated faceoff",player.player_name, player_index);
@@ -459,13 +460,15 @@ impl HQMServer {
 
     pub(crate) fn start_game (& mut self, player_index: usize) {
         if let Some(player) = & self.players[player_index] {
-            if player.is_admin && self.config.mode == HQMServerMode::Match && self.game.state == HQMGameState::Warmup {
-                info!("{} ({}) started game",player.player_name, player_index);
-                let msg = format!("Game started by {}",player.player_name);
+            if player.is_admin {
+                if self.config.mode == HQMServerMode::Match && self.game.state == HQMGameState::Warmup {
+                    info!("{} ({}) started game", player.player_name, player_index);
+                    let msg = format!("Game started by {}", player.player_name);
 
-                self.game.time = 1;
+                    self.game.time = 1;
 
-                self.add_server_chat_message(msg);
+                    self.add_server_chat_message(msg);
+                }
             } else {
                 self.admin_deny_message(player_index);
             }
