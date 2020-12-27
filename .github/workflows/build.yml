@@ -34,6 +34,7 @@ jobs:
     runs-on: windows-latest
     needs: install-cross
     strategy:
+      fail-fast: false
       matrix:
         target:
           - i686-pc-windows-msvc
@@ -72,6 +73,7 @@ jobs:
     runs-on: macos-11.0
     needs: install-cross
     strategy:
+      fail-fast: false
       matrix:
         target:
           - x86_64-apple-darwin
@@ -110,12 +112,20 @@ jobs:
     runs-on: ubuntu-latest
     needs: install-cross
     strategy:
+      fail-fast: false
       matrix:
         target:
           - aarch64-unknown-linux-gnu
           - armv7-unknown-linux-gnueabihf
+          - arm-unknown-linux-gnueabihf
+          - thumbv7neon-unknown-linux-gnueabihf
+          - riscv64gc-unknown-linux-gnu
+          - sparc64-unknown-linux-gnu
           - i686-unknown-linux-gnu
+          - x86_64-unknown-freebsd
           - x86_64-unknown-linux-gnu
+          - x86_64-unknown-netbsd
+          - x86_64-unknown-redox
     steps:
       - uses: actions/checkout@v2
       - uses: actions/download-artifact@v1
