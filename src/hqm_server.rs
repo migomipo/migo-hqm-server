@@ -387,6 +387,26 @@ impl HQMServer {
                                 _=>{}
                             }
                         },
+                        "icing" => {
+                            if let Some(arg) = args.get(1) {
+                                self.set_icing_rule(player_index, arg);
+                            }
+                        },
+                        "offside" => {
+                            if let Some(arg) = args.get(1) {
+                                self.set_offside_rule(player_index, arg);
+                            }
+                        },
+                        "teamsize" => {
+                            if let Some(arg) = args.get(1) {
+                                self.set_team_size(player_index, arg);
+                            }
+                        },
+                        "teamparity" => {
+                            if let Some(arg) = args.get(1) {
+                                self.set_team_parity(player_index, arg);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -400,16 +420,16 @@ impl HQMServer {
             "faceoff" => {
                 self.faceoff(player_index);
             },
-            "start" => {
+            "start" | "startgame" => {
                 self.start_game(player_index);
             },
-            "reset" => {
+            "reset" | "resetgame" => {
                 self.reset_game(player_index);
             },
-            "pause" => {
+            "pause" | "pausegame" => {
                 self.pause(player_index);
             },
-            "unpause" => {
+            "unpause" | "unpausegame" => {
                 self.unpause(player_index);
             },
             "lefty" => {
@@ -505,7 +525,13 @@ impl HQMServer {
                         }
                     }
                 }
-            }
+            },
+            "icing" => {
+                self.set_icing_rule (player_index, arg);
+            },
+            "offside" => {
+                self.set_offside_rule (player_index, arg);
+            },
             _ => {}, // matches have to be exhaustive
         }
 

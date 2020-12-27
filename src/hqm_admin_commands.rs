@@ -1,4 +1,4 @@
-use crate::hqm_server::{HQMServer, HQMServerMode, HQMMuteStatus};
+use crate::hqm_server::{HQMServer, HQMServerMode, HQMMuteStatus, HQMIcingConfiguration, HQMOffsideConfiguration};
 use crate::hqm_game::{HQMGameObject, HQMMessage, HQMTeam, HQMGameState};
 
 use tracing::info;
@@ -532,6 +532,119 @@ impl HQMServer {
         }
         for (found_player_index, found_player_name) in found {
             self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
+        }
+    }
+
+    pub(crate) fn set_icing_rule(& mut self, player_index: usize, rule:&str) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+                match rule {
+                    "on" | "touch" => {
+                        self.config.icing = HQMIcingConfiguration::Touch;
+                        info!("{} ({}) enabled touch icing",player.player_name, player_index);
+                        let msg = format!("Touch icing enabled by {}",player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    },
+                    "notouch" => {
+                        self.config.icing = HQMIcingConfiguration::NoTouch;
+                        info!("{} ({}) enabled no-touch icing",player.player_name, player_index);
+                        let msg = format!("No-touch icing enabled by {}",player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    },
+                    "off" => {
+                        self.config.icing = HQMIcingConfiguration::Off;
+                        info!("{} ({}) disabled icing",player.player_name, player_index);
+                        let msg = format!("Icing disabled by {}",player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    }
+                    _ => {}
+                }
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    pub(crate) fn set_offside_rule(& mut self, player_index: usize, rule:&str) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+                match rule {
+                    "on" | "delayed" => {
+                        self.config.offside = HQMOffsideConfiguration::Delayed;
+                        info!("{} ({}) enabled offside", player.player_name, player_index);
+                        let msg = format!("Offside enabled by {}",player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    },
+                    "imm" | "immediate" => {
+                        self.config.offside = HQMOffsideConfiguration::Immediate;
+                        info!("{} ({}) enabled immediate offside", player.player_name, player_index);
+                        let msg = format!("Immediate offside enabled by {}",player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    },
+                    "off" => {
+                        self.config.offside = HQMOffsideConfiguration::Off;
+                        info!("{} ({}) disabled offside",player.player_name, player_index);
+                        let msg = format!("Offside disabled by {}",player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    }
+                    _ => {}
+                }
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    pub(crate) fn set_team_size(& mut self, player_index: usize, size:&str) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+                if let Ok(new_num) = size.parse::<usize>() {
+                    if new_num > 0 && new_num <= 15 {
+                        self.config.team_max = new_num;
+
+                        info!("{} ({}) set team size to {}",player.player_name, player_index, new_num);
+                        let msg = format!("Team size set to {} by {}", new_num, player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    }
+                }
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    pub(crate) fn set_team_parity(& mut self, player_index: usize, rule:&str) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+                match rule {
+                    "on" => {
+                        self.config.force_team_size_parity = true;
+
+                        info!("{} ({}) enabled team size parity",player.player_name, player_index);
+                        let msg = format!("Team size parity enabled by {}", player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    },
+                    "off" => {
+                        self.config.force_team_size_parity = false;
+
+                        info!("{} ({}) disabled team size parity",player.player_name, player_index);
+                        let msg = format!("Team size parity disabled by {}", player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    }
+                    _ => {}
+                }
+            } else {
+                self.admin_deny_message(player_index);
+            }
         }
     }
 }

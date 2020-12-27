@@ -58,25 +58,31 @@ Commands               | Explanation
 
 ### Administrators only
 
-Commands               | Explanation
------------------------|--------------
-/kick *ID*             | Kicks player with ID *ID*.
-/ban *ID*              | Kicks and IP-bans player with ID *ID*.
-/fs *ID*               | Forces player with ID *ID* off ice.
-/mute *ID*             | Mutes player with ID *ID*.
-/unmute *ID*           | Unmutes player with ID *ID*.
-/mutechat              | Mutes all chat.
-/unmutechat            | Unmutes all chat, individual user chat mutes still apply.
-/start                 | Starts game.
-/reset                 | Resets game.
-/pause                 | Pauses game.
-/unpause               | Unpauses game.
-/faceoff               | Calls center-ice faceoff.
-/set clock *M*:*S*     | Sets game clock.
-/set period *N*        | Sets period. OT1 is 4, OT2 is 5, etc. 0 is warmup.
-/set redscore *N*      | Sets red score.
-/set bluescore *N*     | Sets blue score.
-/kickall *S*           | Kicks all players with a player name equal to *S* (case-insensitive). % can be used as wildcards at the start and end of *S* to match players with similar names. For example, migo%, %mipo and %gomi% all match MigoMipo.
-/banall *S*            | Same as /kickall, but also IP-bans.
+Commands                 | Explanation
+-------------------------|--------------
+/disablejoin             | Prevents new players from joining the server.
+/enablejoin              | Enables new players to join the server.
+/kick *ID*               | Kicks player with ID *ID*.
+/ban *ID*                | Kicks and IP-bans player with ID *ID*.
+/fs *ID*                 | Forces player with ID *ID* off ice.
+/mute *ID*               | Mutes player with ID *ID*.
+/unmute *ID*             | Unmutes player with ID *ID*.
+/mutechat                | Mutes all chat.
+/unmutechat              | Unmutes all chat, individual user chat mutes still apply.
+/start                   | Starts game.
+/reset                   | Resets game.
+/pause                   | Pauses game.
+/unpause                 | Unpauses game.
+/faceoff                 | Calls center-ice faceoff.
+/set clock *M*:*S*       | Sets game clock.
+/set period *N*          | Sets period. OT1 is 4, OT2 is 5, etc. 0 is warmup.
+/set redscore *N*        | Sets red score.
+/set bluescore *N*       | Sets blue score.
+/set icing *S*           | Sets icing rule. Allowed values are "off", "on" (touch icing" and "notouch" (no-touch icing)
+/set offside *S*         | Sets offside rule. Allowed values are "off", "on" (delayed offside) and "imm" or "immediate" (immediate offside, no offside warnings).
+/set teamsize *N*        | Sets team size.
+/set teamparity *on/off* | If enabled, players will not be able to join the team that already has more players than the other one.
+/kickall *S*             | Kicks all players with a player name equal to *S* (case-insensitive). % can be used as wildcards at the start and end of *S* to match players with similar names. For example, migo%, %mipo and %gomi% all match MigoMipo.
+/banall *S*              | Same as /kickall, but also IP-bans.
 
 
