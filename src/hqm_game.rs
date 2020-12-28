@@ -162,51 +162,6 @@ pub(crate) struct HQMRinkLine {
 }
 
 impl HQMRinkLine {
-    fn new_offensive_line(team: HQMTeam, rink_length: f32, blue_line_distance: f32) -> Self {
-        let mid_z = rink_length / 2.0;
-        let midline_point = Point3::new(0.0, 0.0, mid_z);
-
-        let normal = match team {
-            HQMTeam::Red => Vector3::z(),
-            HQMTeam::Blue => -Vector3::z(),
-        };
-        let point = midline_point - blue_line_distance*normal;
-        HQMRinkLine {
-            point,
-            width: 0.3,
-            normal
-        }
-    }
-
-    fn new_defensive_line(team: HQMTeam, rink_length: f32, blue_line_distance: f32) -> Self {
-        let mid_z = rink_length / 2.0;
-        let midline_point = Point3::new(0.0, 0.0, mid_z);
-
-        let normal = match team {
-            HQMTeam::Red => Vector3::z(),
-            HQMTeam::Blue => -Vector3::z(),
-        };
-        let point = midline_point + blue_line_distance*normal;
-        HQMRinkLine {
-            point,
-            width: 0.3,
-            normal
-        }
-    }
-
-    fn new_midline(team: HQMTeam, rink_length: f32) -> Self {
-        let mid_z = rink_length / 2.0;
-        let point = Point3::new(0.0, 0.0, mid_z);
-        let normal = match team {
-            HQMTeam::Red => Vector3::z(),
-            HQMTeam::Blue => -Vector3::z(),
-        };
-        HQMRinkLine {
-            point,
-            width: 0.3,
-            normal
-        }
-    }
 
     pub(crate) fn sphere_reached_line (&self, pos: &Point3<f32>, radius: f32) -> bool {
         let dot = (pos - &self.point).dot (&self.normal);
@@ -240,24 +195,19 @@ pub(crate) struct HQMRinkNet {
 }
 
 impl HQMRinkNet {
-    fn new(team: HQMTeam, rink_width: f32, rink_length: f32) -> Self {
-        let mid_x = rink_width / 2.0;
+    fn new(pos: Point3<f32>, rot: Matrix3<f32>) -> Self {
 
-        let (pos, rot) = match team {
-            HQMTeam::Red => (Point3::new (mid_x, 0.0, 3.5), Matrix3::identity()),
-            HQMTeam::Blue => (Point3::new (mid_x, 0.0, rink_length - 3.5), Matrix3::from_columns (& [-Vector3::x(), Vector3::y(), -Vector3::z()])),
-        };
         let (front_upper_left, front_upper_right, front_lower_left, front_lower_right,
             back_upper_left, back_upper_right, back_lower_left, back_lower_right) =
             (
-                &pos + &rot * Vector3::new(-1.5, 1.0, 0.5),
-                &pos + &rot * Vector3::new(1.5, 1.0, 0.5),
-                &pos + &rot * Vector3::new(-1.5, 0.0, 0.5),
-                &pos + &rot * Vector3::new(1.5, 0.0, 0.5),
-                &pos + &rot * Vector3::new(-1.25, 1.0, -0.25),
-                &pos + &rot * Vector3::new(1.25, 1.0, -0.25),
-                &pos + &rot * Vector3::new(-1.25, 0.0, -0.5),
-                &pos + &rot * Vector3::new(1.25, 0.0, -0.5)
+                &pos + &rot * Vector3::new(-1.5, 1.0, 0.0),
+                &pos + &rot * Vector3::new(1.5, 1.0, 0.0),
+                &pos + &rot * Vector3::new(-1.5, 0.0, 0.0),
+                &pos + &rot * Vector3::new(1.5, 0.0, 0.0),
+                &pos + &rot * Vector3::new(-1.25, 1.0, -0.75),
+                &pos + &rot * Vector3::new(1.25, 1.0, -0.75),
+                &pos + &rot * Vector3::new(-1.25, 0.0, -1.0),
+                &pos + &rot * Vector3::new(1.25, 0.0, -1.0)
             );
 
         HQMRinkNet {
@@ -290,8 +240,8 @@ impl HQMRinkNet {
             left_post: front_lower_left.clone(),
             right_post: front_lower_right.clone(),
             normal: rot * Vector3::z(),
-            left_post_inside: rot * Vector3::x(),
-            right_post_inside: rot * -Vector3::x()
+            left_post_inside: &rot * Vector3::x(),
+            right_post_inside: &rot * -Vector3::x()
         }
 
     }
@@ -350,28 +300,60 @@ impl HQMRink {
             (Point3::new(wr, 0.0, lr), Vector3::new( 1.0, 0.0,  1.0), corner_radius),
             (Point3::new(r, 0.0, lr),  Vector3::new(-1.0, 0.0,  1.0), corner_radius)
         ];
-        let blue_line_distance = 8.833333333;
-        let distance_neutral_faceoff_spot = blue_line_distance - 2.0;
+        let goal_line_distance = 4.0; // IIHF rule 17iv
+        let blue_line_distance = 22.86; // IIHF rule 17v
+        let distance_neutral_faceoff_spot = blue_line_distance + 1.5; // IIHF rule 18iv
+        let distance_zone_faceoff_spot = goal_line_distance + 6.0; // IIHF rule 18vi
 
-        let red_net = HQMRinkNet::new(HQMTeam::Red, width, length);
-        let blue_net = HQMRinkNet::new(HQMTeam::Blue, width, length);
-        let red_offensive_line = HQMRinkLine::new_offensive_line(HQMTeam::Red, length, blue_line_distance);
-        let blue_offensive_line = HQMRinkLine::new_offensive_line(HQMTeam::Blue, length, blue_line_distance);
-        let red_defensive_line = HQMRinkLine::new_defensive_line(HQMTeam::Red, length, blue_line_distance);
-        let blue_defensive_line = HQMRinkLine::new_defensive_line(HQMTeam::Blue, length, blue_line_distance);
-        let red_midline = HQMRinkLine::new_midline(HQMTeam::Red, length);
-        let blue_midline = HQMRinkLine::new_midline(HQMTeam::Blue, length);
+        let center_x = width / 2.0;
+        let left_faceoff_x = center_x - 7.0; // IIHF rule 18vi and 18iv
+        let right_faceoff_x = center_x + 7.0; // IIHF rule 18vi and 18iv
 
-        let mid_faceoff_x = width / 2.0;
-        let left_faceoff_x = mid_faceoff_x - 7.0;
-        let right_faceoff_x = mid_faceoff_x + 7.0;
+        let red_zone_faceoff_z = length - distance_zone_faceoff_spot;
+        let red_zone_blueline_z = length - blue_line_distance;
+        let red_neutral_faceoff_z = length - distance_neutral_faceoff_spot;
+        let center_z = length / 2.0;
+        let blue_neutral_faceoff_z = distance_neutral_faceoff_spot;
+        let blue_zone_blueline_z = blue_line_distance;
+        let blue_zone_faceoff_z = distance_zone_faceoff_spot;
 
-        let mid_faceoff_z = length / 2.0;
+        let red_line_normal = Vector3::z();
+        let blue_line_normal = -Vector3::z();
 
-        let red_zone_z = length - 10.0;
-        let red_neutral_z = mid_faceoff_z + distance_neutral_faceoff_spot;
-        let blue_neutral_z = mid_faceoff_z - distance_neutral_faceoff_spot;
-        let blue_zone_z = 10.0;
+        let line_width = 0.3; // IIHF rule 17iii, 17iv
+
+        let red_net = HQMRinkNet::new(Point3::new (center_x, 0.0, goal_line_distance), Matrix3::identity());
+        let blue_net = HQMRinkNet::new(Point3::new (center_x, 0.0, length - goal_line_distance), Matrix3::from_columns (& [-Vector3::x(), Vector3::y(), -Vector3::z()]));
+        let red_offensive_line = HQMRinkLine {
+            point: Point3::new (0.0, 0.0, blue_zone_blueline_z),
+            width: line_width,
+            normal: red_line_normal.clone()
+        };
+        let blue_offensive_line = HQMRinkLine {
+            point: Point3::new (0.0, 0.0, red_zone_blueline_z),
+            width: line_width,
+            normal: blue_line_normal.clone()
+        };
+        let red_defensive_line = HQMRinkLine {
+            point: Point3::new (0.0, 0.0, red_zone_blueline_z),
+            width: line_width,
+            normal: red_line_normal.clone()
+        };
+        let blue_defensive_line = HQMRinkLine {
+            point: Point3::new (0.0, 0.0, blue_zone_blueline_z),
+            width: line_width,
+            normal: blue_line_normal.clone()
+        };
+        let red_midline = HQMRinkLine {
+            point: Point3::new (0.0, 0.0, center_z),
+            width: line_width,
+            normal: red_line_normal.clone()
+        };
+        let blue_midline = HQMRinkLine {
+            point: Point3::new (0.0, 0.0, center_z),
+            width: line_width,
+            normal: blue_line_normal.clone()
+        };
 
         HQMRink {
             planes,
@@ -392,21 +374,21 @@ impl HQMRink {
             length,
             allowed_positions: vec!["C", "LW", "RW", "LD", "RD", "G"].into_iter().map(String::from).collect(),
             blue_zone_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_zone_z), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_zone_z), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_zone_faceoff_z), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_zone_faceoff_z), width, length)
             ],
             blue_neutral_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_neutral_z), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_neutral_z), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_neutral_faceoff_z), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_neutral_faceoff_z), width, length)
             ],
-            center_faceoff_spot: create_faceoff_spot(Point3::new (mid_faceoff_x, 0.0, mid_faceoff_z), width, length),
+            center_faceoff_spot: create_faceoff_spot(Point3::new (center_x, 0.0, center_z), width, length),
             red_neutral_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, red_neutral_z), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, red_neutral_z), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, red_neutral_faceoff_z), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, red_neutral_faceoff_z), width, length)
             ],
             red_zone_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, red_zone_z), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, red_zone_z), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, red_zone_faceoff_z), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, red_zone_faceoff_z), width, length)
             ]
         }
     }
@@ -583,7 +565,7 @@ pub(crate) struct HQMSkaterCollisionBall {
 
 impl HQMSkaterCollisionBall {
     fn from_skater(offset: Vector3<f32>, skater_pos: & Point3<f32>, skater_rot: & Matrix3<f32>, velocity: & Vector3<f32>, radius: f32) -> Self {
-        let pos = skater_pos + skater_rot * offset;
+        let pos = skater_pos + skater_rot * &offset;
         HQMSkaterCollisionBall {
             offset,
             pos,
