@@ -532,6 +532,20 @@ impl HQMServer {
             "offside" => {
                 self.set_offside_rule (player_index, arg);
             },
+            "rules" => {
+                let offside_str = match self.config.offside {
+                    HQMOffsideConfiguration::Off => "Offside disabled",
+                    HQMOffsideConfiguration::Delayed => "Offside enabled",
+                    HQMOffsideConfiguration::Immediate => "Immediate offside enabled"
+                };
+                let icing_str = match self.config.icing {
+                    HQMIcingConfiguration::Off => "Icing disabled",
+                    HQMIcingConfiguration::Touch => "Icing enabled",
+                    HQMIcingConfiguration::NoTouch => "No-touch icing enabled"
+                };
+                let msg = format!("{}, {}", offside_str, icing_str);
+                self.add_directed_server_chat_message(msg, player_index);
+            }
             _ => {}, // matches have to be exhaustive
         }
 
