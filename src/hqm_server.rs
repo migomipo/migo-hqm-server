@@ -50,23 +50,23 @@ impl HQMServer {
         let command = parser.read_byte_aligned();
         match command {
             0 => {
-                self.request_info(socket, &addr, &mut parser);
+                self.request_info(socket, addr, &mut parser);
             },
             2 => {
-                self.player_join(&addr, &mut parser);
+                self.player_join(addr, &mut parser);
             },
             // if 8 or 0x10, client is modded, probly want to send it to the player_update function to store it in the client/player struct, to use when responding to clients
             4 | 8 | 0x10 => {
-                self.player_update(&addr, &mut parser, command);
+                self.player_update(addr, &mut parser, command);
             },
             7 => {
-                self.player_exit(&addr);
+                self.player_exit(addr);
             },
             _ => {}
         }
     }
 
-    fn request_info<'a>(&self, socket: & Arc<UdpSocket>, addr: &SocketAddr, parser: &mut HQMMessageReader<'a>) {
+    fn request_info<'a>(&self, socket: & Arc<UdpSocket>, addr: SocketAddr, parser: &mut HQMMessageReader<'a>) {
         let mut write_buf = vec![0u8;512];
         let _player_version = parser.read_bits(8);
         let ping = parser.read_u32_aligned();
@@ -104,7 +104,7 @@ impl HQMServer {
         player_count
     }
 
-    fn player_update(&mut self, addr: &SocketAddr, parser: &mut HQMMessageReader, command: u8) {
+    fn player_update(&mut self, addr: SocketAddr, parser: &mut HQMMessageReader, command: u8) {
         let current_slot = self.find_player_slot(addr);
         let (player_index, player) = match current_slot {
             Some(x) => {
@@ -190,7 +190,7 @@ impl HQMServer {
         }
     }
 
-    fn player_join(&mut self, addr: &SocketAddr, parser: &mut HQMMessageReader) {
+    fn player_join(&mut self, addr: SocketAddr, parser: &mut HQMMessageReader) {
         let player_count = self.player_count();
         let max_player_count = self.config.player_max;
         if player_count >= max_player_count {
@@ -219,7 +219,7 @@ impl HQMServer {
         let player_name = get_player_name(player_name_bytes);
         match player_name {
             Some(name) => {
-                if let Some(player_index) = self.add_player(name.clone(), &addr) {
+                if let Some(player_index) = self.add_player(name.clone(), addr) {
                     info!("{} ({}) joined server from address {:?}", name, player_index, addr);
                     let msg = format!("{} joined", name);
                     self.add_server_chat_message(msg);
@@ -588,7 +588,7 @@ impl HQMServer {
         }
     }
 
-    fn player_exit(&mut self, addr: &SocketAddr) {
+    fn player_exit(&mut self, addr: SocketAddr) {
         let player_index = self.find_player_slot(addr);
         match player_index {
             Some(player_index) => {
@@ -628,7 +628,7 @@ impl HQMServer {
         }
     }
 
-    fn add_player(&mut self, player_name: String, addr: &SocketAddr) -> Option<usize> {
+    fn add_player(&mut self, player_name: String, addr: SocketAddr) -> Option<usize> {
         let player_index = self.find_empty_player_slot();
         match player_index {
             Some(player_index) => {
@@ -649,7 +649,7 @@ impl HQMServer {
                     }));
                 }
 
-                let new_player = HQMConnectedPlayer::new(player_index, player_name, *addr, messages);
+                let new_player = HQMConnectedPlayer::new(player_index, player_name, addr, messages);
 
                 self.players[player_index] = Some(new_player);
 
@@ -755,10 +755,10 @@ impl HQMServer {
         }
     }
 
-    fn find_player_slot(&self, addr: &SocketAddr) -> Option<usize> {
+    fn find_player_slot(&self, addr: SocketAddr) -> Option<usize> {
         return self.players.iter().position(|x| {
             match x {
-                Some(x) => x.addr == *addr,
+                Some(x) => x.addr == addr,
                 None => false
             }
         });
