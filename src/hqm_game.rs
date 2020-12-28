@@ -351,6 +351,8 @@ impl HQMRink {
             (Point3::new(r, 0.0, lr),  Vector3::new(-1.0, 0.0,  1.0), corner_radius)
         ];
         let blue_line_distance = 8.833333333;
+        let distance_neutral_faceoff_spot = blue_line_distance - 2.0;
+
         let red_net = HQMRinkNet::new(HQMTeam::Red, width, length);
         let blue_net = HQMRinkNet::new(HQMTeam::Blue, width, length);
         let red_offensive_line = HQMRinkLine::new_offensive_line(HQMTeam::Red, length, blue_line_distance);
@@ -360,10 +362,17 @@ impl HQMRink {
         let red_midline = HQMRinkLine::new_midline(HQMTeam::Red, length);
         let blue_midline = HQMRinkLine::new_midline(HQMTeam::Blue, length);
 
-        let left_faceoff_x = width / 2.0 - 7.0;
-        let right_faceoff_x = width / 2.0 + 7.0;
+        let mid_faceoff_x = width / 2.0;
+        let left_faceoff_x = mid_faceoff_x - 7.0;
+        let right_faceoff_x = mid_faceoff_x + 7.0;
 
-        let distance_faceoff_spot_line = 2.0;
+        let mid_faceoff_z = length / 2.0;
+
+        let red_zone_z = length - 10.0;
+        let red_neutral_z = mid_faceoff_z + distance_neutral_faceoff_spot;
+        let blue_neutral_z = mid_faceoff_z - distance_neutral_faceoff_spot;
+        let blue_zone_z = 10.0;
+
         HQMRink {
             planes,
             corners,
@@ -383,21 +392,21 @@ impl HQMRink {
             length,
             allowed_positions: vec!["C", "LW", "RW", "LD", "RD", "G"].into_iter().map(String::from).collect(),
             blue_zone_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, 10.0), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, 10.0), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_zone_z), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_zone_z), width, length)
             ],
             blue_neutral_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length / 2.0 - blue_line_distance + distance_faceoff_spot_line), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, length / 2.0 - blue_line_distance + distance_faceoff_spot_line), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_neutral_z), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_neutral_z), width, length)
             ],
-            center_faceoff_spot: create_faceoff_spot(Point3::new (width / 2.0, 0.0, length / 2.0), width, length),
+            center_faceoff_spot: create_faceoff_spot(Point3::new (mid_faceoff_x, 0.0, mid_faceoff_z), width, length),
             red_neutral_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length / 2.0 + blue_line_distance - distance_faceoff_spot_line), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, length / 2.0 + blue_line_distance - distance_faceoff_spot_line), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, red_neutral_z), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, red_neutral_z), width, length)
             ],
             red_zone_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, length - 10.0), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, length - 10.0), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, red_zone_z), width, length),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, red_zone_z), width, length)
             ]
         }
     }
