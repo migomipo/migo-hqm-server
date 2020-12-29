@@ -410,10 +410,12 @@ fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: &[HQMColli
                     let mut new = normal.scale(overlap * 0.125) + (original_velocity2 - original_velocity1).scale(0.25);
                     if new.dot(&normal) > 0.0 {
                         limit_rejection(& mut new, &normal, 0.01);
-                        let ball1 = & mut players[i].collision_balls[ib];
-                        ball1.velocity += new.scale(0.5);
-                        let ball2 = & mut players[j].collision_balls[jb];
-                        ball2.velocity -= new.scale(0.5);
+                        let mass1 = players[i].collision_balls[ib].mass;
+                        let mass2 = players[j].collision_balls[jb].mass;
+                        let mass_sum = mass1 + mass2;
+
+                        players[i].collision_balls[ib].velocity += new.scale(mass2 / mass_sum);
+                        players[j].collision_balls[jb].velocity -= new.scale(mass1 / mass_sum);
                     }
                 }
             }

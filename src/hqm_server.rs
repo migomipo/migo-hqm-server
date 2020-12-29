@@ -545,6 +545,11 @@ impl HQMServer {
                 };
                 let msg = format!("{}, {}", offside_str, icing_str);
                 self.add_directed_server_chat_message(msg, player_index);
+            },
+            "cheat" => {
+                if self.config.cheats_enabled {
+                    self.cheat(player_index, arg);
+                }
             }
             _ => {}, // matches have to be exhaustive
         }
@@ -1263,7 +1268,7 @@ impl HQMServer {
 
         fn setup (messages: & mut Vec<HQMMessage>, world: & mut HQMGameWorld,
                   player: & mut HQMConnectedPlayer, player_index: usize, faceoff_position: String, pos: Point3<f32>, rot: Matrix3<f32>, team: HQMTeam) {
-            let new_object_index = world.create_player_object(team,pos, rot, player.hand, player_index, faceoff_position);
+            let new_object_index = world.create_player_object(team,pos, rot, player.hand, player_index, faceoff_position, player.mass);
             player.skater = new_object_index;
 
             let update = HQMMessage::PlayerUpdate {
@@ -1713,7 +1718,7 @@ fn set_team_internal (player_index: usize, player: & mut HQMConnectedPlayer, wor
                             (pos, rot)
                         }
                     };
-                    if let Some(i) = world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index, "".to_string()) {
+                    if let Some(i) = world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index, "".to_string(), player.mass) {
                         player.skater = Some(i);
                         player.view_player_index = player_index;
                         info!("{} ({}) has joined team {:?}", player.player_name, player_index, team);
@@ -1785,6 +1790,7 @@ pub(crate) struct HQMConnectedPlayer {
     pub(crate) is_muted: HQMMuteStatus,
     pub(crate) team_switch_timer: u32,
     hand: HQMSkaterHand,
+    pub(crate) mass: f32,
     deltatime: u32,
     last_ping: VecDeque<f32>,
     view_player_index: usize
@@ -1811,7 +1817,8 @@ impl HQMConnectedPlayer {
             // store latest deltime client sends you to respond with it
             deltatime: 0,
             last_ping: VecDeque::new (),
-            view_player_index: player_index
+            view_player_index: player_index,
+            mass: 1.0
         }
     }
 
@@ -1881,6 +1888,8 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) icing: HQMIcingConfiguration,
     pub(crate) warmup_pucks: u32,
     pub(crate) limit_jump_speed: bool,
+
+    pub(crate) cheats_enabled: bool,
 
     pub(crate) spawn_point: HQMSpawnPoint,
     pub(crate) cylinder_puck_post_collision: bool

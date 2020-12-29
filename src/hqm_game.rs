@@ -16,10 +16,11 @@ pub(crate) struct HQMGameWorld {
 }
 
 impl HQMGameWorld {
-    pub(crate) fn create_player_object (& mut self, team: HQMTeam, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize, faceoff_position: String) -> Option<usize> {
+    pub(crate) fn create_player_object (& mut self, team: HQMTeam, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand,
+                                        connected_player_index: usize, faceoff_position: String, mass: f32) -> Option<usize> {
         let object_slot = self.find_empty_object_slot();
         if let Some(i) = object_slot {
-            self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, team, start, rot, hand, connected_player_index, faceoff_position));
+            self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, team, start, rot, hand, connected_player_index, faceoff_position, mass));
         }
         return object_slot;
     }
@@ -493,20 +494,20 @@ pub(crate) struct HQMSkater {
 
 impl HQMSkater {
 
-    fn get_collision_balls(pos: &Point3<f32>, rot: &Matrix3<f32>, linear_velocity: &Vector3<f32>) -> Vec<HQMSkaterCollisionBall> {
+    fn get_collision_balls(pos: &Point3<f32>, rot: &Matrix3<f32>, linear_velocity: &Vector3<f32>, mass: f32) -> Vec<HQMSkaterCollisionBall> {
         let mut collision_balls = Vec::with_capacity(6);
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.0, 0.0, 0.0), pos, rot, linear_velocity, 0.225));
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.25, 0.3125, 0.0), pos, rot, linear_velocity, 0.25));
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(-0.25, 0.3125, 0.0), pos, rot, linear_velocity, 0.25));
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(-0.1875, -0.1875, 0.0), pos, rot, linear_velocity, 0.1875));
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.1875, -0.1875, 0.0), pos, rot, linear_velocity, 0.1875));
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.0, 0.5, 0.0), pos, & rot, linear_velocity, 0.1875));
+        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.0, 0.0, 0.0), pos, rot, linear_velocity, 0.225, mass));
+        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.25, 0.3125, 0.0), pos, rot, linear_velocity, 0.25, mass));
+        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(-0.25, 0.3125, 0.0), pos, rot, linear_velocity, 0.25, mass));
+        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(-0.1875, -0.1875, 0.0), pos, rot, linear_velocity, 0.1875, mass));
+        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.1875, -0.1875, 0.0), pos, rot, linear_velocity, 0.1875, mass));
+        collision_balls.push(HQMSkaterCollisionBall::from_skater(Vector3::new(0.0, 0.5, 0.0), pos, & rot, linear_velocity, 0.1875, mass));
         collision_balls
     }
 
-    fn new(object_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize, faceoff_position: String) -> Self {
+    fn new(object_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize, faceoff_position: String, mass: f32) -> Self {
         let linear_velocity = Vector3::new (0.0, 0.0, 0.0);
-        let collision_balls = HQMSkater::get_collision_balls(&pos, &rot, &linear_velocity);
+        let collision_balls = HQMSkater::get_collision_balls(&pos, &rot, &linear_velocity, mass);
         HQMSkater {
             index:object_index,
             connected_player_index,
@@ -559,18 +560,20 @@ pub(crate) struct HQMSkaterCollisionBall {
     pub(crate) offset: Vector3<f32>,
     pub(crate) pos: Point3<f32>,
     pub(crate) velocity: Vector3<f32>,
-    pub(crate) radius: f32
+    pub(crate) radius: f32,
+    pub(crate) mass: f32
 
 }
 
 impl HQMSkaterCollisionBall {
-    fn from_skater(offset: Vector3<f32>, skater_pos: & Point3<f32>, skater_rot: & Matrix3<f32>, velocity: & Vector3<f32>, radius: f32) -> Self {
+    fn from_skater(offset: Vector3<f32>, skater_pos: & Point3<f32>, skater_rot: & Matrix3<f32>, velocity: & Vector3<f32>, radius: f32, mass: f32) -> Self {
         let pos = skater_pos + skater_rot * &offset;
         HQMSkaterCollisionBall {
             offset,
             pos,
             velocity: velocity.clone_owned(),
-            radius
+            radius,
+            mass
         }
     }
 }

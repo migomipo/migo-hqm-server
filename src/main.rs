@@ -51,6 +51,10 @@ async fn main() -> std::io::Result<()> {
                 _ => HQMServerMode::Match
             }
         });
+        let cheats_enabled = match server_section.get("cheats_enabled") {
+            Some(s) => s.eq_ignore_ascii_case("true"),
+            None => false
+        };
         let log_name = server_section.get("log_name").map_or(format!("{}.log", server_name) , |x| String::from(x));
 
         let welcome = server_section.get("welcome").unwrap_or("");
@@ -111,6 +115,7 @@ async fn main() -> std::io::Result<()> {
             warmup_pucks,
             force_team_size_parity,
             limit_jump_speed,
+            cheats_enabled,
             spawn_point,
             cylinder_puck_post_collision,
 

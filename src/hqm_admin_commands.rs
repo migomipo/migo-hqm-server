@@ -647,4 +647,56 @@ impl HQMServer {
             }
         }
     }
+
+    fn cheat_gravity (& mut self, split: &[&str]) {
+        if split.len() >= 2 {
+            let gravity = split[1].parse::<f32>();
+            if let Ok (gravity) = gravity {
+                self.game.world.gravity = gravity/10000.0;
+            }
+        }
+    }
+
+    fn cheat_mass (& mut self, split: &[&str]) {
+        if split.len() >= 3 {
+            let player = split[1].parse::<usize>().ok()
+                .and_then(|x| self.players.get_mut(x).and_then(|x| x.as_mut()));
+            let mass = split[2].parse::<f32>();
+            if let Some(player) = player {
+                if let Ok(mass) = mass {
+                    player.mass = mass;
+                    if let Some(skater_obj_index) = player.skater {
+                        if let HQMGameObject::Player(skater) = & mut self.game.world.objects[skater_obj_index] {
+                            for collision_ball in skater.collision_balls.iter_mut() {
+                                collision_ball.mass = mass;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn cheat(& mut self, player_index: usize, arg:&str) {
+        if let Some(player) = & self.players[player_index] {
+
+            if player.is_admin{
+                let split: Vec<&str> = arg.split_whitespace().collect();
+                if let Some(&command) = split.get(0) {
+                    match command {
+                        "mass" => {
+                            self.cheat_mass(&split);
+                        },
+                        "gravity" => {
+                            self.cheat_gravity(&split);
+                        }
+                        _ => {}
+                    }
+                }
+
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
 }
