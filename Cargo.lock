@@ -221,7 +221,7 @@ checksum = "60302e4db3a61da70c0cb7991976248362f30319e88850c487b9b95bbf059e00"
 
 [[package]]
 name = "migo-hqm-server"
-version = "1.0.3"
+version = "1.0.5"
 dependencies = [
  "bytes",
  "nalgebra",

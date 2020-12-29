@@ -54,6 +54,7 @@ Commands               | Explanation
 /ping *ID*             | Get server-side ping of player with ID *ID*
 /lefty                 | Makes player left-handed. If done during play, it will only be applied after play has stopped.
 /righty                | Makes player right-handed. If done during play, it will only be applied after play has stopped.
+/rules                 | Shows current offside/icing rule settings.
 /admin *PASSWORD*      | Logs in as administrator, if the password is correct.
 
 ### Administrators only

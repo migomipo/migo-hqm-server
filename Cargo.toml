@@ -1,6 +1,6 @@
 [package]
 name = "migo-hqm-server"
-version = "1.0.3"
+version = "1.0.5"
 authors = ["John Eriksson <john.eriksson.16@gmail.com>"]
 edition = "2018"
 
