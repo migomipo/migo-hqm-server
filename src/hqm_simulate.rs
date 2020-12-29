@@ -166,10 +166,10 @@ fn update_sticks_and_pucks (players: & mut Vec<& mut HQMSkater>,
 
 fn update_stick(player: & mut HQMSkater, linear_velocity_before: & Vector3<f32>, angular_velocity_before: & Vector3<f32>, rink: & HQMRink) {
     let placement_diff = &player.input.stick - &player.stick_placement;
-    let placement_temp = placement_diff.scale(0.0625) - player.stick_placement_delta.scale(0.5);
-    let placement_temp = limit_vector_length2(& placement_temp, 0.0088888891);
+    let placement_change = placement_diff.scale(0.0625) - player.stick_placement_delta.scale(0.5);
+    let placement_change = limit_vector_length2(&placement_change, 0.0088888891);
 
-    player.stick_placement_delta += placement_temp;
+    player.stick_placement_delta += placement_change;
     player.stick_placement += &player.stick_placement_delta;
 
     // Now that stick placement has been calculated,
@@ -179,46 +179,52 @@ fn update_stick(player: & mut HQMSkater, linear_velocity_before: & Vector3<f32>,
         HQMSkaterHand::Right => 1.0,
         HQMSkaterHand::Left => -1.0
     };
+    player.stick_rot = {
+        let pivot1_pos = &player.body.pos + (&player.body.rot * Vector3::new(-0.375 * mul, -0.5, -0.125));
 
-    let pivot1_pos = &player.body.pos + (&player.body.rot * Vector3::new(-0.375 * mul, -0.5, -0.125));
-    let pivot2_pos = &player.body.pos + (&player.body.rot * Vector3::new(-0.375 * mul, 0.5, -0.125));
+        let stick_pos_converted = player.body.rot.transpose() * (&player.stick_pos - pivot1_pos);
 
-    let stick_pos_converted = player.body.rot.transpose() * (&player.stick_pos - pivot1_pos);
+        let current_azimuth = stick_pos_converted[0].atan2(-stick_pos_converted[2]);
+        let current_inclination = -stick_pos_converted[1].atan2((stick_pos_converted[0].powi(2) + stick_pos_converted[2].powi(2)).sqrt());
 
-    let current_azimuth = stick_pos_converted[0].atan2(-stick_pos_converted[2]);
-    let current_inclination = -stick_pos_converted[1].atan2((stick_pos_converted[0].powi(2) + stick_pos_converted[2].powi(2)).sqrt());
+        let mut new_stick_rotation = player.body.rot.clone_owned();
+        rotate_matrix_spherical(& mut new_stick_rotation, current_azimuth, current_inclination);
 
-    let mut stick_rotation1 = player.body.rot.clone_owned();
-    rotate_matrix_spherical(& mut stick_rotation1, current_azimuth, current_inclination);
-    player.stick_rot = stick_rotation1;
+        if player.stick_placement[1] > 0.0 {
+            let axis = &new_stick_rotation * Vector3::y();
+            rotate_matrix_around_axis(& mut new_stick_rotation, & axis, player.stick_placement[1] * mul * FRAC_PI_2)
+        }
 
-    if player.stick_placement[1] > 0.0 {
-        let axis = &player.stick_rot * Vector3::y();
-        rotate_matrix_around_axis(& mut player.stick_rot, & axis, player.stick_placement[1] * mul * FRAC_PI_2)
-    }
+        // Rotate around the stick axis
+        let handle_axis = (&new_stick_rotation * Vector3::new(0.0, 0.75, 1.0)).normalize();
+        rotate_matrix_around_axis(& mut new_stick_rotation, &handle_axis, -player.input.stick_angle * FRAC_PI_4);
 
-    // Rotate around the stick axis
-    let handle_axis = (&player.stick_rot * Vector3::new(0.0, 0.75, 1.0)).normalize();
-    rotate_matrix_around_axis(& mut player.stick_rot, &handle_axis, -player.input.stick_angle * FRAC_PI_4);
+        new_stick_rotation
+    };
 
-    let mut stick_rotation2 = player.body.rot.clone_owned();
-    rotate_matrix_spherical(& mut stick_rotation2, player.stick_placement[0], player.stick_placement[1]);
+    let (stick_force, intended_stick_position) = {
+        let mut stick_rotation2 = player.body.rot.clone_owned();
+        rotate_matrix_spherical(& mut stick_rotation2, player.stick_placement[0], player.stick_placement[1]);
 
-    let temp = stick_rotation2 * Vector3::x();
-    rotate_matrix_around_axis(& mut stick_rotation2, & temp, FRAC_PI_4);
+        let temp = stick_rotation2 * Vector3::x();
+        rotate_matrix_around_axis(& mut stick_rotation2, & temp, FRAC_PI_4);
 
-    let stick_length = 1.75;
+        let stick_length = 1.75;
 
-    let mut intended_stick_position = pivot2_pos + (&stick_rotation2 * Vector3::z().scale(-stick_length));
-    if intended_stick_position[1] < 0.0 {
-        intended_stick_position[1] = 0.0;
-    }
+        let stick_top_position = &player.body.pos + (&player.body.rot * Vector3::new(-0.375 * mul, 0.5, -0.125));
+        let mut intended_stick_position = stick_top_position + (&stick_rotation2 * Vector3::z().scale(-stick_length));
+        if intended_stick_position[1] < 0.0 {
+            intended_stick_position[1] = 0.0;
+        }
 
-    let speed_at_stick_pos = speed_of_point_including_rotation(&intended_stick_position, & player.body.pos, linear_velocity_before, angular_velocity_before);
-    let stick_pos_movement = 0.125 * (intended_stick_position - &player.stick_pos) + (speed_at_stick_pos - &player.stick_velocity).scale(0.5);
+        let speed_at_stick_pos = speed_of_point_including_rotation(&intended_stick_position, & player.body.pos, linear_velocity_before, angular_velocity_before);
+        let stick_force = 0.125 * (intended_stick_position - &player.stick_pos) + (speed_at_stick_pos - &player.stick_velocity).scale(0.5);
 
-    player.stick_velocity += stick_pos_movement.scale(0.996);
-    apply_acceleration_to_object(& mut player.body, & stick_pos_movement.scale(-0.004), &intended_stick_position);
+        (stick_force, intended_stick_position)
+    };
+
+    player.stick_velocity += stick_force.scale(0.996);
+    apply_acceleration_to_object(& mut player.body, & stick_force.scale(-0.004), &intended_stick_position);
 
     if let Some((overlap, normal)) = collision_between_sphere_and_rink(&player.stick_pos, 0.09375, rink) {
         let mut n = normal.scale(overlap * 0.25) - player.stick_velocity.scale(0.5);
