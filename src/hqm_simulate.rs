@@ -339,11 +339,10 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
         let mut temp2 = unit_y.scale(temp1) - player.body.linear_velocity.scale(0.25);
         if temp2.dot(&unit_y) > 0.0 {
             let (column, rejection_limit) = if player.input.shift() { (Vector3::x(), 0.4) } else { (Vector3::z(), 1.2) };
-            let mut temp_v2 = &player.body.rot * column;
-            temp_v2[1] = 0.0;
-            normal_or_zero_mut(& mut temp_v2);
+            let mut direction = &player.body.rot * column;
+            direction[1] = 0.0;
 
-            temp2 -= temp_v2.scale(temp2.dot(&temp_v2));
+            temp2 -= get_projection(&temp2,&direction);
 
             limit_rejection(& mut temp2, & unit_y, rejection_limit);
             player.body.linear_velocity += temp2;
@@ -365,20 +364,21 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
             rotate_vector_around_axis(& mut unit, &axis, 0.225 * turn * temp);
         }
 
-        let mut temp2 = unit.cross(&(&player.body.rot * Vector3::y()));
+        let temp2 = unit.cross(&(&player.body.rot * Vector3::y()));
 
-        let temp2n = normal_or_zero(&temp2);
-        temp2.scale_mut(0.008333333);
-
-        let temp3 = -0.25 * temp2n.dot (&player.body.angular_velocity);
-        temp2 += temp2n.scale(temp3);
-        temp2 = limit_vector_length(&temp2, 0.000347222222);
+        let temp2 = temp2.scale(0.008333333) - get_projection(&player.body.angular_velocity, &temp2).scale(0.25);
+        let temp2 = limit_vector_length(&temp2, 0.000347222222);
         player.body.angular_velocity += temp2;
     }
     update_stick(player, &linear_velocity_before, &angular_velocity_before, rink);
 
 }
 
+// Project a onto b
+fn get_projection (a: & Vector3<f32>, b: & Vector3<f32>) -> Vector3<f32> {
+    let normal = normal_or_zero(b);
+    normal.scale(normal.dot (&a))
+}
 
 
 fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: &[HQMCollision]) {
@@ -853,12 +853,3 @@ fn normal_or_zero(v: & Vector3<f32>) -> Vector3<f32> {
     }
 }
 
-fn normal_or_zero_mut(v: & mut Vector3<f32>) {
-    let res = v.try_normalize_mut(0.0);
-    if res.is_none() {
-        v[0] = 0.0;
-        v[1] = 0.0;
-        v[2] = 0.0;
-    }
-
-}
