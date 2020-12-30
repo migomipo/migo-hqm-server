@@ -301,8 +301,11 @@ impl HQMRink {
             (Point3::new(wr, 0.0, lr), Vector3::new( 1.0, 0.0,  1.0), corner_radius),
             (Point3::new(r, 0.0, lr),  Vector3::new(-1.0, 0.0,  1.0), corner_radius)
         ];
+
+        let line_width = 0.3; // IIHF rule 17iii, 17iv
         let goal_line_distance = 4.0; // IIHF rule 17iv
-        let blue_line_distance = 22.86; // IIHF rule 17v
+        let blue_line_distance = 22.86 - line_width/2.0; // IIHF rule 17v
+        // IIHF specifies distance between end boards and edge closest to the neutral zone, but my code specifies middle of line
         let distance_neutral_faceoff_spot = blue_line_distance + 1.5; // IIHF rule 18iv
         let distance_zone_faceoff_spot = goal_line_distance + 6.0; // IIHF rule 18vi
 
@@ -320,8 +323,6 @@ impl HQMRink {
 
         let red_line_normal = Vector3::z();
         let blue_line_normal = -Vector3::z();
-
-        let line_width = 0.3; // IIHF rule 17iii, 17iv
 
         let red_net = HQMRinkNet::new(Point3::new (center_x, 0.0, goal_line_distance), Matrix3::identity());
         let blue_net = HQMRinkNet::new(Point3::new (center_x, 0.0, length - goal_line_distance), Matrix3::from_columns (& [-Vector3::x(), Vector3::y(), -Vector3::z()]));
