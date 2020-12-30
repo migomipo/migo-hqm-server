@@ -304,10 +304,10 @@ impl HQMRink {
 
         let line_width = 0.3; // IIHF rule 17iii, 17iv
         let goal_line_distance = 4.0; // IIHF rule 17iv
-        let blue_line_distance = 22.86 - line_width/2.0; // IIHF rule 17v
+        let blue_line_distance = 22.86 - line_width/2.0; // IIHF rule 17v and 17vi
         // IIHF specifies distance between end boards and edge closest to the neutral zone, but my code specifies middle of line
-        let distance_neutral_faceoff_spot = blue_line_distance + 1.5; // IIHF rule 18iv
-        let distance_zone_faceoff_spot = goal_line_distance + 6.0; // IIHF rule 18vi
+        let distance_neutral_faceoff_spot = blue_line_distance + 1.5 - line_width/2.0; // IIHF rule 18iv and 18vii
+        let distance_zone_faceoff_spot = goal_line_distance + 6.0 - 0.05; // IIHF rule 18vi and 18vii
 
         let center_x = width / 2.0;
         let left_faceoff_x = center_x - 7.0; // IIHF rule 18vi and 18iv
