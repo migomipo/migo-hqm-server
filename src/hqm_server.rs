@@ -550,6 +550,7 @@ impl HQMServer {
                     self.cheat(player_index, arg);
                 }
             },
+            /*
             "test" => {
                 let rink = &self.game.world.rink;
                 let faceoff_spot = match arg {
@@ -569,6 +570,8 @@ impl HQMServer {
                     self.do_faceoff();
                 }
             }
+            */
+
             _ => {}, // matches have to be exhaustive
         }
 
