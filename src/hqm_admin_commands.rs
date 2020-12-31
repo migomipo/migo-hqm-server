@@ -431,7 +431,6 @@ impl HQMServer {
             if let Some(player) = & self.players[player_index] {
                 if player.is_admin{
                     self.game.intermission = 5*100;
-                    self.game.goal_timer = 0;
 
                     let msg = format!("Faceoff initiated by {}",player.player_name);
                     info!("{} ({}) initiated faceoff",player.player_name, player_index);

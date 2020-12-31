@@ -945,7 +945,8 @@ impl HQMServer {
         } else if team == HQMTeam::Blue {
             self.game.blue_score += 1;
         }
-        self.game.goal_timer = self.config.time_intermission*100;
+        self.game.intermission = self.config.time_intermission*100;
+        self.game.is_intermission_goal = true;
         self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
         if self.game.period > 3 && self.game.red_score != self.game.blue_score {
             self.game.intermission = 2000;
@@ -1006,7 +1007,6 @@ impl HQMServer {
             || self.game.blue_icing_status == HQMIcingStatus::Icing
         || self.game.period == 0
         || self.game.time == 0
-        || self.game.goal_timer > 0
         || self.game.intermission > 0
         || self.game.paused {
             return;
@@ -1355,6 +1355,7 @@ impl HQMServer {
             if self.game.intermission > 0 {
                 self.game.intermission -= 1;
                 if self.game.intermission == 0 {
+                    self.game.is_intermission_goal = false;
                     if self.game.game_over {
                         self.new_game();
                     } else {
@@ -1364,11 +1365,6 @@ impl HQMServer {
                         self.do_faceoff();
                     }
 
-                }
-            } else if self.game.goal_timer > 0 {
-                self.game.goal_timer -= 1;
-                if self.game.goal_timer == 0 && !self.game.game_over {
-                    self.do_faceoff();
                 }
             } else if self.game.time > 0 {
                 self.game.time -= 1;
@@ -1539,7 +1535,11 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
                 writer.write_bits(8, game.red_score);
                 writer.write_bits(8, game.blue_score);
                 writer.write_bits(16, game.time);
-                writer.write_bits(16, game.goal_timer);
+
+                writer.write_bits(16,
+                                  if game.is_intermission_goal {
+                                      game.intermission }
+                                  else {0});
                 writer.write_bits(8, game.period);
                 writer.write_bits(8, player.view_player_index as u32);
 
