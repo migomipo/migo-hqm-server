@@ -945,11 +945,11 @@ impl HQMServer {
         } else if team == HQMTeam::Blue {
             self.game.blue_score += 1;
         }
-        self.game.intermission = self.config.time_intermission*100;
+        self.game.time_break = self.config.time_break *100;
         self.game.is_intermission_goal = true;
         self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
         if self.game.period > 3 && self.game.red_score != self.game.blue_score {
-            self.game.intermission = 2000;
+            self.game.time_break = self.config.time_intermission*100;
             self.game.game_over = true;
         }
 
@@ -984,7 +984,7 @@ impl HQMServer {
             HQMTeam::Blue => & mut self.game.blue_offside_status,
         };
         self.game.next_faceoff_spot = self.game.world.rink.get_offside_faceoff_spot(pass_origin, team);
-        self.game.intermission = self.config.time_intermission*100;
+        self.game.time_break = self.config.time_break *100;
         *offside_status = HQMOffsideStatus::Offside;
         self.add_server_chat_message(String::from("Offside"));
     }
@@ -995,7 +995,7 @@ impl HQMServer {
             HQMTeam::Blue => & mut self.game.blue_icing_status,
         };
         self.game.next_faceoff_spot = self.game.world.rink.get_icing_faceoff_spot(pass_origin, team);
-        self.game.intermission = self.config.time_intermission*100;
+        self.game.time_break = self.config.time_break *100;
         *icing_status = HQMIcingStatus::Icing;
         self.add_server_chat_message(String::from("Icing"));
     }
@@ -1007,7 +1007,7 @@ impl HQMServer {
             || self.game.blue_icing_status == HQMIcingStatus::Icing
         || self.game.period == 0
         || self.game.time == 0
-        || self.game.intermission > 0
+        || self.game.time_break > 0
         || self.game.paused {
             return;
         }
@@ -1352,9 +1352,9 @@ impl HQMServer {
                 }
             }
 
-            if self.game.intermission > 0 {
-                self.game.intermission -= 1;
-                if self.game.intermission == 0 {
+            if self.game.time_break > 0 {
+                self.game.time_break -= 1;
+                if self.game.time_break == 0 {
                     self.game.is_intermission_goal = false;
                     if self.game.game_over {
                         self.new_game();
@@ -1371,10 +1371,10 @@ impl HQMServer {
                 if self.game.time == 0 {
                     self.game.period += 1;
                     if self.game.period > 3 && self.game.red_score != self.game.blue_score {
-                        self.game.intermission = self.config.time_intermission*100;
+                        self.game.time_break = self.config.time_intermission*100;
                         self.game.game_over = true;
                     } else {
-                        self.game.intermission = self.config.time_intermission*100;
+                        self.game.time_break = self.config.time_intermission*100;
                         self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
                     }
                 }
@@ -1538,7 +1538,8 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
 
                 writer.write_bits(16,
                                   if game.is_intermission_goal {
-                                      game.intermission }
+                                      game.time_break
+                                  }
                                   else {0});
                 writer.write_bits(8, game.period);
                 writer.write_bits(8, player.view_player_index as u32);
@@ -1925,6 +1926,7 @@ pub(crate) struct HQMServerConfiguration {
 
     pub(crate) time_period: u32,
     pub(crate) time_warmup: u32,
+    pub(crate) time_break: u32,
     pub(crate) time_intermission: u32,
     pub(crate) offside: HQMOffsideConfiguration,
     pub(crate) icing: HQMIcingConfiguration,

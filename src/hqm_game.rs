@@ -87,7 +87,7 @@ pub(crate) struct HQMGame {
     pub(crate) blue_score: u32,
     pub(crate) period: u32,
     pub(crate) time: u32,
-    pub(crate) intermission: u32,
+    pub(crate) time_break: u32,
     pub(crate) is_intermission_goal: bool,
     pub(crate) paused: bool,
     pub(crate) game_id: u32,
@@ -125,7 +125,7 @@ impl HQMGame {
             period: 0,
             time: 30000,
             is_intermission_goal: false,
-            intermission: 0,
+            time_break: 0,
             paused: false,
 
             game_over: false,
@@ -140,7 +140,7 @@ impl HQMGame {
         self.state = if !self.paused {
             if self.game_over {
                 HQMGameState::GameOver
-            } else if self.intermission > 0 {
+            } else if self.time_break > 0 {
                 if self.is_intermission_goal {
                     HQMGameState::GoalScored
                 } else {

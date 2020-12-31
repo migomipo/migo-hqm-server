@@ -66,9 +66,10 @@ async fn main() -> std::io::Result<()> {
         // Game
         let game_section = conf.section(Some("Game")).unwrap();
 
-        let rules_time_period = game_section.get("time_period").unwrap().parse::<u32>().unwrap();
-        let rules_time_warmup = game_section.get("time_warmup").unwrap().parse::<u32>().unwrap();
-        let rules_time_intermission = game_section.get("time_intermission").unwrap().parse::<u32>().unwrap();
+        let rules_time_period = game_section.get("time_period").map_or(300, |x| x.parse::<u32>().unwrap());
+        let rules_time_warmup = game_section.get("time_warmup").map_or(300, |x| x.parse::<u32>().unwrap());
+        let rule_time_break = game_section.get("time_break").map_or(10, |x| x.parse::<u32>().unwrap());
+        let rule_time_intermission = game_section.get("time_intermission").map_or(20, |x| x.parse::<u32>().unwrap());
         let warmup_pucks = game_section.get("warmup_pucks").map_or_else(|| 1, |x| x.parse::<u32>().unwrap());
 
         let limit_jump_speed = match game_section.get("limit_jump_speed") {
@@ -109,7 +110,8 @@ async fn main() -> std::io::Result<()> {
 
             time_period: rules_time_period, 
             time_warmup: rules_time_warmup, 
-            time_intermission: rules_time_intermission,
+            time_break: rule_time_break,
+            time_intermission: rule_time_intermission,
             icing,
             offside,
             warmup_pucks,
@@ -120,7 +122,8 @@ async fn main() -> std::io::Result<()> {
             cylinder_puck_post_collision,
 
             welcome: welcome_str,
-            mode
+            mode,
+
         };
 
         let file_appender = tracing_appender::rolling::daily("log", log_name);

@@ -430,7 +430,7 @@ impl HQMServer {
         if self.config.mode == HQMServerMode::Match && self.game.state != HQMGameState::GameOver {
             if let Some(player) = & self.players[player_index] {
                 if player.is_admin{
-                    self.game.intermission = 5*100;
+                    self.game.time_break = 5*100;
 
                     let msg = format!("Faceoff initiated by {}",player.player_name);
                     info!("{} ({}) initiated faceoff",player.player_name, player_index);
