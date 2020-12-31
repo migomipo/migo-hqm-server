@@ -18,9 +18,11 @@ use tracing::info;
 use std::collections::VecDeque;
 use std::f32::consts::{PI, FRAC_PI_2};
 
-const GAME_HEADER: &[u8] = b"Hock";
+use hyper::Client;
+use std::net::IpAddr;
+use std::error::Error;
 
-const MASTER_SERVER: &str = "66.226.72.227:27590";
+const GAME_HEADER: &[u8] = b"Hock";
 
 pub struct HQMSavedTick {
     packets: Vec<HQMObjectPacket>,
@@ -517,9 +519,6 @@ impl HQMServer {
                                 self.add_directed_server_chat_message(msg1, player_index);
                                 self.add_directed_server_chat_message(msg2, player_index);
                             }
-
-
-
                         } else {
                             self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
                         }
@@ -549,6 +548,25 @@ impl HQMServer {
             "cheat" => {
                 if self.config.cheats_enabled {
                     self.cheat(player_index, arg);
+                }
+            },
+            "test" => {
+                let rink = &self.game.world.rink;
+                let faceoff_spot = match arg {
+                    "c" => Some(rink.center_faceoff_spot.clone()),
+                    "r1" => Some(rink.red_zone_faceoff_spots[0].clone()),
+                    "r2" => Some(rink.red_zone_faceoff_spots[1].clone()),
+                    "b1" => Some(rink.blue_zone_faceoff_spots[0].clone()),
+                    "b2" => Some(rink.blue_zone_faceoff_spots[1].clone()),
+                    "rn1" => Some(rink.red_neutral_faceoff_spots[0].clone()),
+                    "rn2" => Some(rink.red_neutral_faceoff_spots[1].clone()),
+                    "bn1" => Some(rink.blue_neutral_faceoff_spots[0].clone()),
+                    "bn2" => Some(rink.blue_neutral_faceoff_spots[1].clone()),
+                    _ => None
+                };
+                if let Some(faceoff_spot) = faceoff_spot {
+                    self.game.next_faceoff_spot = faceoff_spot;
+                    self.do_faceoff();
                 }
             }
             _ => {}, // matches have to be exhaustive
@@ -1382,10 +1400,20 @@ impl HQMServer {
         if self.config.public {
             let socket = socket.clone();
             tokio::spawn(async move {
-                let mut public_timer = tokio::time::interval(Duration::from_secs(2));
                 loop {
-                    let _ = notify_master_server(&socket).await;
-                    public_timer.tick().await;
+                    let master_server = get_master_server().await.ok();
+                    if let Some (addr) = master_server {
+                        for _ in 0..60 {
+                            let msg = b"Hock\x20";
+                            let res = socket.send_to(msg, addr).await;
+                            if res.is_err() {
+                                break;
+                            }
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                        }
+                    } else {
+                        tokio::time::sleep(Duration::from_secs(15)).await;
+                    }
                 }
             });
         }
@@ -1761,10 +1789,21 @@ fn get_player_name(bytes: Vec<u8>) -> Option<String> {
     };
 }
 
-async fn notify_master_server(socket: & UdpSocket) -> std::io::Result<usize> {
-    let server_addr: SocketAddr = MASTER_SERVER.parse().unwrap();
-    let msg = b"Hock\x20";
-    socket.send_to(msg, server_addr).await
+async fn get_master_server () -> Result<SocketAddr, Box<dyn Error>> {
+    let client = Client::new();
+    let uri = "http://www.crypticsea.com/anewzero/serverinfo.php".parse()?;
+
+    let mut resp = client.get(uri).await?;
+
+    let bytes = hyper::body::to_bytes(resp.body_mut()).await?;
+
+    let s = std::str::from_utf8(&bytes).unwrap().to_string();
+    let split = s.split_ascii_whitespace().collect::<Vec<&str>>();
+
+    let addr = split.get(1).unwrap_or(&"").parse::<IpAddr> ()?;
+    let port = split.get(2).unwrap_or(&"").parse::<u16> ()?;
+    Ok(SocketAddr::new(addr, port))
+
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
