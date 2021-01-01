@@ -445,7 +445,7 @@ fn create_faceoff_spot (center_position: Point3<f32>, rink_width: f32, rink_leng
             ("RW", Vector3::new (5.0,1.5,4.0)),
     ];
     let red_rot = Rotation3::identity();
-    let blue_rot = Rotation3::from_euler_angles(0.0, std::f32::consts::PI, 0.0);
+    let blue_rot = Rotation3::from_euler_angles(0.0, PI, 0.0);
     for (s, offset) in offsets {
         let red_pos = &center_position + &red_rot * &offset;
         let blue_pos = &center_position + &blue_rot * &offset;
