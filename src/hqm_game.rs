@@ -61,7 +61,8 @@ impl HQMIcingStatus {
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) enum HQMOffsideStatus {
     No,                           // No offside
-    Warning(Point3<f32>, usize),  // Warning, puck is in offensive zone but not touched yet
+    InOffensiveZone,              // No offside, puck in offensive zone
+    Warning(Point3<f32>, usize),  // Warning, puck entered offensive zone in an offside situation but not touched yet
     Offside                       // Offside has been called
 }
 

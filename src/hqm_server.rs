@@ -1117,21 +1117,29 @@ impl HQMServer {
                         HQMTeam::Red => & mut self.game.red_offside_status,
                         HQMTeam::Blue => & mut self.game.blue_offside_status,
                     };
-                    if let HQMGameObject::Puck(puck) = & self.game.world.objects[puck] {
-                        if let Some(touch) = puck.touches.front() {
-                            if team == touch.team &&
-                                has_players_in_offensive_zone(& self.game.world, team) {
-                                match self.config.offside {
-                                    HQMOffsideConfiguration::Delayed => {
-                                        *offside_status = HQMOffsideStatus::Warning(touch.puck_pos.clone(), touch.player_index);
-                                        self.add_server_chat_message(String::from("Offside warning"));
+                    if *offside_status == HQMOffsideStatus::No {
+                        if let HQMGameObject::Puck(puck) = & self.game.world.objects[puck] {
+                            if let Some(touch) = puck.touches.front() {
+                                if team == touch.team &&
+                                    has_players_in_offensive_zone(& self.game.world, team) {
+                                    match self.config.offside {
+                                        HQMOffsideConfiguration::Delayed => {
+                                            *offside_status = HQMOffsideStatus::Warning(touch.puck_pos.clone(), touch.player_index);
+                                            self.add_server_chat_message(String::from("Offside warning"));
+                                        }
+                                        HQMOffsideConfiguration::Immediate => {
+                                            let copy = touch.puck_pos.clone();
+                                            self.call_offside(team, &copy);
+                                        },
+                                        HQMOffsideConfiguration::Off => {
+                                            *offside_status = HQMOffsideStatus::InOffensiveZone;
+                                        }
                                     }
-                                    HQMOffsideConfiguration::Immediate => {
-                                        let copy = touch.puck_pos.clone();
-                                        self.call_offside(team, &copy);
-                                    },
-                                    HQMOffsideConfiguration::Off => {}
+                                } else {
+                                    *offside_status = HQMOffsideStatus::InOffensiveZone;
                                 }
+                            } else {
+                                *offside_status = HQMOffsideStatus::InOffensiveZone;
                             }
                         }
                     }
@@ -1144,8 +1152,9 @@ impl HQMServer {
                         HQMTeam::Red => & mut self.game.red_offside_status,
                         HQMTeam::Blue => & mut self.game.blue_offside_status,
                     };
-                    if offside_status.is_warning() {
-                        *offside_status = HQMOffsideStatus::No;
+                    let was_warning = offside_status.is_warning();
+                    *offside_status = HQMOffsideStatus::No;
+                    if was_warning {
                         self.add_server_chat_message(String::from("Offside waved off"));
                     }
                 }
@@ -1275,15 +1284,15 @@ impl HQMServer {
     }
 
     fn do_faceoff(&mut self){
-        let rink = &self.game.world.rink;
         let faceoff_spot = &self.game.next_faceoff_spot;
 
-        let positions = Self::get_faceoff_positions(& self.players, & self.game.world.objects, &rink.allowed_positions);
+        let positions = Self::get_faceoff_positions(& self.players, & self.game.world.objects,
+                                                    &self.game.world.rink.allowed_positions);
 
         let puck_pos = &faceoff_spot.center_position + &(1.5f32*Vector3::y());
 
         self.game.world.objects = vec![HQMGameObject::None; 32];
-        self.game.world.create_puck_object(puck_pos, Matrix3::identity(), self.config.cylinder_puck_post_collision);
+        self.game.world.create_puck_object(puck_pos.clone(), Matrix3::identity(), self.config.cylinder_puck_post_collision);
 
         let mut messages = Vec::new();
 
@@ -1318,10 +1327,20 @@ impl HQMServer {
 
         }
 
+        let rink = &self.game.world.rink;
         self.game.red_icing_status = HQMIcingStatus::No;
         self.game.blue_icing_status = HQMIcingStatus::No;
-        self.game.red_offside_status = HQMOffsideStatus::No;
-        self.game.blue_offside_status = HQMOffsideStatus::No;
+        self.game.red_offside_status = if rink.red_lines_and_net.offensive_line.point_past_middle_of_line(&puck_pos) {
+            HQMOffsideStatus::InOffensiveZone
+        } else {
+            HQMOffsideStatus::No
+        };
+
+        self.game.blue_offside_status = if rink.blue_lines_and_net.offensive_line.point_past_middle_of_line(&puck_pos) {
+            HQMOffsideStatus::InOffensiveZone
+        } else {
+            HQMOffsideStatus::No
+        };
 
         for message in messages {
             self.add_global_message(message, true);
