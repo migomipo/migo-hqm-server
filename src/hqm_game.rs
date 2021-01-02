@@ -44,15 +44,22 @@ impl HQMGameWorld {
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) enum HQMIcingStatus {
     No,          // No icing
-    NotTouched(Point3<f32>),  // Puck has entered offensive half, but not reached the goal line
-    Warning(Point3<f32>),     // Puck has reached the goal line, delayed icing
-    Icing        // Icing has been called
+    NotTouched(HQMTeam, Point3<f32>),  // Puck has entered offensive half, but not reached the goal line
+    Warning(HQMTeam, Point3<f32>),     // Puck has reached the goal line, delayed icing
+    Icing(HQMTeam)       // Icing has been called
 }
 
 impl HQMIcingStatus {
     pub(crate) fn is_warning(&self) -> bool {
         match self {
-            HQMIcingStatus::Warning(_) => true,
+            HQMIcingStatus::Warning(_, _) => true,
+            _ => false
+        }
+    }
+
+    pub(crate) fn is_icing(&self) -> bool {
+        match self {
+            HQMIcingStatus::Icing(_) => true,
             _ => false
         }
     }
@@ -60,16 +67,23 @@ impl HQMIcingStatus {
 
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) enum HQMOffsideStatus {
-    No,                           // No offside
-    InOffensiveZone,              // No offside, puck in offensive zone
-    Warning(Point3<f32>, usize),  // Warning, puck entered offensive zone in an offside situation but not touched yet
-    Offside                       // Offside has been called
+    InNeutralZone,                // No offside
+    InOffensiveZone(HQMTeam),              // No offside, puck in offensive zone
+    Warning(HQMTeam, Point3<f32>, usize),  // Warning, puck entered offensive zone in an offside situation but not touched yet
+    Offside(HQMTeam)                       // Offside has been called
 }
 
 impl HQMOffsideStatus {
     pub(crate) fn is_warning(&self) -> bool {
         match self {
-            HQMOffsideStatus::Warning(_, _) => true,
+            HQMOffsideStatus::Warning(_, _, _) => true,
+            _ => false
+        }
+    }
+
+    pub(crate) fn is_offside(&self) -> bool {
+        match self {
+            HQMOffsideStatus::Offside(_) => true,
             _ => false
         }
     }
@@ -78,10 +92,8 @@ impl HQMOffsideStatus {
 pub(crate) struct HQMGame {
 
     pub(crate) state: HQMGameState,
-    pub(crate) red_icing_status: HQMIcingStatus,
-    pub(crate) blue_icing_status: HQMIcingStatus,
-    pub(crate) red_offside_status: HQMOffsideStatus,
-    pub(crate) blue_offside_status: HQMOffsideStatus,
+    pub(crate) icing_status: HQMIcingStatus,
+    pub(crate) offside_status: HQMOffsideStatus,
     pub(crate) next_faceoff_spot: HQMFaceoffSpot,
     pub(crate) world: HQMGameWorld,
     pub(crate) red_score: u32,
@@ -110,10 +122,8 @@ impl HQMGame {
 
         HQMGame {
             state:HQMGameState::Warmup,
-            red_icing_status: HQMIcingStatus::No,
-            blue_icing_status: HQMIcingStatus::No,
-            red_offside_status: HQMOffsideStatus::No,
-            blue_offside_status: HQMOffsideStatus::No,
+            icing_status: HQMIcingStatus::No,
+            offside_status: HQMOffsideStatus::InNeutralZone,
             next_faceoff_spot: mid_faceoff,
             world: HQMGameWorld {
                 objects: object_vec,
