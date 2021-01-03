@@ -10,6 +10,7 @@ use std::f32::consts::PI;
 
 pub(crate) struct HQMGameWorld {
     pub(crate) objects: Vec<HQMGameObject>,
+    pub(crate) puck_slots: usize,
     pub(crate) rink: HQMRink,
     pub(crate) gravity: f32,
     pub(crate) limit_jump_speed: bool,
@@ -18,7 +19,7 @@ pub(crate) struct HQMGameWorld {
 impl HQMGameWorld {
     pub(crate) fn create_player_object (& mut self, team: HQMTeam, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand,
                                         connected_player_index: usize, faceoff_position: String, mass: f32) -> Option<usize> {
-        let object_slot = self.find_empty_object_slot();
+        let object_slot = self.find_empty_player_slot();
         if let Some(i) = object_slot {
             self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, team, start, rot, hand, connected_player_index, faceoff_position, mass));
         }
@@ -26,18 +27,29 @@ impl HQMGameWorld {
     }
 
     pub(crate) fn create_puck_object (& mut self, start: Point3<f32>, rot: Matrix3<f32>, cylinder_puck_post_collision: bool) -> Option<usize> {
-        let object_slot = self.find_empty_object_slot();
+        let object_slot = self.find_empty_puck_slot();
         if let Some(i) = object_slot {
             self.objects[i] = HQMGameObject::Puck(HQMPuck::new(i, start, rot, cylinder_puck_post_collision));
         }
         return object_slot;
     }
 
-    fn find_empty_object_slot(& self) -> Option<usize> {
-        return self.objects.iter().position(|x| {match x {
-            HQMGameObject::None  => true,
-            _ => false
-        }});
+    fn find_empty_puck_slot(& self) -> Option<usize> {
+        for i in 0..self.puck_slots {
+            if let HQMGameObject::None = self.objects[i] {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn find_empty_player_slot(& self) -> Option<usize> {
+        for i in self.puck_slots..self.objects.len() {
+            if let HQMGameObject::None = self.objects[i] {
+                return Some(i);
+            }
+        }
+        None
     }
 }
 
@@ -127,6 +139,7 @@ impl HQMGame {
             next_faceoff_spot: mid_faceoff,
             world: HQMGameWorld {
                 objects: object_vec,
+                puck_slots: config.warmup_pucks,
                 rink,
                 gravity: 0.000680555,
                 limit_jump_speed: config.limit_jump_speed

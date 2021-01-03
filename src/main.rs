@@ -70,7 +70,7 @@ async fn main() -> std::io::Result<()> {
         let rules_time_warmup = game_section.get("time_warmup").map_or(300, |x| x.parse::<u32>().unwrap());
         let rule_time_break = game_section.get("time_break").map_or(10, |x| x.parse::<u32>().unwrap());
         let rule_time_intermission = game_section.get("time_intermission").map_or(20, |x| x.parse::<u32>().unwrap());
-        let warmup_pucks = game_section.get("warmup_pucks").map_or_else(|| 1, |x| x.parse::<u32>().unwrap());
+        let warmup_pucks = game_section.get("warmup_pucks").map_or_else(|| 1, |x| x.parse::<usize>().unwrap());
 
         let limit_jump_speed = match game_section.get("limit_jump_speed") {
             Some(s) => s.eq_ignore_ascii_case("true"),

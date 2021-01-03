@@ -1916,7 +1916,7 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) time_intermission: u32,
     pub(crate) offside: HQMOffsideConfiguration,
     pub(crate) icing: HQMIcingConfiguration,
-    pub(crate) warmup_pucks: u32,
+    pub(crate) warmup_pucks: usize,
     pub(crate) limit_jump_speed: bool,
 
     pub(crate) cheats_enabled: bool,
