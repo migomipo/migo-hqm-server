@@ -12,7 +12,7 @@ use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
-use bytes::BytesMut;
+use bytes::{BytesMut, Bytes};
 
 use tracing::info;
 use std::collections::VecDeque;
@@ -26,6 +26,13 @@ const GAME_HEADER: &[u8] = b"Hock";
 pub struct HQMSavedTick {
     packets: Vec<HQMObjectPacket>,
     time: Instant,
+}
+
+enum HQMServerReceivedData {
+    GameClientPacket {
+        addr: SocketAddr,
+        data: Bytes,
+    }
 }
 
 pub(crate) struct HQMServer {
@@ -1417,7 +1424,10 @@ impl HQMServer {
                     match socket.recv_from(&mut buf).await {
                         Ok((size, addr)) => {
                             buf.truncate(size);
-                            let _ = msg_sender.send((addr, buf.freeze())).await;
+                            let _ = msg_sender.send(HQMServerReceivedData::GameClientPacket {
+                                addr,
+                                data: buf.freeze()
+                            }).await;
                         }
                         Err(_) => {}
                     }
@@ -1432,7 +1442,10 @@ impl HQMServer {
                     self.tick(& socket).await;
                 }
                 x = msg_receiver.recv() => {
-                    if let Some ((addr, msg)) = x {
+                    if let Some (HQMServerReceivedData::GameClientPacket {
+                        addr,
+                        data: msg
+                    }) = x {
                         self.handle_message(addr, & socket, & msg).await;
                     }
                 }
