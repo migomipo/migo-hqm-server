@@ -18,7 +18,6 @@ use tracing::info;
 use std::collections::VecDeque;
 use std::f32::consts::{PI, FRAC_PI_2};
 
-use hyper::Client;
 use std::net::IpAddr;
 use std::error::Error;
 
@@ -1780,20 +1779,14 @@ fn get_player_name(bytes: Vec<u8>) -> Option<String> {
 }
 
 async fn get_master_server () -> Result<SocketAddr, Box<dyn Error>> {
-    let client = Client::new();
-    let uri = "http://www.crypticsea.com/anewzero/serverinfo.php".parse()?;
+    let s = reqwest::get("http://www.crypticsea.com/anewzero/serverinfo.php")
+        .await?.text().await?;
 
-    let mut resp = client.get(uri).await?;
-
-    let bytes = hyper::body::to_bytes(resp.body_mut()).await?;
-
-    let s = std::str::from_utf8(&bytes).unwrap().to_string();
     let split = s.split_ascii_whitespace().collect::<Vec<&str>>();
 
     let addr = split.get(1).unwrap_or(&"").parse::<IpAddr> ()?;
     let port = split.get(2).unwrap_or(&"").parse::<u16> ()?;
     Ok(SocketAddr::new(addr, port))
-
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
