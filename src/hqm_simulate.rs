@@ -3,7 +3,7 @@
 use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld};
 use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Point3, Vector2};
 use std::ops::{AddAssign};
-use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
 use nalgebra::base::storage::{Storage, StorageMut};
 use std::iter::FromIterator;
 
@@ -165,7 +165,12 @@ fn update_sticks_and_pucks (players: & mut Vec<& mut HQMSkater>,
 }
 
 fn update_stick(player: & mut HQMSkater, linear_velocity_before: & Vector3<f32>, angular_velocity_before: & Vector3<f32>, rink: & HQMRink) {
-    let placement_diff = &player.input.stick - &player.stick_placement;
+    let stick_input = Vector2::new (
+        clamp(player.input.stick[0], -FRAC_PI_2, FRAC_PI_2),
+        clamp(player.input.stick[1], -5.0*PI / 16.0, FRAC_PI_8)
+    );
+
+    let placement_diff = stick_input - &player.stick_placement;
     let placement_change = placement_diff.scale(0.0625) - player.stick_placement_delta.scale(0.5);
     let placement_change = limit_vector_length2(&placement_change, 0.0088888891);
 
@@ -197,7 +202,7 @@ fn update_stick(player: & mut HQMSkater, linear_velocity_before: & Vector3<f32>,
 
         // Rotate around the stick axis
         let handle_axis = (&new_stick_rotation * Vector3::new(0.0, 0.75, 1.0)).normalize();
-        rotate_matrix_around_axis(& mut new_stick_rotation, &handle_axis, -player.input.stick_angle * FRAC_PI_4);
+        rotate_matrix_around_axis(& mut new_stick_rotation, &handle_axis, clamp (-player.input.stick_angle * FRAC_PI_4, -1.0, 1.0));
 
         new_stick_rotation
     };
@@ -304,8 +309,8 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
     if player.body.angular_velocity.norm() > 1.0/65536.0 {
         rotate_matrix_around_axis(& mut player.body.rot, &player.body.angular_velocity.normalize(), player.body.angular_velocity.norm());
     }
-    adjust_head_body_rot(& mut player.head_rot, player.input.head_rot);
-    adjust_head_body_rot(& mut player.body_rot, player.input.body_rot);
+    adjust_head_body_rot(& mut player.head_rot, clamp (player.input.head_rot, -7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8));
+    adjust_head_body_rot(& mut player.body_rot, clamp (player.input.body_rot, -FRAC_PI_2, FRAC_PI_2));
     for (collision_ball_index, collision_ball) in player.collision_balls.iter_mut().enumerate() {
         let mut new_rot = player.body.rot.clone_owned();
         if collision_ball_index == 1 || collision_ball_index == 2 || collision_ball_index == 5 {
