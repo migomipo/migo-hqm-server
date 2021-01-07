@@ -202,7 +202,7 @@ fn update_stick(player: & mut HQMSkater, linear_velocity_before: & Vector3<f32>,
 
         // Rotate around the stick axis
         let handle_axis = (&new_stick_rotation * Vector3::new(0.0, 0.75, 1.0)).normalize();
-        rotate_matrix_around_axis(& mut new_stick_rotation, &handle_axis, clamp (-player.input.stick_angle * FRAC_PI_4, -1.0, 1.0));
+        rotate_matrix_around_axis(& mut new_stick_rotation, &handle_axis, clamp (-player.input.stick_angle, -1.0, 1.0) * FRAC_PI_4);
 
         new_stick_rotation
     };
