@@ -385,6 +385,75 @@ impl HQMRink {
             normal: blue_line_normal.clone()
         };
 
+        let red_rot = Rotation3::identity();
+        let blue_rot = Rotation3::from_euler_angles(0.0, PI, 0.0);
+        let red_goalie_pos = Point3::new (width / 2.0, 1.5, length - 5.0);
+        let blue_goalie_pos = Point3::new (width / 2.0, 1.5, 5.0);
+
+        let create_faceoff_spot = |center_position: Point3<f32>| {
+
+            let red_defensive_zone = center_position.z > length - 11.0;
+            let blue_defensive_zone = center_position.z < 11.0;
+            let (red_left, red_right) = if center_position.x < 9.0 {
+                (true, false)
+            } else if center_position.x > width - 9.0 {
+                (false, true)
+            } else {
+                (false, false)
+            };
+            let blue_left = red_right;
+            let blue_right = red_left;
+
+            fn get_positions (center_position: &Point3<f32>, rot: &Rotation3<f32>, goalie_pos: &Point3<f32>,
+                              is_defensive_zone: bool, is_close_to_left: bool, is_close_to_right: bool) -> HashMap<String, (Point3<f32>, Rotation3<f32>)> {
+                let mut player_positions = HashMap::new();
+
+                let winger_z = 4.0;
+                let d_z = 7.25;
+                let dd_z = if is_defensive_zone {8.25} else {10.0};
+                let (far_left_winger_x, far_left_winger_z) = if is_close_to_left {(-6.5, 3.0)} else {(-10.0, winger_z)};
+                let (far_right_winger_x, far_right_winger_z) = if is_close_to_right {(6.5, 3.0)} else {(10.0, winger_z)};
+
+                let offsets = vec![
+                    ("C", Vector3::new (0.0,1.5,2.75)),
+                    ("LD", Vector3::new (-2.0,1.5,d_z)),
+                    ("RD", Vector3::new (2.0,1.5,d_z)),
+                    ("LW", Vector3::new (-5.0,1.5,winger_z)),
+                    ("RW", Vector3::new (5.0,1.5,winger_z)),
+                    ("LDD", Vector3::new (-2.0,1.5,dd_z)),
+                    ("RDD", Vector3::new (2.0,1.5,dd_z)),
+                    ("LLD", Vector3::new (if is_close_to_left && is_defensive_zone {-3.0} else {-5.0},1.5,d_z)),
+                    ("RRD", Vector3::new (if is_close_to_right && is_defensive_zone {3.0} else {5.0},1.5,d_z)),
+                    ("LLDD", Vector3::new (if is_close_to_left && is_defensive_zone {-3.0} else {-5.0},1.5,dd_z)),
+                    ("RRDD", Vector3::new (if is_close_to_right && is_defensive_zone {3.0} else {5.0},1.5,dd_z)),
+                    ("CD", Vector3::new (0.0,1.5,d_z)),
+                    ("CDD", Vector3::new (0.0,1.5,dd_z)),
+                    ("LW2", Vector3::new (-6.0,1.5,winger_z)),
+                    ("RW2", Vector3::new (6.0,1.5,winger_z)),
+                    ("LLW", Vector3::new (far_left_winger_x,1.5,far_left_winger_z)),
+                    ("RRW", Vector3::new (far_right_winger_x,1.5,far_right_winger_z)),
+                ];
+                for (s, offset) in offsets {
+                    let pos = center_position + rot * &offset;
+
+                    player_positions.insert(String::from (s), (pos, rot.clone()));
+                }
+
+                player_positions.insert(String::from ("G"), (goalie_pos.clone(), rot.clone()));
+
+                player_positions
+            }
+
+            let red_player_positions = get_positions(&center_position, &red_rot, &red_goalie_pos, red_defensive_zone, red_left, red_right);
+            let blue_player_positions = get_positions(&center_position, &blue_rot, &blue_goalie_pos, blue_defensive_zone, blue_left, blue_right);
+
+            HQMFaceoffSpot {
+                center_position,
+                red_player_positions,
+                blue_player_positions
+            }
+        };
+
         HQMRink {
             planes,
             corners,
@@ -402,23 +471,23 @@ impl HQMRink {
             },
             width,
             length,
-            allowed_positions: vec!["C", "LW", "RW", "LD", "RD", "G"].into_iter().map(String::from).collect(),
+            allowed_positions: vec!["C", "LW", "RW", "LD", "RD", "G", "LDD", "RDD", "LLD", "RRD", "LLDD", "RRDD", "CD", "CDD", "LW2", "RW2", "LLW", "RRW"].into_iter().map(String::from).collect(),
             blue_zone_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_zone_faceoff_z), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_zone_faceoff_z), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_zone_faceoff_z)),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_zone_faceoff_z))
             ],
             blue_neutral_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_neutral_faceoff_z), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_neutral_faceoff_z), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_neutral_faceoff_z)),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_neutral_faceoff_z))
             ],
-            center_faceoff_spot: create_faceoff_spot(Point3::new (center_x, 0.0, center_z), width, length),
+            center_faceoff_spot: create_faceoff_spot(Point3::new (center_x, 0.0, center_z)),
             red_neutral_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, red_neutral_faceoff_z), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, red_neutral_faceoff_z), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, red_neutral_faceoff_z)),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, red_neutral_faceoff_z))
             ],
             red_zone_faceoff_spots: [
-                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, red_zone_faceoff_z), width, length),
-                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, red_zone_faceoff_z), width, length)
+                create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, red_zone_faceoff_z)),
+                create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, red_zone_faceoff_z))
             ]
         }
     }
@@ -456,40 +525,6 @@ impl HQMRink {
         }
     }
 }
-
-fn create_faceoff_spot (center_position: Point3<f32>, rink_width: f32, rink_length: f32) -> HQMFaceoffSpot {
-    let mut red_player_positions = HashMap::new();
-    let mut blue_player_positions = HashMap::new();
-
-    let offsets = vec![
-        ("C", Vector3::new (0.0,1.5,2.75)),
-        ("LD", Vector3::new (-2.0,1.5,7.25)),
-            ("RD", Vector3::new (2.0,1.5,7.25)),
-            ("LW", Vector3::new (-5.0,1.5,4.0)),
-            ("RW", Vector3::new (5.0,1.5,4.0)),
-    ];
-    let red_rot = Rotation3::identity();
-    let blue_rot = Rotation3::from_euler_angles(0.0, PI, 0.0);
-    for (s, offset) in offsets {
-        let red_pos = &center_position + &red_rot * &offset;
-        let blue_pos = &center_position + &blue_rot * &offset;
-
-        red_player_positions.insert(String::from (s), (red_pos, red_rot.clone()));
-        blue_player_positions.insert( String::from (s), (blue_pos, blue_rot.clone()));
-    }
-
-    let red_goalie_pos = Point3::new (rink_width / 2.0, 1.5, rink_length - 5.0);
-    let blue_goalie_pos = Point3::new (rink_width / 2.0, 1.5, 5.0);
-    red_player_positions.insert(String::from ("G"), (red_goalie_pos, red_rot.clone()));
-    blue_player_positions.insert(String::from ("G"), (blue_goalie_pos, blue_rot.clone()));
-    HQMFaceoffSpot {
-        center_position,
-        red_player_positions,
-        blue_player_positions
-    }
-}
-
-
 
 #[derive(Debug, Clone)]
 pub(crate) struct HQMBody {
