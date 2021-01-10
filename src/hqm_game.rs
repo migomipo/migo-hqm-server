@@ -409,25 +409,25 @@ impl HQMRink {
                 let mut player_positions = HashMap::new();
 
                 let winger_z = 4.0;
-                let d_z = 7.25;
-                let dd_z = if is_defensive_zone {8.25} else {10.0};
+                let m_z = 7.25;
+                let d_z = if is_defensive_zone {8.25} else {10.0};
                 let (far_left_winger_x, far_left_winger_z) = if is_close_to_left {(-6.5, 3.0)} else {(-10.0, winger_z)};
                 let (far_right_winger_x, far_right_winger_z) = if is_close_to_right {(6.5, 3.0)} else {(10.0, winger_z)};
 
                 let offsets = vec![
                     ("C", Vector3::new (0.0,1.5,2.75)),
-                    ("LD", Vector3::new (-2.0,1.5,d_z)),
-                    ("RD", Vector3::new (2.0,1.5,d_z)),
+                    ("LM", Vector3::new (-2.0, 1.5, m_z)),
+                    ("RM", Vector3::new (2.0, 1.5, m_z)),
                     ("LW", Vector3::new (-5.0,1.5,winger_z)),
                     ("RW", Vector3::new (5.0,1.5,winger_z)),
-                    ("LDD", Vector3::new (-2.0,1.5,dd_z)),
-                    ("RDD", Vector3::new (2.0,1.5,dd_z)),
-                    ("LLD", Vector3::new (if is_close_to_left && is_defensive_zone {-3.0} else {-5.0},1.5,d_z)),
-                    ("RRD", Vector3::new (if is_close_to_right && is_defensive_zone {3.0} else {5.0},1.5,d_z)),
-                    ("LLDD", Vector3::new (if is_close_to_left && is_defensive_zone {-3.0} else {-5.0},1.5,dd_z)),
-                    ("RRDD", Vector3::new (if is_close_to_right && is_defensive_zone {3.0} else {5.0},1.5,dd_z)),
-                    ("CD", Vector3::new (0.0,1.5,d_z)),
-                    ("CDD", Vector3::new (0.0,1.5,dd_z)),
+                    ("LD", Vector3::new (-2.0, 1.5, d_z)),
+                    ("RD", Vector3::new (2.0, 1.5, d_z)),
+                    ("LLM", Vector3::new (if is_close_to_left && is_defensive_zone {-3.0} else {-5.0}, 1.5, m_z)),
+                    ("RRM", Vector3::new (if is_close_to_right && is_defensive_zone {3.0} else {5.0}, 1.5, m_z)),
+                    ("LLD", Vector3::new (if is_close_to_left && is_defensive_zone {-3.0} else {-5.0}, 1.5, d_z)),
+                    ("RRD", Vector3::new (if is_close_to_right && is_defensive_zone {3.0} else {5.0}, 1.5, d_z)),
+                    ("CM", Vector3::new (0.0, 1.5, m_z)),
+                    ("CD", Vector3::new (0.0, 1.5, d_z)),
                     ("LW2", Vector3::new (-6.0,1.5,winger_z)),
                     ("RW2", Vector3::new (6.0,1.5,winger_z)),
                     ("LLW", Vector3::new (far_left_winger_x,1.5,far_left_winger_z)),
@@ -471,7 +471,7 @@ impl HQMRink {
             },
             width,
             length,
-            allowed_positions: vec!["C", "LW", "RW", "LD", "RD", "G", "LDD", "RDD", "LLD", "RRD", "LLDD", "RRDD", "CD", "CDD", "LW2", "RW2", "LLW", "RRW"].into_iter().map(String::from).collect(),
+            allowed_positions: vec!["C", "LW", "RW", "LD", "RD", "G", "LM", "RM",  "LLM", "RRM", "LLD", "RRD", "CM", "CD", "LW2", "RW2", "LLW", "RRW"].into_iter().map(String::from).collect(),
             blue_zone_faceoff_spots: [
                 create_faceoff_spot(Point3::new (left_faceoff_x, 0.0, blue_zone_faceoff_z)),
                 create_faceoff_spot(Point3::new (right_faceoff_x, 0.0, blue_zone_faceoff_z))
