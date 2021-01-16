@@ -224,17 +224,25 @@ pub(crate) struct HQMRinkNet {
 impl HQMRinkNet {
     fn new(pos: Point3<f32>, rot: Matrix3<f32>) -> Self {
 
+        let front_width = 3.0;
+        let back_width = 2.5;
+        let front_half_width = front_width / 2.0;
+        let back_half_width = back_width / 2.0;
+        let height = 1.0;
+        let upper_depth = 0.75;
+        let lower_depth = 1.0;
+
         let (front_upper_left, front_upper_right, front_lower_left, front_lower_right,
             back_upper_left, back_upper_right, back_lower_left, back_lower_right) =
             (
-                &pos + &rot * Vector3::new(-1.5, 1.0, 0.0),
-                &pos + &rot * Vector3::new(1.5, 1.0, 0.0),
-                &pos + &rot * Vector3::new(-1.5, 0.0, 0.0),
-                &pos + &rot * Vector3::new(1.5, 0.0, 0.0),
-                &pos + &rot * Vector3::new(-1.25, 1.0, -0.75),
-                &pos + &rot * Vector3::new(1.25, 1.0, -0.75),
-                &pos + &rot * Vector3::new(-1.25, 0.0, -1.0),
-                &pos + &rot * Vector3::new(1.25, 0.0, -1.0)
+                &pos + &rot * Vector3::new(-front_half_width, height, 0.0),
+                &pos + &rot * Vector3::new(front_half_width, height, 0.0),
+                &pos + &rot * Vector3::new(-front_half_width, 0.0, 0.0),
+                &pos + &rot * Vector3::new(front_half_width, 0.0, 0.0),
+                &pos + &rot * Vector3::new(-back_half_width, height, -upper_depth),
+                &pos + &rot * Vector3::new(back_half_width, height, -upper_depth),
+                &pos + &rot * Vector3::new(-back_half_width, 0.0, -lower_depth),
+                &pos + &rot * Vector3::new(back_half_width, 0.0, -lower_depth)
             );
 
         HQMRinkNet {
