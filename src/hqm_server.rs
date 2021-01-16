@@ -1498,9 +1498,75 @@ fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool 
     false
 }
 
-async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], socket: & UdpSocket, packets: &VecDeque<HQMSavedTick>, write_buf: & mut [u8]) {
+fn send_objects(writer: & mut HQMMessageWriter, game: &HQMGame, packets: &VecDeque<HQMSavedTick>, known_packet: u32) {
+    let current_packets = &packets[0].packets;
 
-    let packets = &packets[0].packets;
+    let old_packets = {
+        let diff = if known_packet == u32::MAX {
+            None
+        } else {
+            game.packet.checked_sub(known_packet)
+        };
+        if let Some(diff) = diff {
+            let index = diff as usize;
+            if index < packets.len() && index < 192 && index > 0 {
+                Some(&packets[index].packets)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    writer.write_u32_aligned(game.packet);
+    writer.write_u32_aligned(known_packet);
+
+    for i in 0..32 {
+        let current_packet = &current_packets[i];
+        let old_packet = old_packets.map(|x| &x[i]);
+        match current_packet {
+            HQMObjectPacket::Puck(puck) => {
+                let old_puck = old_packet.and_then(|x| match x {
+                    HQMObjectPacket::Puck(old_puck) => Some(old_puck),
+                    _ => None
+                });
+                writer.write_bits(1, 1);
+                writer.write_bits(2, 1); // Puck type
+                writer.write_pos(17, puck.pos.0, old_puck.map(|puck| puck.pos.0));
+                writer.write_pos(17, puck.pos.1, old_puck.map(|puck| puck.pos.1));
+                writer.write_pos(17, puck.pos.2, old_puck.map(|puck| puck.pos.2));
+                writer.write_pos(31, puck.rot.0, old_puck.map(|puck| puck.rot.0));
+                writer.write_pos(31, puck.rot.1, old_puck.map(|puck| puck.rot.1));
+            } ,
+            HQMObjectPacket::Skater(skater) => {
+                let old_skater = old_packet.and_then(|x| match x {
+                    HQMObjectPacket::Skater(old_skater) => Some(old_skater),
+                    _ => None
+                });
+                writer.write_bits(1, 1);
+                writer.write_bits(2, 0); // Skater type
+                writer.write_pos(17, skater.pos.0, old_skater.map(|skater| skater.pos.0));
+                writer.write_pos(17, skater.pos.1, old_skater.map(|skater| skater.pos.1));
+                writer.write_pos(17, skater.pos.2, old_skater.map(|skater| skater.pos.2));
+                writer.write_pos(31, skater.rot.0, old_skater.map(|skater| skater.rot.0));
+                writer.write_pos(31, skater.rot.1, old_skater.map(|skater| skater.rot.1));
+                writer.write_pos(13, skater.stick_pos.0, old_skater.map(|skater| skater.stick_pos.0));
+                writer.write_pos(13, skater.stick_pos.1, old_skater.map(|skater| skater.stick_pos.1));
+                writer.write_pos(13, skater.stick_pos.2, old_skater.map(|skater| skater.stick_pos.2));
+                writer.write_pos(25, skater.stick_rot.0, old_skater.map(|skater| skater.stick_rot.0));
+                writer.write_pos(25, skater.stick_rot.1, old_skater.map(|skater| skater.stick_rot.1));
+                writer.write_pos(16, skater.head_rot, old_skater.map(|skater| skater.head_rot));
+                writer.write_pos(16, skater.body_rot, old_skater.map(|skater| skater.body_rot));
+            },
+            HQMObjectPacket::None => {
+                writer.write_bits(1, 0);
+            }
+        }
+    }
+}
+
+async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], socket: & UdpSocket, packets: &VecDeque<HQMSavedTick>, write_buf: & mut [u8]) {
 
     let rules_state =
         if let HQMOffsideStatus::Offside(_) = game.offside_status{
@@ -1572,41 +1638,7 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
                     writer.write_u32_aligned(num);
                 }
 
-                writer.write_u32_aligned(game.packet);
-                writer.write_u32_aligned(player.known_packet);
-
-                for i in 0..32 {
-                    match &packets[i] {
-                        HQMObjectPacket::Puck(puck) => {
-                            writer.write_bits(1, 1);
-                            writer.write_bits(2, 1); // Puck type
-                            writer.write_pos(17, puck.pos.0, None);
-                            writer.write_pos(17, puck.pos.1, None);
-                            writer.write_pos(17, puck.pos.2, None);
-                            writer.write_pos(31, puck.rot.0, None);
-                            writer.write_pos(31, puck.rot.1, None);
-                        } ,
-                        HQMObjectPacket::Skater(skater) => {
-                            writer.write_bits(1, 1);
-                            writer.write_bits(2, 0); // Skater type
-                            writer.write_pos(17, skater.pos.0, None);
-                            writer.write_pos(17, skater.pos.1, None);
-                            writer.write_pos(17, skater.pos.2, None);
-                            writer.write_pos(31, skater.rot.0, None);
-                            writer.write_pos(31, skater.rot.1, None);
-                            writer.write_pos(13, skater.stick_pos.0, None);
-                            writer.write_pos(13, skater.stick_pos.1, None);
-                            writer.write_pos(13, skater.stick_pos.2, None);
-                            writer.write_pos(25, skater.stick_rot.0, None);
-                            writer.write_pos(25, skater.stick_rot.1, None);
-                            writer.write_pos(16, skater.head_rot, None);
-                            writer.write_pos(16, skater.body_rot, None);
-                        },
-                        HQMObjectPacket::None => {
-                            writer.write_bits(1, 0);
-                        }
-                    }
-                }
+                send_objects(& mut writer, game, packets, player.known_packet);
 
                 let remaining_messages = min(player.messages.len() - player.known_msgpos as usize, 15);
 
