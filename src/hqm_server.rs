@@ -1498,6 +1498,84 @@ fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool 
     false
 }
 
+fn send_messages(writer: & mut HQMMessageWriter, player: &HQMConnectedPlayer) {
+    let remaining_messages = min(player.messages.len() - player.known_msgpos as usize, 15);
+
+    writer.write_bits(4, remaining_messages as u32);
+    writer.write_bits(16, player.known_msgpos.into());
+
+    let pos2 = player.known_msgpos as usize;
+
+    for i in pos2..pos2 + remaining_messages {
+        let message = &player.messages[i];
+        match Rc::as_ref(message) {
+            HQMMessage::Chat {
+                player_index,
+                message
+            } => {
+                writer.write_bits(6, 2);
+                writer.write_bits(6, match *player_index {
+                    Some(x)=> x as u32,
+                    None => u32::MAX
+                });
+                let message_bytes = message.as_bytes();
+                let size = min(63, message_bytes.len());
+                writer.write_bits(6, size as u32);
+
+                for i in 0..size {
+                    writer.write_bits(7, message_bytes[i] as u32);
+                }
+            }
+            HQMMessage::Goal {
+                team,
+                goal_player_index,
+                assist_player_index
+            } => {
+                writer.write_bits(6, 1);
+                writer.write_bits(2, team.get_num());
+                writer.write_bits(6, match *goal_player_index {
+                    Some (x) => x as u32,
+                    None => u32::MAX
+                });
+                writer.write_bits(6, match *assist_player_index {
+                    Some (x) => x as u32,
+                    None => u32::MAX
+                });
+            }
+            HQMMessage::PlayerUpdate {
+                player_name,
+                object,
+                player_index,
+                in_server,
+            } => {
+                writer.write_bits(6, 0);
+                writer.write_bits(6, *player_index as u32);
+                writer.write_bits(1, if *in_server { 1 } else { 0 });
+                let (object_index, team_num) = match object {
+                    Some((i, team)) => {
+                        (*i as u32, team.get_num ())
+                    },
+                    None => {
+                        (u32::MAX, u32::MAX)
+                    }
+                };
+                writer.write_bits(2, team_num);
+                writer.write_bits(6, object_index);
+
+                let name_bytes = player_name.as_bytes();
+                for i in 0usize..31 {
+                    let v = if i < name_bytes.len() {
+                        name_bytes[i]
+                    } else {
+                        0
+                    };
+                    writer.write_bits(7, v as u32);
+                }
+            }
+        };
+    }
+}
+
 fn send_objects(writer: & mut HQMMessageWriter, game: &HQMGame, packets: &VecDeque<HQMSavedTick>, known_packet: u32) {
     let current_packets = &packets[0].packets;
 
@@ -1640,81 +1718,7 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
 
                 send_objects(& mut writer, game, packets, player.known_packet);
 
-                let remaining_messages = min(player.messages.len() - player.known_msgpos as usize, 15);
-
-                writer.write_bits(4, remaining_messages as u32);
-                writer.write_bits(16, player.known_msgpos.into());
-
-                let pos2 = player.known_msgpos as usize;
-
-                for i in pos2..pos2 + remaining_messages {
-                    let message = &player.messages[i];
-                    match Rc::as_ref(message) {
-                        HQMMessage::Chat {
-                            player_index,
-                            message
-                        } => {
-                            writer.write_bits(6, 2);
-                            writer.write_bits(6, match *player_index {
-                                Some(x)=> x as u32,
-                                None => u32::MAX
-                            });
-                            let message_bytes = message.as_bytes();
-                            let size = min(63, message_bytes.len());
-                            writer.write_bits(6, size as u32);
-
-                            for i in 0..size {
-                                writer.write_bits(7, message_bytes[i] as u32);
-                            }
-                        }
-                        HQMMessage::Goal {
-                            team,
-                            goal_player_index,
-                            assist_player_index
-                        } => {
-                            writer.write_bits(6, 1);
-                            writer.write_bits(2, team.get_num());
-                            writer.write_bits(6, match *goal_player_index {
-                                Some (x) => x as u32,
-                                None => u32::MAX
-                            });
-                            writer.write_bits(6, match *assist_player_index {
-                                Some (x) => x as u32,
-                                None => u32::MAX
-                            });
-                        }
-                        HQMMessage::PlayerUpdate {
-                            player_name,
-                            object,
-                            player_index,
-                            in_server,
-                        } => {
-                            writer.write_bits(6, 0);
-                            writer.write_bits(6, *player_index as u32);
-                            writer.write_bits(1, if *in_server { 1 } else { 0 });
-                            let (object_index, team_num) = match object {
-                                Some((i, team)) => {
-                                    (*i as u32, team.get_num ())
-                                },
-                                None => {
-                                    (u32::MAX, u32::MAX)
-                                }
-                            };
-                            writer.write_bits(2, team_num);
-                            writer.write_bits(6, object_index);
-
-                            let name_bytes = player_name.as_bytes();
-                            for i in 0usize..31 {
-                                let v = if i < name_bytes.len() {
-                                    name_bytes[i]
-                                } else {
-                                    0
-                                };
-                                writer.write_bits(7, v as u32);
-                            }
-                        }
-                    };
-                }
+                send_messages(& mut writer, player);
             }
             let bytes_written = writer.get_bytes_written();
 
@@ -1722,9 +1726,6 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
             let _ = socket.send_to(slice, player.addr).await;
         }
     }
-
-
-
 
 }
 
