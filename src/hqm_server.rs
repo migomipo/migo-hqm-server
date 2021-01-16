@@ -1498,16 +1498,16 @@ fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool 
     false
 }
 
-fn send_messages(writer: & mut HQMMessageWriter, player: &HQMConnectedPlayer) {
-    let remaining_messages = min(player.messages.len() - player.known_msgpos as usize, 15);
+fn send_messages(writer: & mut HQMMessageWriter, known_msgpos: u16, messages: &[Rc<HQMMessage>]) {
+    let known_msgpos = known_msgpos as usize;
+
+    let remaining_messages = min(messages.len() - known_msgpos, 15);
 
     writer.write_bits(4, remaining_messages as u32);
-    writer.write_bits(16, player.known_msgpos.into());
+    writer.write_bits(16, known_msgpos as u32);
 
-    let pos2 = player.known_msgpos as usize;
+    for message in &messages[known_msgpos..known_msgpos + remaining_messages] {
 
-    for i in pos2..pos2 + remaining_messages {
-        let message = &player.messages[i];
         match Rc::as_ref(message) {
             HQMMessage::Chat {
                 player_index,
@@ -1718,7 +1718,7 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
 
                 send_objects(& mut writer, game, packets, player.known_packet);
 
-                send_messages(& mut writer, player);
+                send_messages(& mut writer, player.known_msgpos, &player.messages);
             }
             let bytes_written = writer.get_bytes_written();
 
