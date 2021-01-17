@@ -501,39 +501,6 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn list_players (& mut self, player_index: usize, first_index: usize) {
-        let mut found = vec![];
-        for player_index in first_index..self.players.len() {
-            if let Some(player) = & self.players[player_index] {
-                found.push((player_index, player.player_name.clone()));
-                if found.len() >= 5 {
-                    break;
-                }
-            }
-        }
-        for (found_player_index, found_player_name) in found {
-            self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
-        }
-    }
-
-    pub(crate) fn search_players (& mut self, player_index: usize, name: &str) {
-        let name = name.to_lowercase();
-        let mut found = vec![];
-        for (player_index, player) in self.players.iter ().enumerate() {
-            if let Some(player) = player {
-                if player.player_name.to_lowercase().contains(&name) {
-                    found.push((player_index, player.player_name.clone()));
-                    if found.len() >= 5 {
-                        break;
-                    }
-                }
-            }
-        }
-        for (found_player_index, found_player_name) in found {
-            self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
-        }
-    }
-
     pub(crate) fn set_icing_rule(& mut self, player_index: usize, rule:&str) {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{

@@ -50,8 +50,10 @@ Commands               | Explanation
 /list *ID*             | Lists up to 5 player IDs, starting from *ID*, which must be a number.
 /search *S*            | Lists up to 5 player IDs of players who have the substring S in their player name.
 /view *ID*             | Enters first person view of player with ID *ID*. If you're on the ice, your player will be removed and you will become a spectator.
+/views *S*             | Searches for player with name *S* and enters first person view of that player if a unique match is found. If multiple matches are found, they are listed instead.
 /restoreview           | Restores first person view.
 /ping *ID*             | Get server-side ping of player with ID *ID*
+/pings *S*             | Searches for player with name *S* and gets server-side ping for that player if a unique match is found. If multiple matches are found, they are listed instead.
 /lefty                 | Makes player left-handed. If done during play, it will only be applied after play has stopped.
 /righty                | Makes player right-handed. If done during play, it will only be applied after play has stopped.
 /rules                 | Shows current offside/icing rule settings.
@@ -83,6 +85,7 @@ Commands                 | Explanation
 /set offside *S*         | Sets offside rule. Allowed values are "off", "on" (delayed offside) and "imm" or "immediate" (immediate offside, no offside warnings).
 /set teamsize *N*        | Sets team size.
 /set teamparity *on/off* | If enabled, players will not be able to join the team that already has more players than the other one.
+/set replay *on/off*     | Enables/disables server-side replays
 /kickall *S*             | Kicks all players with a player name equal to *S* (case-insensitive). % can be used as wildcards at the start and end of *S* to match players with similar names. For example, migo%, %mipo and %gomi% all match MigoMipo.
 /banall *S*              | Same as /kickall, but also IP-bans.
 

@@ -467,32 +467,7 @@ impl HQMServer {
             },
             "view" => {
                 if let Ok(view_player_index) = arg.parse::<usize>() {
-                    if view_player_index < self.players.len() {
-                        if let Some(view_player) = &self.players[view_player_index] {
-                            let view_player_name = view_player.player_name.clone();
-                            if let Some(player) = &mut self.players[player_index] {
-                                if view_player_index != player.view_player_index {
-                                    player.view_player_index = view_player_index;
-                                    if player_index != view_player_index {
-                                        if set_team_internal(player_index, player, &mut self.game.world, &self.config, None).is_some() {
-                                            let msg = HQMMessage::PlayerUpdate {
-                                                player_name: player.player_name.clone(),
-                                                object: None,
-                                                player_index,
-                                                in_server: true
-                                            };
-                                            self.add_global_message(msg, true);
-                                        };
-                                        self.add_directed_server_chat_message(format!("You are now viewing {}", view_player_name), player_index);
-                                    } else {
-                                        self.add_directed_server_chat_message("View has been restored".to_string(), player_index);
-                                    }
-                                }
-                            }
-                        } else {
-                            self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
-                        }
-                    }
+                    self.view(view_player_index, player_index);
                 }
             },
             "restoreview" => {
@@ -505,41 +480,35 @@ impl HQMServer {
             },
             "ping" => {
                 if let Ok(ping_player_index) = arg.parse::<usize>() {
-                    if ping_player_index < self.players.len() {
-                        if let Some(ping_player) = & self.players[ping_player_index] {
-                            if ping_player.last_ping.is_empty() {
-                                let msg = format!("No ping values found for {}", ping_player.player_name);
-                                self.add_directed_server_chat_message(msg, player_index);
-                            } else {
-                                let n = ping_player.last_ping.len() as f32;
-                                let mut min = f32::INFINITY;
-                                let mut max = f32::NEG_INFINITY;
-                                let mut sum = 0f32;
-                                for i in ping_player.last_ping.iter() {
-                                    min = min.min(*i);
-                                    max = max.max(*i);
-                                    sum += *i;
-                                }
-                                let avg = sum / n;
-                                let dev = {
-                                    let mut s = 0f32;
-                                    for i in ping_player.last_ping.iter() {
-                                        s += (*i - avg).powi(2);
-                                    }
-                                    (s / n).sqrt()
-                                };
-
-                                let msg1 = format!("{} ping: avg {:.0} ms", ping_player.player_name, (avg * 1000f32));
-                                let msg2 = format!("min {:.0} ms, max {:.0} ms, std.dev {:.1}", (min * 1000f32), (max * 1000f32), (dev * 1000f32));
-                                self.add_directed_server_chat_message(msg1, player_index);
-                                self.add_directed_server_chat_message(msg2, player_index);
-                            }
-                        } else {
-                            self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
-                        }
-                    }
+                    self.ping(ping_player_index, player_index);
                 }
             },
+            "pings" => {
+                let matches = self.player_search(arg);
+                if matches.is_empty() {
+                    self.add_directed_server_chat_message("No matches found".to_string(), player_index);
+                } else if matches.len() > 1 {
+                    self.add_directed_server_chat_message("Multiple matches found, use /ping X".to_string(), player_index);
+                    for (found_player_index, found_player_name) in matches.into_iter().take(5) {
+                        self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
+                    }
+                } else {
+                    self.ping(matches[0].0, player_index);
+                }
+            },
+            "views" => {
+                let matches = self.player_search(arg);
+                if matches.is_empty() {
+                    self.add_directed_server_chat_message("No matches found".to_string(), player_index);
+                } else if matches.len() > 1 {
+                    self.add_directed_server_chat_message("Multiple matches found, use /view X".to_string(), player_index);
+                    for (found_player_index, found_player_name) in matches.into_iter().take(5) {
+                        self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
+                    }
+                } else {
+                    self.view(matches[0].0, player_index);
+                }
+            }
             "icing" => {
                 self.set_icing_rule (player_index, arg);
             },
@@ -590,6 +559,113 @@ impl HQMServer {
             _ => {}, // matches have to be exhaustive
         }
 
+    }
+
+    fn list_players (& mut self, player_index: usize, first_index: usize) {
+        let mut found = vec![];
+        for player_index in first_index..self.players.len() {
+            if let Some(player) = & self.players[player_index] {
+                found.push((player_index, player.player_name.clone()));
+                if found.len() >= 5 {
+                    break;
+                }
+            }
+        }
+        for (found_player_index, found_player_name) in found {
+            self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
+        }
+    }
+
+    fn search_players (& mut self, player_index: usize, name: &str) {
+        let matches = self.player_search(name);
+        if matches.is_empty() {
+            self.add_directed_server_chat_message("No matches found".to_string(), player_index);
+            return;
+        }
+        for (found_player_index, found_player_name) in matches.into_iter().take(5) {
+            self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
+        }
+    }
+
+    fn view (& mut self, view_player_index: usize, player_index: usize) {
+        if view_player_index < self.players.len() {
+            if let Some(view_player) = &self.players[view_player_index] {
+                let view_player_name = view_player.player_name.clone();
+                if let Some(player) = &mut self.players[player_index] {
+                    if view_player_index != player.view_player_index {
+                        player.view_player_index = view_player_index;
+                        if player_index != view_player_index {
+                            if set_team_internal(player_index, player, &mut self.game.world, &self.config, None).is_some() {
+                                let msg = HQMMessage::PlayerUpdate {
+                                    player_name: player.player_name.clone(),
+                                    object: None,
+                                    player_index,
+                                    in_server: true
+                                };
+                                self.add_global_message(msg, true);
+                            };
+                            self.add_directed_server_chat_message(format!("You are now viewing {}", view_player_name), player_index);
+                        } else {
+                            self.add_directed_server_chat_message("View has been restored".to_string(), player_index);
+                        }
+                    }
+                }
+            } else {
+                self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
+            }
+        }
+    }
+
+    fn ping (& mut self, ping_player_index: usize, player_index: usize) {
+        if ping_player_index < self.players.len() {
+            if let Some(ping_player) = & self.players[ping_player_index] {
+                if ping_player.last_ping.is_empty() {
+                    let msg = format!("No ping values found for {}", ping_player.player_name);
+                    self.add_directed_server_chat_message(msg, player_index);
+                } else {
+                    let n = ping_player.last_ping.len() as f32;
+                    let mut min = f32::INFINITY;
+                    let mut max = f32::NEG_INFINITY;
+                    let mut sum = 0f32;
+                    for i in ping_player.last_ping.iter() {
+                        min = min.min(*i);
+                        max = max.max(*i);
+                        sum += *i;
+                    }
+                    let avg = sum / n;
+                    let dev = {
+                        let mut s = 0f32;
+                        for i in ping_player.last_ping.iter() {
+                            s += (*i - avg).powi(2);
+                        }
+                        (s / n).sqrt()
+                    };
+
+                    let msg1 = format!("{} ping: avg {:.0} ms", ping_player.player_name, (avg * 1000f32));
+                    let msg2 = format!("min {:.0} ms, max {:.0} ms, std.dev {:.1}", (min * 1000f32), (max * 1000f32), (dev * 1000f32));
+                    self.add_directed_server_chat_message(msg1, player_index);
+                    self.add_directed_server_chat_message(msg2, player_index);
+                }
+            } else {
+                self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
+            }
+        }
+    }
+
+    pub(crate) fn player_search(&self, name: &str) -> Vec<(usize, String)> {
+        let name = name.to_lowercase();
+        let mut found = vec![];
+        for (player_index, player) in self.players.iter ().enumerate() {
+            if let Some(player) = player {
+                if player.player_name.to_lowercase().contains(&name) {
+                    found.push((player_index, player.player_name.clone()));
+                    if found.len() >= 5 {
+                        break;
+                    }
+                }
+            }
+        }
+        found
     }
 
     fn process_message(&mut self, bytes: Vec<u8>, player_index: usize) {
