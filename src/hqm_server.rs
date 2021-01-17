@@ -1774,7 +1774,8 @@ fn write_replay (game: & mut HQMGame, packets: &VecDeque<HQMSavedTick>, write_bu
                       else {0});
     writer.write_bits(8, game.period);
 
-    write_objects(& mut writer, game, packets, game.packet.wrapping_sub(1));
+    write_objects(& mut writer, game, packets, game.replay_last_packet);
+    game.replay_last_packet = game.packet;
 
     let remaining_messages = game.global_messages.len() - game.replay_msg_pos;
 

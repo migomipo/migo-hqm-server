@@ -109,6 +109,7 @@ pub(crate) struct HQMGame {
     pub(crate) global_messages: Vec<Rc<HQMMessage>>,
     pub(crate) replay_data: Vec<u8>,
     pub(crate) replay_msg_pos: usize,
+    pub(crate) replay_last_packet: u32,
     pub(crate) icing_status: HQMIcingStatus,
     pub(crate) offside_status: HQMOffsideStatus,
     pub(crate) next_faceoff_spot: HQMFaceoffSpot,
@@ -147,6 +148,7 @@ impl HQMGame {
                 Vec::new()
             },
             replay_msg_pos: 0,
+            replay_last_packet: u32::MAX,
             icing_status: HQMIcingStatus::No,
             offside_status: HQMOffsideStatus::InNeutralZone,
             next_faceoff_spot: mid_faceoff,
