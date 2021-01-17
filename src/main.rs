@@ -51,6 +51,12 @@ async fn main() -> std::io::Result<()> {
                 _ => HQMServerMode::Match
             }
         });
+
+        let replays_enabled = match server_section.get("replays") {
+            Some(s) => s.eq_ignore_ascii_case("true"),
+            None => false
+        };
+
         let cheats_enabled = match server_section.get("cheats_enabled") {
             Some(s) => s.eq_ignore_ascii_case("true"),
             None => false
@@ -118,6 +124,7 @@ async fn main() -> std::io::Result<()> {
             force_team_size_parity,
             limit_jump_speed,
             cheats_enabled,
+            replays_enabled,
             spawn_point,
             cylinder_puck_post_collision,
 

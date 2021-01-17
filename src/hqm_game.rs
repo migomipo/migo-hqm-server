@@ -7,6 +7,8 @@ use crate::hqm_parse::{HQMSkaterPacket, HQMPuckPacket};
 use crate::hqm_server::HQMServerConfiguration;
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
+use std::rc::Rc;
+use chrono::{DateTime, Utc};
 
 pub(crate) struct HQMGameWorld {
     pub(crate) objects: Vec<HQMGameObject>,
@@ -102,8 +104,11 @@ impl HQMOffsideStatus {
 }
 
 pub(crate) struct HQMGame {
-
+    pub(crate) start_time: DateTime<Utc>,
     pub(crate) state: HQMGameState,
+    pub(crate) global_messages: Vec<Rc<HQMMessage>>,
+    pub(crate) replay_data: Vec<u8>,
+    pub(crate) replay_msg_pos: usize,
     pub(crate) icing_status: HQMIcingStatus,
     pub(crate) offside_status: HQMOffsideStatus,
     pub(crate) next_faceoff_spot: HQMFaceoffSpot,
@@ -133,7 +138,15 @@ impl HQMGame {
         let mid_faceoff = rink.center_faceoff_spot.clone();
 
         HQMGame {
+            start_time: Utc::now(),
             state:HQMGameState::Warmup,
+            global_messages: vec![],
+            replay_data: if config.replays_enabled {
+                Vec::with_capacity(64 * 1024 * 1024)
+            } else {
+                Vec::new()
+            },
+            replay_msg_pos: 0,
             icing_status: HQMIcingStatus::No,
             offside_status: HQMOffsideStatus::InNeutralZone,
             next_faceoff_spot: mid_faceoff,

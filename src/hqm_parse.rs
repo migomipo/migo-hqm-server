@@ -142,13 +142,14 @@ fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(b: u8, v: &nalgebra::M
     res
 }
 
-
+#[derive(Debug)]
 pub enum HQMObjectPacket {
     None,
     Puck(HQMPuckPacket),
     Skater(HQMSkaterPacket)
 }
 
+#[derive(Debug)]
 pub struct HQMSkaterPacket {
     pub pos: (u32, u32, u32),
     pub rot: (u32, u32),
@@ -158,6 +159,7 @@ pub struct HQMSkaterPacket {
     pub body_rot: u32,
 }
 
+#[derive(Debug)]
 pub struct HQMPuckPacket {
     pub pos: (u32, u32, u32),
     pub rot: (u32, u32),
@@ -173,6 +175,10 @@ impl<'a> HQMMessageWriter<'a> {
 
     pub fn get_bytes_written(&self) -> usize {
         return if self.bit_pos > 0 { self.pos + 1 } else { self.pos };
+    }
+
+    pub fn get_pos(&self) -> usize {
+        self.pos
     }
 
     pub fn write_byte_aligned(&mut self, v: u8) {
@@ -278,11 +284,16 @@ impl<'a> HQMMessageWriter<'a> {
 
 pub struct HQMMessageReader<'a> {
     buf: &'a [u8],
-    pos: usize,
-    bit_pos: u8,
+    pub(crate) pos: usize,
+    pub(crate) bit_pos: u8,
 }
 
 impl<'a> HQMMessageReader<'a> {
+
+    #[allow(dead_code)]
+    pub fn get_pos(&self) -> usize {
+        self.pos
+    }
 
     fn safe_get_byte (&self, pos: usize) -> u8 {
         if pos < self.buf.len () {
@@ -397,11 +408,17 @@ impl<'a> HQMMessageReader<'a> {
         return res;
     }
 
-    fn align(&mut self) {
+    pub fn align(&mut self) {
         if self.bit_pos > 0 {
             self.bit_pos = 0;
             self.pos += 1;
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn next(&mut self) {
+        self.pos += 1;
+        self.bit_pos = 0;
     }
 
     pub fn new(buf: &'a [u8]) -> Self {

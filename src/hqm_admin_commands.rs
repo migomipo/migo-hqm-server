@@ -619,6 +619,37 @@ impl HQMServer {
         }
     }
 
+    pub(crate) fn set_replay (& mut self, player_index: usize, rule:&str) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+                match rule {
+                    "on" => {
+                        self.config.replays_enabled = true;
+                        if self.game.replay_data.len() < 64 * 1024 * 1024 {
+                            self.game.replay_data.reserve((64 * 1024 * 1024) - self.game.replay_data.len())
+                        }
+
+                        info!("{} ({}) enabled replays",player.player_name, player_index);
+                        let msg = format!("Replays enabled by {}", player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    },
+                    "off" => {
+                        self.config.replays_enabled = false;
+
+                        info!("{} ({}) disabled replays",player.player_name, player_index);
+                        let msg = format!("Replays disabled by {}", player.player_name);
+
+                        self.add_server_chat_message(msg);
+                    }
+                    _ => {}
+                }
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
+
     pub(crate) fn set_team_parity(& mut self, player_index: usize, rule:&str) {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{

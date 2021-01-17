@@ -20,6 +20,9 @@ use std::f32::consts::{PI, FRAC_PI_2};
 
 use std::net::IpAddr;
 use std::error::Error;
+use tokio::io::AsyncWriteExt;
+use tokio::fs::File;
+use std::path::PathBuf;
 
 const GAME_HEADER: &[u8] = b"Hock";
 
@@ -41,7 +44,6 @@ pub(crate) struct HQMServer {
     pub(crate) allow_join: bool,
     pub(crate) config: HQMServerConfiguration,
     pub(crate) game: HQMGame,
-    pub(crate) global_messages: Vec<Rc<HQMMessage>>,
     pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
     game_alloc: u32,
     pub(crate) is_muted:bool,
@@ -185,7 +187,7 @@ impl HQMServer {
         player.known_packet = packet;
         player.input = input;
         player.game_id = current_game_id;
-        player.known_msgpos = parser.read_u16_aligned();
+        player.known_msgpos = parser.read_u16_aligned() as usize;
 
         let has_chat_msg = parser.read_bits(1) == 1;
         if has_chat_msg {
@@ -415,6 +417,11 @@ impl HQMServer {
                         "teamparity" => {
                             if let Some(arg) = args.get(1) {
                                 self.set_team_parity(player_index, arg);
+                            }
+                        },
+                        "replay" => {
+                            if let Some(arg) = args.get(1) {
+                                self.set_replay(player_index, arg);
                             }
                         }
                         _ => {}
@@ -675,7 +682,7 @@ impl HQMServer {
 
                 self.add_global_message(update, true);
 
-                let mut messages = self.global_messages.clone();
+                let mut messages = self.game.global_messages.clone();
                 for welcome_msg in self.config.welcome.iter() {
                     messages.push(Rc::new(HQMMessage::Chat {
                         player_index: None,
@@ -777,7 +784,7 @@ impl HQMServer {
     pub(crate) fn add_global_message(&mut self, message: HQMMessage, persistent: bool) {
         let rc = Rc::new(message);
         if persistent {
-            self.global_messages.push(rc.clone());
+            self.game.global_messages.push(rc.clone());
         }
         for player in self.players.iter_mut() {
             match player {
@@ -939,6 +946,9 @@ impl HQMServer {
             self.game.game_step = self.game.game_step.wrapping_add(1);
 
             send_updates(&self.game, & self.players, socket, &self.saved_ticks, & mut write_buf).await;
+            if self.config.replays_enabled {
+                write_replay(& mut self.game, &self.saved_ticks, & mut write_buf);
+            }
         } else if self.game.active {
             info!("Game {} abandoned", self.game.game_id);
             self.new_game();
@@ -1158,10 +1168,44 @@ impl HQMServer {
 
 
     pub(crate) fn new_game(&mut self) {
-        self.game = HQMGame::new(self.game_alloc, &self.config);
+
+        let old_game = std::mem::replace(& mut self.game, HQMGame::new(self.game_alloc, &self.config));
+
+        if self.config.replays_enabled && old_game.period != 0 {
+            let time = old_game.start_time.format("%Y-%m-%dT%H%M%S").to_string();
+            let file_name = format!("{}.{}.hrp", self.config.server_name, time);
+            let replay_data = old_game.replay_data;
+
+            let game_id = old_game.game_id;
+
+            tokio::spawn(async move {
+                if tokio::fs::create_dir_all("replays").await.is_err() {
+                    return;
+                };
+                let path: PathBuf = ["replays", &file_name].iter().collect();
+
+                let mut file_handle = match File::create(path).await {
+                    Ok(file) => file,
+                    Err(e) => {
+                        println!("{:?}", e);
+                        return;
+                    }
+                };
+
+                let size = replay_data.len() as u32;
+
+                let _x = file_handle.write_all(&0u32.to_le_bytes()).await;
+                let _x = file_handle.write_all(&size.to_le_bytes()).await;
+                let _x = file_handle.write_all(&replay_data).await;
+                let _x = file_handle.sync_all().await;
+
+                info!("Replay of game {} saved as {}", game_id, file_name);
+            });
+        }
+
         info!("New game {} started", self.game.game_id);
         self.game_alloc += 1;
-        self.global_messages.clear();
+
         self.saved_ticks.clear();
 
         let puck_line_start= self.game.world.rink.width / 2.0 - 0.4 * ((self.config.warmup_pucks - 1) as f32);
@@ -1466,7 +1510,6 @@ impl HQMServer {
             ban_list: HashSet::new(),
             allow_join:true,
             game: HQMGame::new(1, &config),
-            global_messages: vec![],
             saved_ticks: VecDeque::with_capacity(256),
             game_alloc: 1,
             is_muted:false,
@@ -1498,85 +1541,77 @@ fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool 
     false
 }
 
-fn send_messages(writer: & mut HQMMessageWriter, known_msgpos: u16, messages: &[Rc<HQMMessage>]) {
-    let known_msgpos = known_msgpos as usize;
+fn write_message(writer: & mut HQMMessageWriter, message: &HQMMessage) {
+    match message {
+        HQMMessage::Chat {
+            player_index,
+            message
+        } => {
+            writer.write_bits(6, 2);
+            writer.write_bits(6, match *player_index {
+                Some(x)=> x as u32,
+                None => u32::MAX
+            });
+            let message_bytes = message.as_bytes();
+            let size = min(63, message_bytes.len());
+            writer.write_bits(6, size as u32);
 
-    let remaining_messages = min(messages.len() - known_msgpos, 15);
-
-    writer.write_bits(4, remaining_messages as u32);
-    writer.write_bits(16, known_msgpos as u32);
-
-    for message in &messages[known_msgpos..known_msgpos + remaining_messages] {
-
-        match Rc::as_ref(message) {
-            HQMMessage::Chat {
-                player_index,
-                message
-            } => {
-                writer.write_bits(6, 2);
-                writer.write_bits(6, match *player_index {
-                    Some(x)=> x as u32,
-                    None => u32::MAX
-                });
-                let message_bytes = message.as_bytes();
-                let size = min(63, message_bytes.len());
-                writer.write_bits(6, size as u32);
-
-                for i in 0..size {
-                    writer.write_bits(7, message_bytes[i] as u32);
+            for i in 0..size {
+                writer.write_bits(7, message_bytes[i] as u32);
+            }
+        }
+        HQMMessage::Goal {
+            team,
+            goal_player_index,
+            assist_player_index
+        } => {
+            writer.write_bits(6, 1);
+            writer.write_bits(2, team.get_num());
+            writer.write_bits(6, match *goal_player_index {
+                Some (x) => x as u32,
+                None => u32::MAX
+            });
+            writer.write_bits(6, match *assist_player_index {
+                Some (x) => x as u32,
+                None => u32::MAX
+            });
+        }
+        HQMMessage::PlayerUpdate {
+            player_name,
+            object,
+            player_index,
+            in_server,
+        } => {
+            writer.write_bits(6, 0);
+            writer.write_bits(6, *player_index as u32);
+            writer.write_bits(1, if *in_server { 1 } else { 0 });
+            let (object_index, team_num) = match object {
+                Some((i, team)) => {
+                    (*i as u32, team.get_num ())
+                },
+                None => {
+                    (u32::MAX, u32::MAX)
                 }
-            }
-            HQMMessage::Goal {
-                team,
-                goal_player_index,
-                assist_player_index
-            } => {
-                writer.write_bits(6, 1);
-                writer.write_bits(2, team.get_num());
-                writer.write_bits(6, match *goal_player_index {
-                    Some (x) => x as u32,
-                    None => u32::MAX
-                });
-                writer.write_bits(6, match *assist_player_index {
-                    Some (x) => x as u32,
-                    None => u32::MAX
-                });
-            }
-            HQMMessage::PlayerUpdate {
-                player_name,
-                object,
-                player_index,
-                in_server,
-            } => {
-                writer.write_bits(6, 0);
-                writer.write_bits(6, *player_index as u32);
-                writer.write_bits(1, if *in_server { 1 } else { 0 });
-                let (object_index, team_num) = match object {
-                    Some((i, team)) => {
-                        (*i as u32, team.get_num ())
-                    },
-                    None => {
-                        (u32::MAX, u32::MAX)
-                    }
+            };
+            writer.write_bits(2, team_num);
+            writer.write_bits(6, object_index);
+
+            let name_bytes = player_name.as_bytes();
+            for i in 0usize..31 {
+                let v = if i < name_bytes.len() {
+                    name_bytes[i]
+                } else {
+                    0
                 };
-                writer.write_bits(2, team_num);
-                writer.write_bits(6, object_index);
-
-                let name_bytes = player_name.as_bytes();
-                for i in 0usize..31 {
-                    let v = if i < name_bytes.len() {
-                        name_bytes[i]
-                    } else {
-                        0
-                    };
-                    writer.write_bits(7, v as u32);
-                }
+                writer.write_bits(7, v as u32);
             }
-        };
-    }
+        }
+    };
 }
 
-fn send_objects(writer: & mut HQMMessageWriter, game: &HQMGame, packets: &VecDeque<HQMSavedTick>, known_packet: u32) {
+
+
+fn write_objects(writer: & mut HQMMessageWriter, game: &HQMGame, packets: &VecDeque<HQMSavedTick>, known_packet: u32) {
     let current_packets = &packets[0].packets;
 
     let old_packets = {
@@ -1642,6 +1677,44 @@ fn send_objects(writer: & mut HQMMessageWriter, game: &HQMGame, packets: &VecDeq
             }
         }
     }
+}
+
+fn write_replay (game: & mut HQMGame, packets: &VecDeque<HQMSavedTick>, write_buf: & mut [u8]) {
+    let mut writer = HQMMessageWriter::new(write_buf);
+
+    writer.write_byte_aligned(5);
+    writer.write_bits(1, match game.game_over {
+        true => 1,
+        false => 0
+    });
+    writer.write_bits(8, game.red_score);
+    writer.write_bits(8, game.blue_score);
+    writer.write_bits(16, game.time);
+
+    writer.write_bits(16,
+                      if game.is_intermission_goal {
+                          game.time_break
+                      }
+                      else {0});
+    writer.write_bits(8, game.period);
+
+    write_objects(& mut writer, game, packets, game.packet.wrapping_sub(1));
+
+    let remaining_messages = game.global_messages.len() - game.replay_msg_pos;
+
+    writer.write_bits(16, remaining_messages as u32);
+    writer.write_bits(16, game.replay_msg_pos as u32);
+
+    for message in &game.global_messages[game.replay_msg_pos..game.global_messages.len()] {
+        write_message(& mut writer, Rc::as_ref(message));
+    }
+    game.replay_msg_pos = game.global_messages.len();
+
+    let pos = writer.get_pos();
+
+    let slice = &write_buf[0..pos+1];
+
+    game.replay_data.extend_from_slice(slice);
 }
 
 async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], socket: & UdpSocket, packets: &VecDeque<HQMSavedTick>, write_buf: & mut [u8]) {
@@ -1716,9 +1789,16 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
                     writer.write_u32_aligned(num);
                 }
 
-                send_objects(& mut writer, game, packets, player.known_packet);
+                write_objects(& mut writer, game, packets, player.known_packet);
 
-                send_messages(& mut writer, player.known_msgpos, &player.messages);
+                let remaining_messages = min(player.messages.len() - player.known_msgpos, 15);
+
+                writer.write_bits(4, remaining_messages as u32);
+                writer.write_bits(16, player.known_msgpos as u32);
+
+                for message in &player.messages[player.known_msgpos..player.known_msgpos + remaining_messages] {
+                    write_message(& mut writer, Rc::as_ref(message));
+                }
             }
             let bytes_written = writer.get_bytes_written();
 
@@ -1853,7 +1933,7 @@ pub(crate) struct HQMConnectedPlayer {
     game_id: u32,
     input: HQMPlayerInput,
     known_packet: u32,
-    known_msgpos: u16,
+    known_msgpos: usize,
     chat_rep: Option<u8>,
     messages: Vec<Rc<HQMMessage>>,
     inactivity: u32,
@@ -1963,6 +2043,8 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) limit_jump_speed: bool,
 
     pub(crate) cheats_enabled: bool,
+
+    pub(crate) replays_enabled: bool,
 
     pub(crate) spawn_point: HQMSpawnPoint,
     pub(crate) cylinder_puck_post_collision: bool
