@@ -1978,7 +1978,15 @@ fn get_player_name(bytes: Vec<u8>) -> Option<String> {
         None => &bytes[..]
     }.to_vec();
     return match String::from_utf8(bytes) {
-        Ok(s) => Some(s),
+        Ok(s) => {
+            let s = s.trim();
+            let s = if s.is_empty() {
+                "Noname"
+            } else {
+                s
+            };
+            Some(String::from(s))
+        } ,
         Err(_) => None
     };
 }
