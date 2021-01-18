@@ -431,6 +431,7 @@ impl HQMServer {
             if let Some(player) = & self.players[player_index] {
                 if player.is_admin{
                     self.game.time_break = 5*100;
+                    self.game.paused = false; // Unpause if it's paused as well
 
                     let msg = format!("Faceoff initiated by {}",player.player_name);
                     info!("{} ({}) initiated faceoff",player.player_name, player_index);
