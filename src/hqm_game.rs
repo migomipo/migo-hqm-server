@@ -450,7 +450,7 @@ impl HQMRink {
                 let (far_right_winger_x, far_right_winger_z) = if is_close_to_right {(6.5, 3.0)} else {(10.0, winger_z)};
 
                 let offsets = vec![
-                    ("C", Vector3::new (0.0,1.5,2.5)),
+                    ("C", Vector3::new (0.0,1.5,2.75)),
                     ("LM", Vector3::new (-2.0, 1.5, m_z)),
                     ("RM", Vector3::new (2.0, 1.5, m_z)),
                     ("LW", Vector3::new (-5.0,1.5,winger_z)),
