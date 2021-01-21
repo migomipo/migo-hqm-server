@@ -25,7 +25,6 @@ async fn main() -> std::io::Result<()> {
         "config.ini"
     };
 
-
     // Load configuration (if exists)
     if Path::new(config_path).exists() {
 
@@ -105,6 +104,13 @@ async fn main() -> std::io::Result<()> {
             _ => HQMSpawnPoint::Center
         });
 
+        // Physics
+        let physics_section = conf.section(Some("Physics")).unwrap();
+
+        let player_accel: f32 = physics_section.get("player_acceleration").map_or(0.000208333f32, |x| x.parse::<f32>().unwrap());
+        let player_decel: f32 = physics_section.get("player_deceleration").map_or(0.000555555f32, |x| x.parse::<f32>().unwrap());
+        let puck_to_ice_fric: f32 = physics_section.get("puck_to_ice_linear_friction").map_or(0.05, |x| x.parse::<f32>().unwrap());
+
         let config = HQMServerConfiguration {
             server_name,
             port: server_port,
@@ -114,8 +120,8 @@ async fn main() -> std::io::Result<()> {
 
             password: server_password,
 
-            time_period: rules_time_period, 
-            time_warmup: rules_time_warmup, 
+            time_period: rules_time_period,
+            time_warmup: rules_time_warmup,
             time_break: rule_time_break,
             time_intermission: rule_time_intermission,
             icing,
@@ -130,7 +136,9 @@ async fn main() -> std::io::Result<()> {
 
             welcome: welcome_str,
             mode,
-
+            player_acceleration: player_accel,
+            player_deceleration: player_decel,
+            puck_to_ice_linear_friction: puck_to_ice_fric
         };
 
         let file_appender = tracing_appender::rolling::daily("log", log_name);

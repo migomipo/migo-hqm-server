@@ -16,6 +16,13 @@ pub(crate) struct HQMGameWorld {
     pub(crate) rink: HQMRink,
     pub(crate) gravity: f32,
     pub(crate) limit_jump_speed: bool,
+    pub(crate) physics_config: HQMPhysicsConfig
+}
+
+pub(crate) struct HQMPhysicsConfig {
+    pub(crate) player_acceleration: f32,
+    pub(crate) player_deceleration: f32,
+    pub(crate) puck_to_ice_linear_friction: f32,
 }
 
 impl HQMGameWorld {
@@ -157,7 +164,12 @@ impl HQMGame {
                 puck_slots: config.warmup_pucks,
                 rink,
                 gravity: 0.000680555,
-                limit_jump_speed: config.limit_jump_speed
+                limit_jump_speed: config.limit_jump_speed,
+                physics_config: HQMPhysicsConfig {
+                    player_acceleration: config.player_acceleration,
+                    player_deceleration: config.player_deceleration,
+                    puck_to_ice_linear_friction: config.puck_to_ice_linear_friction
+                }
             },
             red_score: 0,
             blue_score: 0,
@@ -438,7 +450,7 @@ impl HQMRink {
                 let (far_right_winger_x, far_right_winger_z) = if is_close_to_right {(6.5, 3.0)} else {(10.0, winger_z)};
 
                 let offsets = vec![
-                    ("C", Vector3::new (0.0,1.5,2.75)),
+                    ("C", Vector3::new (0.0,1.5,2.5)),
                     ("LM", Vector3::new (-2.0, 1.5, m_z)),
                     ("RM", Vector3::new (2.0, 1.5, m_z)),
                     ("LW", Vector3::new (-5.0,1.5,winger_z)),

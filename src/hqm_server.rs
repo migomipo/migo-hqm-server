@@ -2132,5 +2132,9 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) replays_enabled: bool,
 
     pub(crate) spawn_point: HQMSpawnPoint,
-    pub(crate) cylinder_puck_post_collision: bool
+    pub(crate) cylinder_puck_post_collision: bool,
+
+    pub(crate) player_acceleration: f32,
+    pub(crate) player_deceleration: f32,
+    pub(crate) puck_to_ice_linear_friction: f32
 }
