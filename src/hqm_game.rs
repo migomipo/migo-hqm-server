@@ -4,7 +4,7 @@ use std::fmt;
 use crate::hqm_parse;
 use crate::hqm_parse::{HQMSkaterPacket, HQMPuckPacket};
 
-use crate::hqm_server::HQMServerConfiguration;
+use crate::hqm_server::{HQMServerConfiguration, HQMSavedTick};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
 use std::rc::Rc;
@@ -106,10 +106,12 @@ impl HQMOffsideStatus {
 pub(crate) struct HQMGame {
     pub(crate) start_time: DateTime<Utc>,
     pub(crate) state: HQMGameState,
-    pub(crate) global_messages: Vec<Rc<HQMMessage>>,
+    pub(crate) persistent_messages: Vec<Rc<HQMMessage>>,
     pub(crate) replay_data: Vec<u8>,
     pub(crate) replay_msg_pos: usize,
     pub(crate) replay_last_packet: u32,
+    pub(crate) replay_messages: Vec<Rc<HQMMessage>>,
+    pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
     pub(crate) icing_status: HQMIcingStatus,
     pub(crate) offside_status: HQMOffsideStatus,
     pub(crate) next_faceoff_spot: HQMFaceoffSpot,
@@ -141,7 +143,7 @@ impl HQMGame {
         HQMGame {
             start_time: Utc::now(),
             state:HQMGameState::Warmup,
-            global_messages: vec![],
+            persistent_messages: vec![],
             replay_data: if config.replays_enabled {
                 Vec::with_capacity(64 * 1024 * 1024)
             } else {
@@ -149,6 +151,8 @@ impl HQMGame {
             },
             replay_msg_pos: 0,
             replay_last_packet: u32::MAX,
+            replay_messages: vec![],
+            saved_ticks: VecDeque::with_capacity(256),
             icing_status: HQMIcingStatus::No,
             offside_status: HQMOffsideStatus::InNeutralZone,
             next_faceoff_spot: mid_faceoff,

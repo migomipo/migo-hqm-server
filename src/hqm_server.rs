@@ -44,7 +44,6 @@ pub(crate) struct HQMServer {
     pub(crate) allow_join: bool,
     pub(crate) config: HQMServerConfiguration,
     pub(crate) game: HQMGame,
-    pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
     game_alloc: u32,
     pub(crate) is_muted:bool,
 }
@@ -174,7 +173,7 @@ impl HQMServer {
             if let Some(diff) = self.game.packet.checked_sub(packet) {
                 let diff = diff as usize;
                 let t1 = Instant::now();
-                if let Some (t2) = self.saved_ticks.get(diff).map(|x| x.time) {
+                if let Some (t2) = self.game.saved_ticks.get(diff).map(|x| x.time) {
                     if let Some(duration) = t1.checked_duration_since(t2) {
                         player.last_ping.truncate(100 - 1);
                         player.last_ping.push_front(duration.as_secs_f32());
@@ -758,7 +757,7 @@ impl HQMServer {
 
                 self.add_global_message(update, true);
 
-                let mut messages = self.game.global_messages.clone();
+                let mut messages = self.game.persistent_messages.clone();
                 for welcome_msg in self.config.welcome.iter() {
                     messages.push(Rc::new(HQMMessage::Chat {
                         player_index: None,
@@ -859,8 +858,9 @@ impl HQMServer {
 
     pub(crate) fn add_global_message(&mut self, message: HQMMessage, persistent: bool) {
         let rc = Rc::new(message);
+        self.game.replay_messages.push(rc.clone());
         if persistent {
-            self.game.global_messages.push(rc.clone());
+            self.game.persistent_messages.push(rc.clone());
         }
         for player in self.players.iter_mut() {
             match player {
@@ -1012,8 +1012,8 @@ impl HQMServer {
             });
 
             let mut write_buf = vec![0u8; 4096];
-            self.saved_ticks.truncate(self.saved_ticks.capacity() - 1);
-            self.saved_ticks.push_front(HQMSavedTick {
+            self.game.saved_ticks.truncate(self.game.saved_ticks.capacity() - 1);
+            self.game.saved_ticks.push_front(HQMSavedTick {
                 packets,
                 time: Instant::now()
             });
@@ -1021,9 +1021,9 @@ impl HQMServer {
             self.game.packet = self.game.packet.wrapping_add(1);
             self.game.game_step = self.game.game_step.wrapping_add(1);
 
-            send_updates(&self.game, & self.players, socket, &self.saved_ticks, & mut write_buf).await;
+            send_updates(&self.game, & self.players, socket, & mut write_buf).await;
             if self.config.replays_enabled {
-                write_replay(& mut self.game, &self.saved_ticks, & mut write_buf);
+                write_replay(& mut self.game, & mut write_buf);
             }
         } else if self.game.active {
             info!("Game {} abandoned", self.game.game_id);
@@ -1281,8 +1281,6 @@ impl HQMServer {
 
         info!("New game {} started", self.game.game_id);
         self.game_alloc += 1;
-
-        self.saved_ticks.clear();
 
         let puck_line_start= self.game.world.rink.width / 2.0 - 0.4 * ((self.config.warmup_pucks - 1) as f32);
 
@@ -1586,7 +1584,6 @@ impl HQMServer {
             ban_list: HashSet::new(),
             allow_join:true,
             game: HQMGame::new(1, &config),
-            saved_ticks: VecDeque::with_capacity(256),
             game_alloc: 1,
             is_muted:false,
             config,
@@ -1755,7 +1752,8 @@ fn write_objects(writer: & mut HQMMessageWriter, game: &HQMGame, packets: &VecDe
     }
 }
 
-fn write_replay (game: & mut HQMGame, packets: &VecDeque<HQMSavedTick>, write_buf: & mut [u8]) {
+fn write_replay (game: & mut HQMGame, write_buf: & mut [u8]) {
+
     let mut writer = HQMMessageWriter::new(write_buf);
 
     writer.write_byte_aligned(5);
@@ -1774,18 +1772,20 @@ fn write_replay (game: & mut HQMGame, packets: &VecDeque<HQMSavedTick>, write_bu
                       else {0});
     writer.write_bits(8, game.period);
 
+    let packets = &game.saved_ticks;
+
     write_objects(& mut writer, game, packets, game.replay_last_packet);
     game.replay_last_packet = game.packet;
 
-    let remaining_messages = game.global_messages.len() - game.replay_msg_pos;
+    let remaining_messages = game.replay_messages.len() - game.replay_msg_pos;
 
     writer.write_bits(16, remaining_messages as u32);
     writer.write_bits(16, game.replay_msg_pos as u32);
 
-    for message in &game.global_messages[game.replay_msg_pos..game.global_messages.len()] {
+    for message in &game.replay_messages[game.replay_msg_pos..game.replay_messages.len()] {
         write_message(& mut writer, Rc::as_ref(message));
     }
-    game.replay_msg_pos = game.global_messages.len();
+    game.replay_msg_pos = game.replay_messages.len();
 
     let pos = writer.get_pos();
 
@@ -1794,7 +1794,9 @@ fn write_replay (game: & mut HQMGame, packets: &VecDeque<HQMSavedTick>, write_bu
     game.replay_data.extend_from_slice(slice);
 }
 
-async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], socket: & UdpSocket, packets: &VecDeque<HQMSavedTick>, write_buf: & mut [u8]) {
+async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], socket: & UdpSocket, write_buf: & mut [u8]) {
+
+    let packets = &game.saved_ticks;
 
     let rules_state =
         if let HQMOffsideStatus::Offside(_) = game.offside_status{
