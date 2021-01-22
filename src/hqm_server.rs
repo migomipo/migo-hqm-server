@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
-use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMIcingStatus, HQMOffsideStatus, HQMRulesState};
+use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMGameWorld, HQMMessage, HQMGame, HQMPlayerInput, HQMIcingStatus, HQMOffsideStatus, HQMRulesState, HQMPhysicsConfig};
 use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::collections::{HashSet, HashMap};
@@ -2125,7 +2125,6 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) offside: HQMOffsideConfiguration,
     pub(crate) icing: HQMIcingConfiguration,
     pub(crate) warmup_pucks: usize,
-    pub(crate) limit_jump_speed: bool,
 
     pub(crate) cheats_enabled: bool,
 
@@ -2134,7 +2133,6 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) spawn_point: HQMSpawnPoint,
     pub(crate) cylinder_puck_post_collision: bool,
 
-    pub(crate) player_acceleration: f32,
-    pub(crate) player_deceleration: f32,
-    pub(crate) puck_to_ice_linear_friction: f32
+    pub(crate) physics_configuration: HQMPhysicsConfig,
+
 }

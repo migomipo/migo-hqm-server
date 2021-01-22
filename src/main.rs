@@ -5,6 +5,7 @@ extern crate ini;
 use ini::Ini;
 use std::env;
 use crate::hqm_server::{HQMServer, HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration, HQMServerMode, HQMSpawnPoint};
+use crate::hqm_game::HQMPhysicsConfig;
 
 mod hqm_parse;
 mod hqm_simulate;
@@ -105,11 +106,12 @@ async fn main() -> std::io::Result<()> {
         });
 
         // Physics
-        let physics_section = conf.section(Some("Physics")).unwrap();
+        let physics_section = conf.section(Some("Physics"));
 
-        let player_accel: f32 = physics_section.get("player_acceleration").map_or(0.000208333f32, |x| x.parse::<f32>().unwrap());
-        let player_decel: f32 = physics_section.get("player_deceleration").map_or(0.000555555f32, |x| x.parse::<f32>().unwrap());
-        let puck_to_ice_fric: f32 = physics_section.get("puck_to_ice_linear_friction").map_or(0.05, |x| x.parse::<f32>().unwrap());
+        let player_acceleration: f32 = physics_section.and_then( |x| x.get("player_acceleration")).map_or(0.000208333f32, |x| x.parse::<f32>().unwrap());
+        let player_deceleration: f32 = physics_section.and_then( |x| x.get("player_deceleration")).map_or(0.000555555f32, |x| x.parse::<f32>().unwrap());
+        let puck_to_ice_linear_friction: f32 = physics_section.and_then( |x| x.get("puck_to_ice_linear_friction")).map_or(0.05, |x| x.parse::<f32>().unwrap());
+        let gravity: f32 = physics_section.and_then( |x| x.get("gravity")).map_or(0.000680555f32, |x| x.parse::<f32>().unwrap());
 
         let config = HQMServerConfiguration {
             server_name,
@@ -128,7 +130,6 @@ async fn main() -> std::io::Result<()> {
             offside,
             warmup_pucks,
             force_team_size_parity,
-            limit_jump_speed,
             cheats_enabled,
             replays_enabled,
             spawn_point,
@@ -136,9 +137,14 @@ async fn main() -> std::io::Result<()> {
 
             welcome: welcome_str,
             mode,
-            player_acceleration: player_accel,
-            player_deceleration: player_decel,
-            puck_to_ice_linear_friction: puck_to_ice_fric
+            physics_configuration: HQMPhysicsConfig {
+                player_acceleration,
+                player_deceleration,
+                puck_to_ice_linear_friction,
+                gravity,
+                limit_jump_speed
+            }
+
         };
 
         let file_appender = tracing_appender::rolling::daily("log", log_name);

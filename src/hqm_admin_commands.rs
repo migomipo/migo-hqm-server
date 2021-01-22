@@ -650,7 +650,9 @@ impl HQMServer {
         if split.len() >= 2 {
             let gravity = split[1].parse::<f32>();
             if let Ok (gravity) = gravity {
-                self.game.world.gravity = gravity/10000.0;
+                let gravity_in_meter_per_tick_squared = gravity/10000.0;
+                self.config.physics_configuration.gravity = gravity_in_meter_per_tick_squared;
+                self.game.world.physics_config.gravity = gravity_in_meter_per_tick_squared;
             }
         }
     }

@@ -1,6 +1,6 @@
 
 
-use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld};
+use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld, HQMPhysicsConfig};
 use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Point3, Vector2};
 use std::ops::{AddAssign};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
@@ -57,7 +57,7 @@ impl HQMGameWorld {
 
         let mut collisions = vec![];
         for (i, player) in players.iter_mut().enumerate() {
-            update_player(i, player, self.gravity, self.limit_jump_speed, & self.rink, & mut collisions, self.physics_config.player_acceleration, self.physics_config.player_deceleration);
+            update_player(i, player, & self.rink, & mut collisions, & self.physics_config);
         }
 
         for i in 0..players.len() {
@@ -95,7 +95,7 @@ impl HQMGameWorld {
         let pucks_old_pos: Vec<Point3<f32>> = pucks.iter().map(|x| x.body.pos.clone()).collect();
 
         for puck in pucks.iter_mut() {
-            puck.body.linear_velocity[1] -= self.gravity;
+            puck.body.linear_velocity[1] -= self.physics_config.gravity;
         }
 
         update_sticks_and_pucks (& mut players, & mut pucks, & self.rink, & mut events, self.physics_config.puck_to_ice_linear_friction);
@@ -240,16 +240,16 @@ fn update_stick(player: & mut HQMSkater, linear_velocity_before: & Vector3<f32>,
     }
 }
 
-fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_speed: bool, rink: & HQMRink, collisions: & mut Vec<HQMCollision>, player_acceleration: f32, player_deceleration: f32) {
+fn update_player(i: usize, player: & mut HQMSkater, rink: & HQMRink, collisions: & mut Vec<HQMCollision>, config: &HQMPhysicsConfig) {
     let linear_velocity_before = player.body.linear_velocity.clone_owned();
     let angular_velocity_before = player.body.angular_velocity.clone_owned();
 
     player.body.pos += &player.body.linear_velocity;
-    player.body.linear_velocity[1] -= gravity;
+    player.body.linear_velocity[1] -= config.gravity;
     for collision_ball in player.collision_balls.iter_mut() {
         collision_ball.velocity *= 0.999;
         collision_ball.pos += &collision_ball.velocity;
-        collision_ball.velocity[1] -= gravity;
+        collision_ball.velocity[1] -= config.gravity;
     }
     let feet_pos = &player.body.pos - (&player.body.rot * Vector3::y().scale(player.height));
     if feet_pos[1] < 0.0 {
@@ -261,10 +261,10 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
                 &player.body.rot * Vector3::z()
             };
             let max_acceleration = if player.body.linear_velocity.dot(&skate_direction) < 0.0 {
-                player_deceleration // If we're accelerating against the current direction of movement
+                config.player_deceleration // If we're accelerating against the current direction of movement
                 // we're decelerating and can do so faster
             } else {
-                player_acceleration
+                config.player_acceleration
             };
             skate_direction[1] = 0.0;
             skate_direction.normalize_mut();
@@ -273,7 +273,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
             player.body.linear_velocity += limit_vector_length(&new_acceleration, max_acceleration);
         }
         if player.input.jump() && !player.jumped_last_frame {
-            let diff = if limit_jump_speed {
+            let diff = if config.limit_jump_speed {
                 clamp (0.025 - player.body.linear_velocity[1], 0.0, 0.025)
             } else {
                 0.025

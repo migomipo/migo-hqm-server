@@ -14,15 +14,17 @@ pub(crate) struct HQMGameWorld {
     pub(crate) objects: Vec<HQMGameObject>,
     pub(crate) puck_slots: usize,
     pub(crate) rink: HQMRink,
-    pub(crate) gravity: f32,
-    pub(crate) limit_jump_speed: bool,
+
     pub(crate) physics_config: HQMPhysicsConfig
 }
 
+#[derive(Clone)]
 pub(crate) struct HQMPhysicsConfig {
     pub(crate) player_acceleration: f32,
     pub(crate) player_deceleration: f32,
     pub(crate) puck_to_ice_linear_friction: f32,
+    pub(crate) gravity: f32,
+    pub(crate) limit_jump_speed: bool,
 }
 
 impl HQMGameWorld {
@@ -163,13 +165,7 @@ impl HQMGame {
                 objects: object_vec,
                 puck_slots: config.warmup_pucks,
                 rink,
-                gravity: 0.000680555,
-                limit_jump_speed: config.limit_jump_speed,
-                physics_config: HQMPhysicsConfig {
-                    player_acceleration: config.player_acceleration,
-                    player_deceleration: config.player_deceleration,
-                    puck_to_ice_linear_friction: config.puck_to_ice_linear_friction
-                }
+                physics_config: config.physics_configuration.clone()
             },
             red_score: 0,
             blue_score: 0,
