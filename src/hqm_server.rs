@@ -483,29 +483,37 @@ impl HQMServer {
                 }
             },
             "pings" => {
-                let matches = self.player_search(arg);
-                if matches.is_empty() {
-                    self.add_directed_server_chat_message("No matches found".to_string(), player_index);
-                } else if matches.len() > 1 {
-                    self.add_directed_server_chat_message("Multiple matches found, use /ping X".to_string(), player_index);
-                    for (found_player_index, found_player_name) in matches.into_iter().take(5) {
-                        self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
-                    }
+                if let Some((ping_player_index, _name)) = self.player_exact_unique_match(arg) {
+                    self.ping(ping_player_index, player_index);
                 } else {
-                    self.ping(matches[0].0, player_index);
+                    let matches = self.player_search(arg);
+                    if matches.is_empty() {
+                        self.add_directed_server_chat_message("No matches found".to_string(), player_index);
+                    } else if matches.len() > 1 {
+                        self.add_directed_server_chat_message("Multiple matches found, use /ping X".to_string(), player_index);
+                        for (found_player_index, found_player_name) in matches.into_iter().take(5) {
+                            self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
+                        }
+                    } else {
+                        self.ping(matches[0].0, player_index);
+                    }
                 }
             },
             "views" => {
-                let matches = self.player_search(arg);
-                if matches.is_empty() {
-                    self.add_directed_server_chat_message("No matches found".to_string(), player_index);
-                } else if matches.len() > 1 {
-                    self.add_directed_server_chat_message("Multiple matches found, use /view X".to_string(), player_index);
-                    for (found_player_index, found_player_name) in matches.into_iter().take(5) {
-                        self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
-                    }
+                if let Some((view_player_index, _name)) = self.player_exact_unique_match(arg) {
+                    self.view(view_player_index, player_index);
                 } else {
-                    self.view(matches[0].0, player_index);
+                    let matches = self.player_search(arg);
+                    if matches.is_empty() {
+                        self.add_directed_server_chat_message("No matches found".to_string(), player_index);
+                    } else if matches.len() > 1 {
+                        self.add_directed_server_chat_message("Multiple matches found, use /view X".to_string(), player_index);
+                        for (found_player_index, found_player_name) in matches.into_iter().take(5) {
+                            self.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
+                        }
+                    } else {
+                        self.view(matches[0].0, player_index);
+                    }
                 }
             }
             "icing" => {
@@ -649,6 +657,22 @@ impl HQMServer {
                 self.add_directed_server_chat_message("No player with this ID exists".to_string(), player_index);
             }
         }
+    }
+
+    pub(crate) fn player_exact_unique_match(&self, name: &str) -> Option<(usize, String)> {
+        let mut found = None;
+        for (player_index, player) in self.players.iter ().enumerate() {
+            if let Some(player) = player {
+                if player.player_name == name {
+                    if found.is_none() {
+                        found = Some((player_index, player.player_name.clone()));
+                    } else {
+                        return None
+                    }
+                }
+            }
+        }
+        found
     }
 
     pub(crate) fn player_search(&self, name: &str) -> Vec<(usize, String)> {
