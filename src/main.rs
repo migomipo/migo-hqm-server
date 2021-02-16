@@ -84,9 +84,10 @@ async fn main() -> std::io::Result<()> {
         let rule_time_intermission = get_optional(game_section, "time_intermission", 20, |x| x.parse::<u32>().unwrap());
         let warmup_pucks = get_optional(game_section, "warmup_pucks", 1, |x| x.parse::<usize>().unwrap());
 
-        get_optional(game_section, "limit_jump_speed", false, |x| x.eq_ignore_ascii_case("true"));
         let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, |x| x.eq_ignore_ascii_case("true"));
 
+        let mercy = get_optional(game_section, "mercy", 0, |x| x.parse::<u32>().unwrap());
+        let first_to = get_optional(game_section, "first", 0, |x| x.parse::<u32>().unwrap());
 
         let icing = get_optional(game_section, "icing", HQMIcingConfiguration::Off, |x| match x {
             "on" | "touch" => HQMIcingConfiguration::Touch,
@@ -126,6 +127,8 @@ async fn main() -> std::io::Result<()> {
             time_warmup: rules_time_warmup,
             time_break: rule_time_break,
             time_intermission: rule_time_intermission,
+            mercy,
+            first_to,
             icing,
             offside,
             warmup_pucks,
