@@ -408,6 +408,16 @@ impl HQMServer {
                                 self.set_offside_rule(player_index, arg);
                             }
                         },
+                        "mercy" => {
+                            if let Some(arg) = args.get(1) {
+                                self.set_mercy_rule(player_index, arg);
+                            }
+                        },
+                        "first" => {
+                            if let Some(arg) = args.get(1) {
+                                self.set_first_to_rule(player_index, arg);
+                            }
+                        }
                         "teamsize" => {
                             if let Some(arg) = args.get(1) {
                                 self.set_team_size(player_index, arg);
@@ -1058,15 +1068,32 @@ impl HQMServer {
     }
 
     fn call_goal (& mut self, team: HQMTeam, puck: usize) {
-        if team == HQMTeam::Red {
-            self.game.red_score += 1;
-        } else if team == HQMTeam::Blue {
-            self.game.blue_score += 1;
-        }
+        let (new_score, opponent_score) = match team {
+            HQMTeam::Red => {
+                self.game.red_score += 1;
+                (self.game.red_score, self.game.blue_score)
+            }
+            HQMTeam::Blue => {
+                self.game.blue_score += 1;
+                (self.game.blue_score, self.game.red_score)
+            }
+        };
+
         self.game.time_break = self.config.time_break *100;
         self.game.is_intermission_goal = true;
         self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
-        if self.game.period > 3 && self.game.red_score != self.game.blue_score {
+
+        let game_over = if self.game.period > 3 && self.game.red_score != self.game.blue_score {
+            true
+        } else if self.config.mercy > 0 && (new_score - opponent_score) >= self.config.mercy {
+            true
+        } else if self.config.first_to > 0 && new_score >= self.config.first_to {
+            true
+        } else {
+            false
+        };
+
+        if game_over {
             self.game.time_break = self.config.time_intermission*100;
             self.game.game_over = true;
         }
@@ -2148,6 +2175,8 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) time_warmup: u32,
     pub(crate) time_break: u32,
     pub(crate) time_intermission: u32,
+    pub(crate) mercy: u32,
+    pub(crate) first_to: u32,
     pub(crate) offside: HQMOffsideConfiguration,
     pub(crate) icing: HQMIcingConfiguration,
     pub(crate) warmup_pucks: usize,
@@ -2158,5 +2187,5 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) replays_enabled: bool,
 
     pub(crate) spawn_point: HQMSpawnPoint,
-    pub(crate) cylinder_puck_post_collision: bool
+    pub(crate) cylinder_puck_post_collision: bool,
 }

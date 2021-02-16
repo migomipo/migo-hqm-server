@@ -78,6 +78,9 @@ async fn main() -> std::io::Result<()> {
         let rule_time_intermission = game_section.get("time_intermission").map_or(20, |x| x.parse::<u32>().unwrap());
         let warmup_pucks = game_section.get("warmup_pucks").map_or_else(|| 1, |x| x.parse::<usize>().unwrap());
 
+        let mercy = game_section.get("mercy").map_or(0, |x| x.parse::<u32>().unwrap());
+        let first_to = game_section.get("first").map_or(0, |x| x.parse::<u32>().unwrap());
+
         let limit_jump_speed = match game_section.get("limit_jump_speed") {
             Some(s) => s.eq_ignore_ascii_case("true"),
             None => false
@@ -118,6 +121,8 @@ async fn main() -> std::io::Result<()> {
             time_warmup: rules_time_warmup, 
             time_break: rule_time_break,
             time_intermission: rule_time_intermission,
+            mercy,
+            first_to,
             icing,
             offside,
             warmup_pucks,

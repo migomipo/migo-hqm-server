@@ -568,6 +568,51 @@ impl HQMServer {
         }
     }
 
+    pub(crate) fn set_first_to_rule(& mut self, player_index: usize, size:&str) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+                if let Ok(new_num) = size.parse::<u32>() {
+                    self.config.first_to = new_num;
+
+                    if new_num > 0 {
+                        info!("{} ({}) set first-to-goals rule to {} goals",player.player_name, player_index, new_num);
+                        let msg = format!("First-to-goals rule set to {} goals by {}", new_num, player.player_name);
+                        self.add_server_chat_message(msg);
+                    } else {
+                        info!("{} ({}) disabled first-to-goals rule",player.player_name, player_index);
+                        let msg = format!("First-to-goals rule disabled by {}", player.player_name);
+                        self.add_server_chat_message(msg);
+                    }
+                }
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
+
+
+    pub(crate) fn set_mercy_rule(& mut self, player_index: usize, size:&str) {
+        if let Some(player) = & self.players[player_index] {
+            if player.is_admin{
+                if let Ok(new_num) = size.parse::<u32>() {
+                    self.config.mercy = new_num;
+
+                    if new_num > 0 {
+                        info!("{} ({}) set mercy rule to {} goals",player.player_name, player_index, new_num);
+                        let msg = format!("Mercy rule set to {} goals by {}", new_num, player.player_name);
+                        self.add_server_chat_message(msg);
+                    } else {
+                        info!("{} ({}) disabled mercy rule",player.player_name, player_index);
+                        let msg = format!("Mercy rule disabled by {}", player.player_name);
+                        self.add_server_chat_message(msg);
+                    }
+                }
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
+
     pub(crate) fn set_team_size(& mut self, player_index: usize, size:&str) {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{

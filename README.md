@@ -40,6 +40,9 @@ time_period            | Period length in seconds.
 time_warmup            | Warmup length in seconds.
 time_intermission      | Intermission length in seconds.
 warmup_pucks           | Number of pucks in warmup. Only 32 objects (pucks+players) are allowed on the ice at the time, so at warmup there can never be more players than (32 minus number of pucks) on the ice.
+mercy                  | Mercy rule setting. If 0, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least X goals.
+first                  | First-to-goals rule setting. If 0, first-to-goals rule will be disabled. Otherwise, games will automatically end if a team scores and and reaches at least X goals scored.
+
 
 ## Commands
 
@@ -87,6 +90,8 @@ Commands                 | Explanation
 /set teamsize *N*        | Sets team size.
 /set teamparity *on/off* | If enabled, players will not be able to join the team that already has more players than the other one.
 /set replay *on/off*     | Enables/disables server-side replays
+/set mercy *N*           | Sets mercy rule setting. If 0, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least X goals.
+/set first *N*           | Sets first-to-goals rule setting. If 0, first-to-goals rule will be disabled. Otherwise, games will automatically end if a team scores and and reaches at least X goals scored.
 /kickall *S*             | Kicks all players with a player name equal to *S* (case-insensitive). % can be used as wildcards at the start and end of *S* to match players with similar names. For example, migo%, %mipo and %gomi% all match MigoMipo.
 /banall *S*              | Same as /kickall, but also IP-bans.
 
