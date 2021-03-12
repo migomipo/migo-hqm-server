@@ -1575,7 +1575,7 @@ impl HQMServer {
                             if res.is_err() {
                                 break;
                             }
-                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            tokio::time::sleep(Duration::from_secs(10)).await;
                         }
                     } else {
                         tokio::time::sleep(Duration::from_secs(15)).await;
