@@ -11,6 +11,7 @@ mod hqm_simulate;
 mod hqm_game;
 mod hqm_server;
 mod hqm_admin_commands;
+mod hqm_rules;
 
 use tracing_subscriber;
 use tracing_appender;
