@@ -1,13 +1,13 @@
 [package]
 name = "migo-hqm-server"
-version = "1.1.0"
+version = "1.2.2"
 authors = ["John Eriksson <john.eriksson.16@gmail.com>"]
 edition = "2018"
 
 [dependencies]
 
-nalgebra = "0.24"
-tokio = { version = "1.0.2", features = ["net", "time", "macros", "rt-multi-thread", "sync", "fs"] }
+nalgebra = "0.25"
+tokio = { version = "1.4", features = ["net", "time", "macros", "rt-multi-thread", "sync", "fs"] }
 rust-ini = "0.15" # INI For configuration
 bytes = "1.0"
 reqwest = { version = "0.11", default-features = false }

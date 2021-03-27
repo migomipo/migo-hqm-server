@@ -76,7 +76,7 @@ impl HQMServer {
     }
 
     fn request_info<'a>(&self, socket: & Arc<UdpSocket>, addr: SocketAddr, parser: &mut HQMMessageReader<'a>) {
-        let mut write_buf = vec![0u8;512];
+        let mut write_buf = [0u8;128];
         let _player_version = parser.read_bits(8);
         let ping = parser.read_u32_aligned();
 
@@ -1030,10 +1030,10 @@ impl HQMServer {
     }
 
 
-    async fn tick(&mut self, socket: & UdpSocket) {
+    async fn tick(&mut self, socket: & UdpSocket, write_buf: & mut [u8]) {
         if self.player_count() != 0 {
             self.game.active = true;
-            let packets = tokio::task::block_in_place(|| {
+            tokio::task::block_in_place(|| {
                 self.update_players_and_input();
                 let events = self.game.world.simulate_step();
                 if self.config.mode == HQMServerMode::Match {
@@ -1042,22 +1042,22 @@ impl HQMServer {
                     self.game.update_game_state();
                 }
 
-                get_packets(& self.game.world.objects)
+                let packets = get_packets(& self.game.world.objects);
+
+                self.game.saved_ticks.truncate(self.game.saved_ticks.capacity() - 1);
+                self.game.saved_ticks.push_front(HQMSavedTick {
+                    packets,
+                    time: Instant::now()
+                });
+
+                self.game.packet = self.game.packet.wrapping_add(1);
+                self.game.game_step = self.game.game_step.wrapping_add(1);
+
             });
 
-            let mut write_buf = vec![0u8; 4096];
-            self.game.saved_ticks.truncate(self.game.saved_ticks.capacity() - 1);
-            self.game.saved_ticks.push_front(HQMSavedTick {
-                packets,
-                time: Instant::now()
-            });
-
-            self.game.packet = self.game.packet.wrapping_add(1);
-            self.game.game_step = self.game.game_step.wrapping_add(1);
-
-            send_updates(&self.game, & self.players, socket, & mut write_buf).await;
+            send_updates(&self.game, & self.players, socket, write_buf).await;
             if self.config.replays_enabled {
-                write_replay(& mut self.game, & mut write_buf);
+                write_replay(& mut self.game, write_buf);
             }
         } else if self.game.active {
             info!("Game {} abandoned", self.game.game_id);
@@ -1606,11 +1606,11 @@ impl HQMServer {
             });
         };
 
-
+        let mut write_buf = vec![0u8; 4096];
         loop {
             tokio::select! {
                 _ = tick_timer.tick() => {
-                    self.tick(& socket).await;
+                    self.tick(& socket, & mut write_buf).await;
                 }
                 x = msg_receiver.recv() => {
                     if let Some (HQMServerReceivedData::GameClientPacket {
