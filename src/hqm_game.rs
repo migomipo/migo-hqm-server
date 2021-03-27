@@ -28,10 +28,10 @@ impl HQMGameWorld {
         return object_slot;
     }
 
-    pub(crate) fn create_puck_object (& mut self, start: Point3<f32>, rot: Matrix3<f32>, cylinder_puck_post_collision: bool) -> Option<usize> {
+    pub(crate) fn create_puck_object (& mut self, start: Point3<f32>, rot: Matrix3<f32>) -> Option<usize> {
         let object_slot = self.find_empty_puck_slot();
         if let Some(i) = object_slot {
-            self.objects[i] = HQMGameObject::Puck(HQMPuck::new(i, start, rot, cylinder_puck_post_collision));
+            self.objects[i] = HQMGameObject::Puck(HQMPuck::new(i, start, rot));
         }
         return object_slot;
     }
@@ -725,11 +725,10 @@ pub(crate) struct HQMPuck {
     pub(crate) radius: f32,
     pub(crate) height: f32,
     pub(crate) touches: VecDeque<HQMPuckTouch>,
-    pub(crate) cylinder_puck_post_collision: bool
 }
 
 impl HQMPuck {
-    fn new(object_index:usize, pos: Point3<f32>, rot: Matrix3<f32>, cylinder_puck_post_collision: bool) -> Self {
+    fn new(object_index:usize, pos: Point3<f32>, rot: Matrix3<f32>) -> Self {
         HQMPuck {
             index:object_index,
             body: HQMBody {
@@ -742,7 +741,6 @@ impl HQMPuck {
             radius: 0.125,
             height: 0.0412500016391,
             touches: VecDeque::new(),
-            cylinder_puck_post_collision
         }
     }
 

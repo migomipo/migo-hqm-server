@@ -87,11 +87,6 @@ async fn main() -> std::io::Result<()> {
             None => false
         };
 
-        let cylinder_puck_post_collision = match game_section.get("cylinder_puck_post_collision") {
-            Some(s) => s.eq_ignore_ascii_case("true"),
-            None => false
-        };
-
         let icing = game_section.get("icing").map_or(HQMIcingConfiguration::Off, |x| match x {
             "on" | "touch" => HQMIcingConfiguration::Touch,
             "notouch" => HQMIcingConfiguration::NoTouch,
@@ -132,8 +127,6 @@ async fn main() -> std::io::Result<()> {
             cheats_enabled,
             replays_enabled,
             spawn_point,
-            cylinder_puck_post_collision,
-
             welcome: welcome_str,
             mode,
 

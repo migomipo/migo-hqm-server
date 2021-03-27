@@ -146,7 +146,7 @@ fn update_sticks_and_pucks (players: & mut Vec<& mut HQMSkater>,
                     }
                 }
             }
-            do_puck_post_forces(puck, rink, & puck_vertices, &puck_linear_velocity_before, &puck_angular_velocity_before);
+            do_puck_post_forces(puck, rink, &puck_linear_velocity_before, &puck_angular_velocity_before);
 
             if let Some((overlap_pos, overlap, normal)) = collision_between_sphere_and_nets(&puck.body.pos, puck.radius, rink) {
                 let vertex_velocity = speed_of_point_including_rotation(&overlap_pos, &puck.body.pos, &puck_linear_velocity_before, &puck_angular_velocity_before);
@@ -438,10 +438,10 @@ fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: &[HQMColli
 }
 
 fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<f32>, rink: & HQMRink, events: & mut Vec<HQMSimulationEvent>) {
-    for (team, line) in vec![
+    for (team, line) in std::array::IntoIter::new([
         (HQMTeam::Red, & rink.red_lines_and_net.mid_line),
         (HQMTeam::Blue, & rink.blue_lines_and_net.mid_line)
-    ] {
+    ]) {
         if line.sphere_reached_line(&puck.body.pos, puck.radius) && !line.sphere_reached_line(&old_puck_pos, puck.radius) {
             let event = HQMSimulationEvent::PuckEnteredOtherHalf {
                 team,
@@ -450,10 +450,10 @@ fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<
             events.push(event);
         }
     }
-    for (team, line) in vec![
+    for (team, line) in std::array::IntoIter::new([
         (HQMTeam::Red, & rink.red_lines_and_net.offensive_line),
         (HQMTeam::Blue, & rink.blue_lines_and_net.offensive_line)
-    ] {
+    ]) {
         if !line.sphere_reached_line(&puck.body.pos, puck.radius) && line.sphere_reached_line(old_puck_pos, puck.radius) {
             let event = HQMSimulationEvent::PuckLeftOffensiveZone {
                 team,
@@ -469,10 +469,10 @@ fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<
         }
     }
 
-    for (team, net) in vec![
+    for (team, net) in std::array::IntoIter::new([
         (HQMTeam::Red, & rink.red_lines_and_net.net),
         (HQMTeam::Blue, & rink.blue_lines_and_net.net)
-    ] {
+    ]) {
         if (&net.left_post - &puck.body.pos).dot(&net.normal) >= 0.0 {
             if (&net.left_post - old_puck_pos).dot(&net.normal) < 0.0 {
                 if (&net.left_post - &puck.body.pos).dot(&net.left_post_inside) < 0.0 &&
@@ -496,46 +496,21 @@ fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<
     }
 }
 
-fn do_puck_post_forces(puck: & mut HQMPuck, rink: & HQMRink, puck_vertices: & Vec<Point3<f32>>, puck_linear_velocity: & Vector3<f32>, puck_angular_velocity: & Vector3<f32>) {
-    if !puck.cylinder_puck_post_collision {
-        for net in vec![
-            (& rink.red_lines_and_net.net),
-            (& rink.blue_lines_and_net.net)
-        ] {
-            for post in net.posts.iter() {
-                let collision = collision_between_sphere_and_post(&puck.body.pos, puck.radius, post);
-                if let Some((overlap, normal)) = collision {
-                    let p = &puck.body.pos - puck.radius*normal;
-                    let vertex_velocity = speed_of_point_including_rotation(&p, &puck.body.pos, puck_linear_velocity, puck_angular_velocity);
-                    let mut puck_force = normal.scale(overlap * 0.125) - vertex_velocity.scale (0.25);
+fn do_puck_post_forces(puck: & mut HQMPuck, rink: & HQMRink, puck_linear_velocity: & Vector3<f32>, puck_angular_velocity: & Vector3<f32>) {
+    for net in std::array::IntoIter::new([
+        (& rink.red_lines_and_net.net),
+        (& rink.blue_lines_and_net.net)])
+             {
+        for post in net.posts.iter() {
+            let collision = collision_between_sphere_and_post(&puck.body.pos, puck.radius, post);
+            if let Some((overlap, normal)) = collision {
+                let p = &puck.body.pos - puck.radius*normal;
+                let vertex_velocity = speed_of_point_including_rotation(&p, &puck.body.pos, puck_linear_velocity, puck_angular_velocity);
+                let mut puck_force = normal.scale(overlap * 0.125) - vertex_velocity.scale (0.25);
 
-                    if normal.dot (&puck_force) > 0.0 {
-                        limit_rejection(&mut puck_force, &normal, 0.2);
-                        apply_acceleration_to_object(&mut puck.body, &puck_force, &p);
-                    }
-                }
-            }
-        }
-    } else {
-        for net in vec![
-            (& rink.red_lines_and_net.net),
-            (& rink.blue_lines_and_net.net)
-        ] {
-            for post in net.posts.iter() {
-                let broad_check = collision_between_sphere_and_post(&puck.body.pos, 2.0 * puck.radius, post).is_some();
-                if broad_check {
-                    for puck_vertex in puck_vertices.iter() {
-                        let collision = collision_between_puck_vertex_and_post(&puck.body.pos, puck_vertex, post);
-                        if let Some((overlap, normal)) = collision {
-                            let puck_vertex_speed = speed_of_point_including_rotation(&puck_vertex, & puck.body.pos, &puck_linear_velocity, &puck_angular_velocity);
-
-                            let mut puck_force = (normal.scale(overlap * 0.5) - puck_vertex_speed).scale(0.125 * 0.5);
-                            if puck_force.dot(&normal) > 0.0 {
-                                limit_rejection(& mut puck_force, &normal, 0.5);
-                                apply_acceleration_to_object(& mut puck.body, &puck_force, & puck_vertex);
-                            }
-                        }
-                    }
+                if normal.dot (&puck_force) > 0.0 {
+                    limit_rejection(&mut puck_force, &normal, 0.2);
+                    apply_acceleration_to_object(&mut puck.body, &puck_force, &p);
                 }
             }
         }
@@ -613,10 +588,10 @@ fn inside_surface(pos: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3
 fn collision_between_sphere_and_nets(pos: &Point3<f32>, radius: f32, rink: & HQMRink) -> Option<(Point3<f32>, f32, Vector3<f32>)> {
     let mut max_overlap = 0.0;
     let mut res: Option<(Point3<f32>, f32, Vector3<f32>)> = None;
-    for net in vec![
+    for net in std::array::IntoIter::new([
         (& rink.red_lines_and_net.net),
         (& rink.blue_lines_and_net.net)
-    ] {
+    ]) {
         for surface in net.surfaces.iter() {
             let normal = (&surface.3 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
 
@@ -660,26 +635,6 @@ fn collision_between_sphere_and_post(pos: &Point3<f32>, radius: f32, post: &(Poi
     let rejection = diff - projection;
     let rejection_norm = rejection.norm();
     let overlap = a - rejection_norm;
-    if overlap > 0.0 {
-        Some ((overlap, rejection.normalize()))
-    } else {
-        None
-    }
-}
-
-fn collision_between_puck_vertex_and_post(_puck_pos: &Point3<f32>, puck_pos2: &Point3<f32>, post: &(Point3<f32>, Point3<f32>, f32)) -> Option<(f32, Vector3<f32>)> {
-    let (p1, p2, post_radius) = post;
-
-    let direction_vector = p2 - p1;
-
-    let diff = puck_pos2 - p1;
-    let t0 = diff.dot(&direction_vector) / direction_vector.norm_squared();
-    let dot = clamp(t0, 0.0, 1.0);
-
-    let projection = dot * &direction_vector;
-    let rejection = diff - projection;
-    let rejection_norm = rejection.norm();
-    let overlap = post_radius - rejection_norm;
     if overlap > 0.0 {
         Some ((overlap, rejection.normalize()))
     } else {

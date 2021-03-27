@@ -294,7 +294,7 @@ impl HQMServer {
         let puck_pos = &faceoff_spot.center_position + &(1.5f32*Vector3::y());
 
         self.game.world.objects = vec![HQMGameObject::None; 32];
-        self.game.world.create_puck_object(puck_pos.clone(), Matrix3::identity(), self.config.cylinder_puck_post_collision);
+        self.game.world.create_puck_object(puck_pos.clone(), Matrix3::identity());
 
         let mut messages = Vec::new();
 
