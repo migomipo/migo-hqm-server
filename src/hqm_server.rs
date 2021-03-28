@@ -42,8 +42,6 @@ pub(crate) struct HQMServer {
     pub(crate) ban_list: HashSet<std::net::IpAddr>,
     pub(crate) allow_join: bool,
     pub(crate) server_name: String,
-    pub(crate) port: u16,
-    pub(crate) public: bool,
     pub(crate) config: HQMServerConfiguration,
     pub(crate) game: HQMGame,
     game_alloc: u32,
@@ -1069,9 +1067,25 @@ impl HQMServer {
 
     }
 
+    fn create_game (game_id: u32, config: &HQMServerConfiguration) -> HQMGame {
+        let mut game = HQMGame::new(game_id, config);
+        let puck_line_start= game.world.rink.width / 2.0 - 0.4 * ((config.warmup_pucks - 1) as f32);
+
+        for i in 0..config.warmup_pucks {
+            let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, game.world.rink.length / 2.0);
+            let rot = Matrix3::identity();
+            game.world.create_puck_object(pos, rot);
+        }
+
+        game
+    }
+
     pub(crate) fn new_game(&mut self) {
 
-        let old_game = std::mem::replace(& mut self.game, HQMGame::new(self.game_alloc, &self.config));
+        let old_game = std::mem::replace(& mut self.game,
+                                         Self::create_game(self.game_alloc, &self.config));
+        info!("New game {} started", self.game.game_id);
+        self.game_alloc += 1;
 
         if self.config.replays_enabled && old_game.period != 0 {
             let time = old_game.start_time.format("%Y-%m-%dT%H%M%S").to_string();
@@ -1105,17 +1119,6 @@ impl HQMServer {
             });
         }
 
-        info!("New game {} started", self.game.game_id);
-        self.game_alloc += 1;
-
-        let puck_line_start= self.game.world.rink.width / 2.0 - 0.4 * ((self.config.warmup_pucks - 1) as f32);
-
-        for i in 0..self.config.warmup_pucks {
-            let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, self.game.world.rink.length / 2.0);
-            let rot = Matrix3::identity();
-            self.game.world.create_puck_object(pos, rot);
-        }
-
         let mut messages = Vec::new();
         for (i, p) in self.players.iter_mut().enumerate() {
             if let Some(player) = p {
@@ -1143,20 +1146,34 @@ impl HQMServer {
 
     }
 
-    pub async fn run(&mut self) -> std::io::Result<()> {
+    pub async fn run_server(server_name: String, port: u16, public: bool, config: HQMServerConfiguration) -> std::io::Result<()> {
+        let mut player_vec = Vec::with_capacity(64);
+        for _ in 0..64 {
+            player_vec.push(None);
+        }
 
-        // Start new game
-        self.new_game();
+        let mut server = HQMServer {
+            players: player_vec,
+            ban_list: HashSet::new(),
+            allow_join:true,
+            server_name,
+            game: Self::create_game(1, &config),
+            game_alloc: 2,
+            is_muted:false,
+            config,
+        };
+
+        info!("Server started, new game {} started", 1);
 
         // Set up timers
         let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
         let socket = Arc::new (tokio::net::UdpSocket::bind(& addr).await?);
         info!("Server listening at address {:?}", socket.local_addr().unwrap());
 
-        if self.public {
+        if public {
             let socket = socket.clone();
             tokio::spawn(async move {
                 loop {
@@ -1203,38 +1220,18 @@ impl HQMServer {
         loop {
             tokio::select! {
                 _ = tick_timer.tick() => {
-                    self.tick(& socket, & mut write_buf).await;
+                    server.tick(& socket, & mut write_buf).await;
                 }
                 x = msg_receiver.recv() => {
                     if let Some (HQMServerReceivedData::GameClientPacket {
                         addr,
                         data: msg
                     }) = x {
-                        self.handle_message(addr, & socket, & msg).await;
+                        server.handle_message(addr, & socket, & msg).await;
                     }
                 }
             }
         }
-    }
-
-    pub async fn run_server(server_name: String, port: u16, public: bool, config: HQMServerConfiguration) -> std::io::Result<()> {
-        let mut player_vec = Vec::with_capacity(64);
-        for _ in 0..64 {
-            player_vec.push(None);
-        }
-
-        HQMServer {
-            players: player_vec,
-            ban_list: HashSet::new(),
-            allow_join:true,
-            server_name,
-            port,
-            game: HQMGame::new(1, &config),
-            game_alloc: 1,
-            is_muted:false,
-            config,
-            public
-        }.run().await
     }
 }
 
@@ -1759,4 +1756,8 @@ pub(crate) struct HQMServerConfiguration {
     pub(crate) replays_enabled: bool,
 
     pub(crate) spawn_point: HQMSpawnPoint,
+}
+
+trait HQMServerBehaviour {
+
 }
