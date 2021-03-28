@@ -105,11 +105,8 @@ async fn main() -> std::io::Result<()> {
         });
 
         let config = HQMServerConfiguration {
-            server_name,
-            port: server_port,
             team_max: server_team_max,
             player_max: server_player_max,
-            public: server_public,
 
             password: server_password,
 
@@ -139,7 +136,7 @@ async fn main() -> std::io::Result<()> {
             .init();
 
         // Config file didn't exist; use defaults as described
-        return HQMServer::new(config).run().await;
+        return HQMServer::run_server(server_name, server_port, server_public, config).await;
     } else {
         println! ("Could not open configuration file {}!", config_path);
         return Ok(())
