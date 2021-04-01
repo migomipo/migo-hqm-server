@@ -23,7 +23,7 @@ impl HQMServer {
 
         let game_over = if self.game.period > 3 && self.game.red_score != self.game.blue_score {
             true
-        } else if self.config.mercy > 0 && (new_score - opponent_score) >= self.config.mercy {
+        } else if self.config.mercy > 0 && new_score.saturating_sub(opponent_score) >= self.config.mercy {
             true
         } else if self.config.first_to > 0 && new_score >= self.config.first_to {
             true
