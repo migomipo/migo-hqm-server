@@ -1,4 +1,4 @@
-use crate::hqm_game::{HQMTeam, HQMGameWorld, HQMGameObject, HQMOffsideStatus, HQMIcingStatus, HQMMessage};
+use crate::hqm_game::{HQMTeam, HQMGameWorld, HQMGameObject, HQMOffsideStatus, HQMIcingStatus};
 use crate::hqm_server::{HQMServer, HQMOffsideConfiguration, HQMIcingConfiguration, HQMConnectedPlayer};
 use crate::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Vector3, Point3, Matrix3};
@@ -53,12 +53,7 @@ impl HQMServer {
             }
         }
 
-        let message = HQMMessage::Goal {
-            team,
-            goal_player_index: goal_scorer_index,
-            assist_player_index: assist_index
-        };
-        self.add_global_message(message, true);
+        self.add_goal_message(team, goal_scorer_index, assist_index);
     }
 
     fn call_offside(&mut self, team: HQMTeam, pass_origin: &Point3<f32>) {
@@ -285,48 +280,35 @@ impl HQMServer {
         }
     }
 
-    fn do_faceoff(&mut self){
-        let faceoff_spot = &self.game.next_faceoff_spot;
+    pub fn clear_pucks(& mut self) {
+        for object in self.game.world.objects.iter_mut() {
+            if let HQMGameObject::Puck(_puck) = object {
+                *object = HQMGameObject::None;
+            }
+        }
+    }
 
+
+    fn do_faceoff(&mut self){
         let positions = get_faceoff_positions(& self.players, & self.game.world.objects,
                                                     &self.game.world.rink.allowed_positions);
 
-        let puck_pos = &faceoff_spot.center_position + &(1.5f32*Vector3::y());
+        self.clear_pucks();
 
-        self.game.world.objects = vec![HQMGameObject::None; 32];
-        self.game.world.create_puck_object(puck_pos.clone(), Matrix3::identity());
+        let puck_pos = &self.game.next_faceoff_spot.center_position + &(1.5f32*Vector3::y());
 
-        let mut messages = Vec::new();
-
-        fn setup (messages: & mut Vec<HQMMessage>, world: & mut HQMGameWorld,
-                  player: & mut HQMConnectedPlayer, player_index: usize, faceoff_position: String, pos: Point3<f32>, rot: Matrix3<f32>, team: HQMTeam) {
-            let new_object_index = world.create_player_object(team,pos, rot, player.hand, player_index, faceoff_position, player.mass);
-            player.skater = new_object_index;
-
-            let update = HQMMessage::PlayerUpdate {
-                player_name: player.player_name.clone(),
-                object: new_object_index.map(|x| (x, team)),
-                player_index,
-
-                in_server: true,
-            };
-            messages.push(update);
-        }
+        self.game.world.create_puck_object(puck_pos, Matrix3::identity());
 
         for (player_index, (team, faceoff_position)) in positions {
-            if let Some(player) = & mut self.players[player_index] {
-                let (player_position, player_rotation) = match team {
-                    HQMTeam::Red => {
-                        faceoff_spot.red_player_positions[&faceoff_position].clone()
-                    }
-                    HQMTeam::Blue => {
-                        faceoff_spot.blue_player_positions[&faceoff_position].clone()
-                    }
-                };
-                setup (& mut messages, & mut self.game.world, player, player_index, faceoff_position, player_position,
-                       player_rotation.matrix().clone_owned(), team)
-            }
-
+            let (player_position, player_rotation) = match team {
+                HQMTeam::Red => {
+                    self.game.next_faceoff_spot.red_player_positions[&faceoff_position].clone()
+                }
+                HQMTeam::Blue => {
+                    self.game.next_faceoff_spot.blue_player_positions[&faceoff_position].clone()
+                }
+            };
+            self.move_to_team (player_index, team, player_position, player_rotation);
         }
 
         let rink = &self.game.world.rink;
@@ -339,9 +321,7 @@ impl HQMServer {
             HQMOffsideStatus::InNeutralZone
         };
 
-        for message in messages {
-            self.add_global_message(message, true);
-        }
+
 
     }
 

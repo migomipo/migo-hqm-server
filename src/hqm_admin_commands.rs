@@ -1,5 +1,5 @@
 use crate::hqm_server::{HQMServer, HQMServerMode, HQMMuteStatus, HQMIcingConfiguration, HQMOffsideConfiguration};
-use crate::hqm_game::{HQMGameObject, HQMMessage, HQMTeam, HQMGameState};
+use crate::hqm_game::{HQMGameObject, HQMTeam, HQMGameState};
 
 use tracing::info;
 use std::net::SocketAddr;
@@ -140,23 +140,12 @@ impl HQMServer {
                 let admin_player_name = player.player_name.clone();
 
                 if force_player_index < self.players.len() {
-                    if let Some(force_player) = & mut self.players[force_player_index] {
-
-                        force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
-                        if let Some (i) = force_player.skater {
-                            self.game.world.objects[i] = HQMGameObject::None;
-                            force_player.skater = None;
+                    if self.move_to_spectator(force_player_index) {
+                        if let Some(force_player) = & mut self.players[force_player_index] {
+                            force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
                             let force_player_name = force_player.player_name.clone();
                             let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
                             info!("{} ({}) forced {} ({}) off ice", admin_player_name, admin_player_index, force_player.player_name, force_player_index);
-
-                            self.add_global_message(HQMMessage::PlayerUpdate {
-                                player_name: force_player_name,
-                                object: None,
-                                player_index: force_player_index as usize,
-                                in_server: true
-                            },true);
-
                             self.add_server_chat_message(msg);
                         }
                     }
