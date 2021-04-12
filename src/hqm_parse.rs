@@ -2,6 +2,24 @@ use std::cmp::min;
 use nalgebra::{Vector3, U1, U3, Matrix3};
 use nalgebra::storage::Storage;
 
+const UXP: Vector3<f32> = Vector3::new(1.0, 0.0, 0.0);
+const UXN: Vector3<f32> = Vector3::new(-1.0, 0.0, 0.0);
+const UYP: Vector3<f32> = Vector3::new(0.0, 1.0, 0.0);
+const UYN: Vector3<f32> = Vector3::new(0.0, -1.0, 0.0);
+const UZP: Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
+const UZN: Vector3<f32> = Vector3::new(0.0, 0.0, -1.0);
+
+const TABLE: [[&'static Vector3<f32>; 3]; 8] = [
+[&UYP, &UXP, &UZP],
+[&UYP, &UZP, &UXN],
+[&UYP, &UZN, &UXP],
+[&UYP, &UXN, &UZN],
+[&UZP, &UXP, &UYN],
+[&UXN, &UZP, &UYN],
+[&UXP, &UZN, &UYN],
+[&UZN, &UXN, &UYN]
+];
+
 pub fn convert_matrix_to_network(b: u8, v: &Matrix3<f32>) -> (u32, u32) {
     let r1 = convert_rot_column_to_network(b, &v.column(1));
     let r2 = convert_rot_column_to_network(b, &v.column(2));
@@ -18,29 +36,12 @@ pub fn convert_matrix_from_network(b: u8, v1: u32, v2: u32) -> Matrix3<f32>{
 
 #[allow(dead_code)]
 fn convert_rot_column_from_network(b: u8, v: u32) -> Vector3<f32> {
-    let uxp = Vector3::x();
-    let uxn = -uxp;
-    let uyp = Vector3::y();
-    let uyn = -uyp;
-    let uzp = Vector3::z();
-    let uzn = -uzp;
-
-    let a = [
-        [&uyp, &uxp, &uzp],
-        [&uyp, &uzp, &uxn],
-        [&uyp, &uzn, &uxp],
-        [&uyp, &uxn, &uzn],
-        [&uzp, &uxp, &uyn],
-        [&uxn, &uzp, &uyn],
-        [&uxp, &uzn, &uyn],
-        [&uzn, &uxn, &uyn]
-    ];
 
     let start = v & 7;
 
-    let mut temp1 = a[start as usize][0].clone();
-    let mut temp2 = a[start as usize][1].clone();
-    let mut temp3 = a[start as usize][2].clone();
+    let mut temp1 = TABLE[start as usize][0].clone();
+    let mut temp2 = TABLE[start as usize][1].clone();
+    let mut temp3 = TABLE[start as usize][2].clone();
     let mut pos = 3;
     while pos < b {
         let step = (v >> pos) & 3;
@@ -76,24 +77,6 @@ fn convert_rot_column_from_network(b: u8, v: u32) -> Vector3<f32> {
 
 fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(b: u8, v: &nalgebra::Matrix<f32, U3, U1, S>) -> u32 {
 
-    let uxp = Vector3::x();
-    let uxn = -uxp;
-    let uyp = Vector3::y();
-    let uyn = -uyp;
-    let uzp = Vector3::z();
-    let uzn = -uzp;
-
-    let a = [
-        [&uyp, &uxp, &uzp],
-        [&uyp, &uzp, &uxn],
-        [&uyp, &uzn, &uxp],
-        [&uyp, &uxn, &uzn],
-        [&uzp, &uxp, &uyn],
-        [&uxn, &uzp, &uyn],
-        [&uxp, &uzn, &uyn],
-        [&uzn, &uxn, &uyn]
-    ];
-
     let mut res = 0;
 
     if v[0] < 0.0 {
@@ -105,9 +88,9 @@ fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(b: u8, v: &nalgebra::M
     if v[1] < 0.0 {
         res |= 4
     }
-    let mut temp1 = a[res as usize][0].clone();
-    let mut temp2 = a[res as usize][1].clone();
-    let mut temp3 = a[res as usize][2].clone();
+    let mut temp1 = TABLE[res as usize][0].clone();
+    let mut temp2 = TABLE[res as usize][1].clone();
+    let mut temp3 = TABLE[res as usize][2].clone();
     for i in (3..b).step_by(2) {
         let temp4 = (temp1 + temp2).normalize ();
         let temp5 = (temp2 + temp3).normalize ();
