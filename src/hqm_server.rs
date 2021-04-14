@@ -6,7 +6,7 @@ use std::cmp::min;
 use std::time::{Duration, Instant};
 
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
-use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMMessage, HQMGame, HQMPlayerInput, HQMIcingStatus, HQMOffsideStatus, HQMRulesState, HQMSkater};
+use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMMessage, HQMGame, HQMPlayerInput, HQMIcingStatus, HQMOffsideStatus, HQMRulesState, HQMSkater, HQMPhysicsConfiguration};
 use tokio::net::UdpSocket;
 use std::rc::Rc;
 use std::collections::{HashSet};
@@ -37,12 +37,12 @@ enum HQMServerReceivedData {
     }
 }
 
-pub(crate) struct HQMServer {
+pub struct HQMServer {
     pub(crate) players: Vec<Option<HQMConnectedPlayer>>,
     pub(crate) ban_list: HashSet<std::net::IpAddr>,
     pub(crate) allow_join: bool,
-    pub(crate) server_name: String,
     pub(crate) config: HQMServerConfiguration,
+    pub(crate) match_config: HQMMatchConfiguration,
     pub(crate) game: HQMGame,
     game_alloc: u32,
     pub(crate) is_muted:bool,
@@ -89,9 +89,9 @@ impl HQMServer {
         let player_count  = self.player_count();
         writer.write_bits(8, player_count as u32);
         writer.write_bits(4, 4);
-        writer.write_bits(4, self.config.team_max as u32);
+        writer.write_bits(4, self.match_config.team_max as u32);
 
-        writer.write_bytes_aligned_padded(32, self.server_name.as_ref());
+        writer.write_bytes_aligned_padded(32, self.config.server_name.as_ref());
 
         let written = writer.get_bytes_written();
         let socket = socket.clone();
@@ -533,12 +533,12 @@ impl HQMServer {
                 self.set_offside_rule (player_index, arg);
             },
             "rules" => {
-                let offside_str = match self.config.offside {
+                let offside_str = match self.match_config.offside {
                     HQMOffsideConfiguration::Off => "Offside disabled",
                     HQMOffsideConfiguration::Delayed => "Offside enabled",
                     HQMOffsideConfiguration::Immediate => "Immediate offside enabled"
                 };
-                let icing_str = match self.config.icing {
+                let icing_str = match self.match_config.icing {
                     HQMIcingConfiguration::Off => "Icing disabled",
                     HQMIcingConfiguration::Touch => "Icing enabled",
                     HQMIcingConfiguration::NoTouch => "No-touch icing enabled"
@@ -547,7 +547,7 @@ impl HQMServer {
                 self.add_directed_server_chat_message(msg, player_index);
             },
             "cheat" => {
-                if self.config.cheats_enabled {
+                if self.match_config.cheats_enabled {
                     self.cheat(player_index, arg);
                 }
             },
@@ -1008,15 +1008,15 @@ impl HQMServer {
                 }
             }
         }
-        let mut num_joining_red = joining_red.len().min(self.config.team_max.saturating_sub(red_player_count));
-        let mut num_joining_blue = joining_blue.len().min(self.config.team_max.saturating_sub(blue_player_count));
+        let mut num_joining_red = joining_red.len().min(self.match_config.team_max.saturating_sub(red_player_count));
+        let mut num_joining_blue = joining_blue.len().min(self.match_config.team_max.saturating_sub(blue_player_count));
 
-        if self.config.force_team_size_parity {
+        if self.match_config.force_team_size_parity {
             num_joining_red = num_joining_red.min(blue_player_count + num_joining_blue + 1 - red_player_count);
             num_joining_blue = num_joining_blue.min(red_player_count + num_joining_red + 1 - blue_player_count);
         }
         for (player_index, player_name) in &joining_red[0..num_joining_red] {
-            let (pos, rot) = match self.config.spawn_point {
+            let (pos, rot) = match self.match_config.spawn_point {
                 HQMSpawnPoint::Center => {
                     let (z, rot) = ((self.game.world.rink.length/2.0) + 3.0, 0.0);
                     let pos = Point3::new (self.game.world.rink.width / 2.0, 2.0, z);
@@ -1035,7 +1035,7 @@ impl HQMServer {
             self.move_to_team(*player_index, HQMTeam::Red, pos, rot);
         }
         for (player_index, player_name) in &joining_blue[0..num_joining_blue] {
-            let (pos, rot) = match self.config.spawn_point {
+            let (pos, rot) = match self.match_config.spawn_point {
                 HQMSpawnPoint::Center => {
                     let (z, rot) = ((self.game.world.rink.length/2.0) - 3.0, PI);
                     let pos = Point3::new (self.game.world.rink.width / 2.0, 2.0, z);
@@ -1075,7 +1075,7 @@ impl HQMServer {
                     }
                 }
                 let events = self.game.world.simulate_step();
-                if self.config.mode == HQMServerMode::Match {
+                if self.match_config.mode == HQMServerMode::Match {
                     self.handle_events(events);
                     self.update_clock();
                     self.game.update_game_state();
@@ -1106,29 +1106,16 @@ impl HQMServer {
 
     }
 
-    fn create_game (game_id: u32, config: &HQMServerConfiguration) -> HQMGame {
-        let mut game = HQMGame::new(game_id, config);
-        let puck_line_start= game.world.rink.width / 2.0 - 0.4 * ((config.warmup_pucks - 1) as f32);
-
-        for i in 0..config.warmup_pucks {
-            let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, game.world.rink.length / 2.0);
-            let rot = Matrix3::identity();
-            game.world.create_puck_object(pos, rot);
-        }
-
-        game
-    }
-
     pub(crate) fn new_game(&mut self) {
 
         let old_game = std::mem::replace(& mut self.game,
-                                         Self::create_game(self.game_alloc, &self.config));
+                                         create_game(self.game_alloc, &self.match_config));
         info!("New game {} started", self.game.game_id);
         self.game_alloc += 1;
 
         if self.config.replays_enabled && old_game.period != 0 {
             let time = old_game.start_time.format("%Y-%m-%dT%H%M%S").to_string();
-            let file_name = format!("{}.{}.hrp", self.server_name, time);
+            let file_name = format!("{}.{}.hrp", self.config.server_name, time);
             let replay_data = old_game.replay_data;
 
             let game_id = old_game.game_id;
@@ -1181,83 +1168,88 @@ impl HQMServer {
             self.add_global_message(message, true);
         }
 
-        self.game.time = self.config.time_warmup * 100;
+
 
     }
 
-    pub async fn run_server(server_name: String, port: u16, public: bool, config: HQMServerConfiguration) -> std::io::Result<()> {
-        let mut player_vec = Vec::with_capacity(64);
-        for _ in 0..64 {
-            player_vec.push(None);
-        }
 
-        let mut server = HQMServer {
-            players: player_vec,
-            ban_list: HashSet::new(),
-            allow_join:true,
-            server_name,
-            game: Self::create_game(1, &config),
-            game_alloc: 2,
-            is_muted:false,
-            config,
-        };
+}
 
-        info!("Server started, new game {} started", 1);
+pub async fn run_server(port: u16, public: bool,
+                        config: HQMServerConfiguration,
+                        match_config: HQMMatchConfiguration) -> std::io::Result<()> {
+    let mut player_vec = Vec::with_capacity(64);
+    for _ in 0..64 {
+        player_vec.push(None);
+    }
 
-        // Set up timers
-        let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
+    let mut server = HQMServer {
+        players: player_vec,
+        ban_list: HashSet::new(),
+        allow_join:true,
+        game: create_game(1, &match_config),
+        game_alloc: 2,
+        is_muted:false,
+        config,
+        match_config,
+    };
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    info!("Server started, new game {} started", 1);
 
-        let socket = Arc::new (tokio::net::UdpSocket::bind(& addr).await?);
-        info!("Server listening at address {:?}", socket.local_addr().unwrap());
+    // Set up timers
+    let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
 
-        if public {
-            let socket = socket.clone();
-            tokio::spawn(async move {
-                loop {
-                    let master_server = get_master_server().await.ok();
-                    if let Some (addr) = master_server {
-                        for _ in 0..60 {
-                            let msg = b"Hock\x20";
-                            let res = socket.send_to(msg, addr).await;
-                            if res.is_err() {
-                                break;
-                            }
-                            tokio::time::sleep(Duration::from_secs(10)).await;
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    let socket = Arc::new (tokio::net::UdpSocket::bind(& addr).await?);
+    info!("Server listening at address {:?}", socket.local_addr().unwrap());
+
+    if public {
+        let socket = socket.clone();
+        tokio::spawn(async move {
+            loop {
+                let master_server = get_master_server().await.ok();
+                if let Some (addr) = master_server {
+                    for _ in 0..60 {
+                        let msg = b"Hock\x20";
+                        let res = socket.send_to(msg, addr).await;
+                        if res.is_err() {
+                            break;
                         }
-                    } else {
-                        tokio::time::sleep(Duration::from_secs(15)).await;
+                        tokio::time::sleep(Duration::from_secs(10)).await;
                     }
+                } else {
+                    tokio::time::sleep(Duration::from_secs(15)).await;
                 }
-            });
-        }
-        let (msg_sender, mut msg_receiver) = tokio::sync::mpsc::channel(256);
-        {
-            let socket = socket.clone();
+            }
+        });
+    }
+    let (msg_sender, mut msg_receiver) = tokio::sync::mpsc::channel(256);
+    {
+        let socket = socket.clone();
 
-            tokio::spawn(async move {
-                loop {
-                    let mut buf = BytesMut::new();
-                    buf.resize(512, 0u8);
+        tokio::spawn(async move {
+            loop {
+                let mut buf = BytesMut::new();
+                buf.resize(512, 0u8);
 
-                    match socket.recv_from(&mut buf).await {
-                        Ok((size, addr)) => {
-                            buf.truncate(size);
-                            let _ = msg_sender.send(HQMServerReceivedData::GameClientPacket {
-                                addr,
-                                data: buf.freeze()
-                            }).await;
-                        }
-                        Err(_) => {}
+                match socket.recv_from(&mut buf).await {
+                    Ok((size, addr)) => {
+                        buf.truncate(size);
+                        let _ = msg_sender.send(HQMServerReceivedData::GameClientPacket {
+                            addr,
+                            data: buf.freeze()
+                        }).await;
                     }
+                    Err(_) => {}
                 }
-            });
-        };
+            }
+        });
+    };
 
-        let mut write_buf = vec![0u8; 4096];
-        loop {
-            tokio::select! {
+    let mut write_buf = vec![0u8; 4096];
+    loop {
+        tokio::select! {
                 _ = tick_timer.tick() => {
                     server.tick(& socket, & mut write_buf).await;
                 }
@@ -1270,8 +1262,23 @@ impl HQMServer {
                     }
                 }
             }
-        }
     }
+}
+
+fn create_game (game_id: u32, config: &HQMMatchConfiguration) -> HQMGame {
+    let mut game = HQMGame::new(game_id, config.warmup_pucks,HQMPhysicsConfiguration {
+        gravity: 0.000680555,
+        limit_jump_speed: config.limit_jump_speed
+    });
+    let puck_line_start= game.world.rink.width / 2.0 - 0.4 * ((config.warmup_pucks - 1) as f32);
+
+    for i in 0..config.warmup_pucks {
+        let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, game.world.rink.length / 2.0);
+        let rot = Matrix3::identity();
+        game.world.create_puck_object(pos, rot);
+    }
+    game.time = config.time_warmup * 100;
+    game
 }
 
 
@@ -1700,14 +1707,20 @@ pub enum HQMServerMode {
     PermanentWarmup
 }
 
-pub(crate) struct HQMServerConfiguration {
+pub struct HQMServerConfiguration {
+    pub(crate) welcome: Vec<String>,
+    pub(crate) password: String,
     pub(crate) player_max: usize,
+    pub(crate) replays_enabled: bool,
+    pub(crate) server_name: String,
+}
+
+pub struct HQMMatchConfiguration {
+
     pub(crate) team_max: usize,
     pub(crate) force_team_size_parity: bool,
-    pub(crate) welcome: Vec<String>,
     pub(crate) mode: HQMServerMode,
 
-    pub(crate) password: String,
 
     pub(crate) time_period: u32,
     pub(crate) time_warmup: u32,
@@ -1722,11 +1735,8 @@ pub(crate) struct HQMServerConfiguration {
 
     pub(crate) cheats_enabled: bool,
 
-    pub(crate) replays_enabled: bool,
+
 
     pub(crate) spawn_point: HQMSpawnPoint,
 }
 
-trait HQMServerBehaviour {
-
-}

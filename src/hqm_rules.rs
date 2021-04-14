@@ -17,22 +17,22 @@ impl HQMServer {
             }
         };
 
-        self.game.time_break = self.config.time_break *100;
+        self.game.time_break = self.match_config.time_break *100;
         self.game.is_intermission_goal = true;
         self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
 
         let game_over = if self.game.period > 3 && self.game.red_score != self.game.blue_score {
             true
-        } else if self.config.mercy > 0 && new_score.saturating_sub(opponent_score) >= self.config.mercy {
+        } else if self.match_config.mercy > 0 && new_score.saturating_sub(opponent_score) >= self.match_config.mercy {
             true
-        } else if self.config.first_to > 0 && new_score >= self.config.first_to {
+        } else if self.match_config.first_to > 0 && new_score >= self.match_config.first_to {
             true
         } else {
             false
         };
 
         if game_over {
-            self.game.time_break = self.config.time_intermission*100;
+            self.game.time_break = self.match_config.time_intermission*100;
             self.game.game_over = true;
         }
 
@@ -59,14 +59,14 @@ impl HQMServer {
     fn call_offside(&mut self, team: HQMTeam, pass_origin: &Point3<f32>) {
 
         self.game.next_faceoff_spot = self.game.world.rink.get_offside_faceoff_spot(pass_origin, team);
-        self.game.time_break = self.config.time_break *100;
+        self.game.time_break = self.match_config.time_break * 100;
         self.game.offside_status = HQMOffsideStatus::Offside(team);
         self.add_server_chat_message(String::from("Offside"));
     }
 
     fn call_icing(& mut self, team: HQMTeam, pass_origin: &Point3<f32>) {
         self.game.next_faceoff_spot = self.game.world.rink.get_icing_faceoff_spot(pass_origin, team);
-        self.game.time_break = self.config.time_break *100;
+        self.game.time_break = self.match_config.time_break * 100;
         self.game.icing_status = HQMIcingStatus::Icing(team);
         self.add_server_chat_message(String::from("Icing"));
     }
@@ -162,7 +162,7 @@ impl HQMServer {
 
                     if let HQMIcingStatus::NotTouched(icing_team, p) = &self.game.icing_status {
                         if team == *icing_team {
-                            match self.config.icing {
+                            match self.match_config.icing {
                                 HQMIcingConfiguration::Touch => {
                                     self.game.icing_status = HQMIcingStatus::Warning(team, p.clone());
                                     self.add_server_chat_message(String::from("Icing warning"));
@@ -184,7 +184,7 @@ impl HQMServer {
                             if let Some(touch) = puck.touches.front() {
                                 if team == touch.team &&
                                     has_players_in_offensive_zone(& self.game.world, team) {
-                                    match self.config.offside {
+                                    match self.match_config.offside {
                                         HQMOffsideConfiguration::Delayed => {
                                             self.game.offside_status = HQMOffsideStatus::Warning(team, touch.puck_pos.clone(), touch.player_index);
                                             self.add_server_chat_message(String::from("Offside warning"));
@@ -257,7 +257,7 @@ impl HQMServer {
                         self.new_game();
                     } else {
                         if self.game.time == 0 {
-                            self.game.time = self.config.time_period*100;
+                            self.game.time = self.match_config.time_period*100;
                         }
                         self.do_faceoff();
                     }
@@ -268,10 +268,10 @@ impl HQMServer {
                 if self.game.time == 0 {
                     self.game.period += 1;
                     if self.game.period > 3 && self.game.red_score != self.game.blue_score {
-                        self.game.time_break = self.config.time_intermission*100;
+                        self.game.time_break = self.match_config.time_intermission*100;
                         self.game.game_over = true;
                     } else {
-                        self.game.time_break = self.config.time_intermission*100;
+                        self.game.time_break = self.match_config.time_intermission*100;
                         self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
                     }
                 }

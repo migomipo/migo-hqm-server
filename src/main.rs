@@ -4,7 +4,7 @@ use std::path::Path;
 extern crate ini;
 use ini::Ini;
 use std::env;
-use crate::hqm_server::{HQMServer, HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration, HQMServerMode, HQMSpawnPoint};
+use crate::hqm_server::{HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration, HQMServerMode, HQMSpawnPoint, HQMMatchConfiguration};
 
 mod hqm_parse;
 mod hqm_simulate;
@@ -105,10 +105,15 @@ async fn main() -> std::io::Result<()> {
         });
 
         let config = HQMServerConfiguration {
-            team_max: server_team_max,
-            player_max: server_player_max,
-
+            welcome: welcome_str,
             password: server_password,
+            player_max: server_player_max,
+            replays_enabled,
+            server_name
+        };
+
+        let match_config = HQMMatchConfiguration {
+            team_max: server_team_max,
 
             time_period: rules_time_period, 
             time_warmup: rules_time_warmup, 
@@ -122,11 +127,8 @@ async fn main() -> std::io::Result<()> {
             force_team_size_parity,
             limit_jump_speed,
             cheats_enabled,
-            replays_enabled,
             spawn_point,
-            welcome: welcome_str,
             mode,
-
         };
 
         let file_appender = tracing_appender::rolling::daily("log", log_name);
@@ -136,7 +138,7 @@ async fn main() -> std::io::Result<()> {
             .init();
 
         // Config file didn't exist; use defaults as described
-        return HQMServer::run_server(server_name, server_port, server_public, config).await;
+        return hqm_server::run_server(server_port, server_public, config, match_config).await;
     } else {
         println! ("Could not open configuration file {}!", config_path);
         return Ok(())

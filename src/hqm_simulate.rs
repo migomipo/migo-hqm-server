@@ -57,7 +57,7 @@ impl HQMGameWorld {
 
         let mut collisions = vec![];
         for (i, player) in players.iter_mut().enumerate() {
-            update_player(i, player, self.gravity, self.limit_jump_speed, & self.rink, & mut collisions);
+            update_player(i, player, self.physics_config.gravity, self.physics_config.limit_jump_speed, & self.rink, & mut collisions);
         }
 
         for i in 0..players.len() {
@@ -95,7 +95,7 @@ impl HQMGameWorld {
         let pucks_old_pos: Vec<Point3<f32>> = pucks.iter().map(|x| x.body.pos.clone()).collect();
 
         for puck in pucks.iter_mut() {
-            puck.body.linear_velocity[1] -= self.gravity;
+            puck.body.linear_velocity[1] -= self.physics_config.gravity;
         }
 
         update_sticks_and_pucks (& mut players, & mut pucks, & self.rink, & mut events);

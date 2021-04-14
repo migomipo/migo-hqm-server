@@ -4,7 +4,7 @@ use std::fmt;
 use crate::hqm_parse;
 use crate::hqm_parse::{HQMSkaterPacket, HQMPuckPacket};
 
-use crate::hqm_server::{HQMServerConfiguration, HQMSavedTick};
+use crate::hqm_server::{HQMSavedTick};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
 use std::rc::Rc;
@@ -14,8 +14,7 @@ pub(crate) struct HQMGameWorld {
     pub(crate) objects: Vec<HQMGameObject>,
     pub(crate) puck_slots: usize,
     pub(crate) rink: HQMRink,
-    pub(crate) gravity: f32,
-    pub(crate) limit_jump_speed: bool,
+    pub(crate) physics_config: HQMPhysicsConfiguration
 }
 
 impl HQMGameWorld {
@@ -131,8 +130,13 @@ pub(crate) struct HQMGame {
     pub(crate) active: bool,
 }
 
+pub struct HQMPhysicsConfiguration {
+    pub(crate) gravity: f32,
+    pub(crate) limit_jump_speed: bool,
+}
+
 impl HQMGame {
-    pub(crate) fn new (game_id: u32, config: &HQMServerConfiguration) -> Self {
+    pub(crate) fn new (game_id: u32, puck_slots: usize, config: HQMPhysicsConfiguration) -> Self {
         let mut object_vec = Vec::with_capacity(32);
         for _ in 0..32 {
             object_vec.push(HQMGameObject::None);
@@ -144,11 +148,7 @@ impl HQMGame {
             start_time: Utc::now(),
             state:HQMGameState::Warmup,
             persistent_messages: vec![],
-            replay_data: if config.replays_enabled {
-                Vec::with_capacity(64 * 1024 * 1024)
-            } else {
-                Vec::new()
-            },
+            replay_data: Vec::with_capacity(64 * 1024 * 1024),
             replay_msg_pos: 0,
             replay_last_packet: u32::MAX,
             replay_messages: vec![],
@@ -158,10 +158,9 @@ impl HQMGame {
             next_faceoff_spot: mid_faceoff,
             world: HQMGameWorld {
                 objects: object_vec,
-                puck_slots: config.warmup_pucks,
+                puck_slots,
                 rink,
-                gravity: 0.000680555,
-                limit_jump_speed: config.limit_jump_speed
+                physics_config: config
             },
             red_score: 0,
             blue_score: 0,

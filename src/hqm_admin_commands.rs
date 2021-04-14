@@ -416,7 +416,7 @@ impl HQMServer {
     }
 
     pub(crate) fn faceoff (& mut self, player_index: usize) {
-        if self.config.mode == HQMServerMode::Match && self.game.state != HQMGameState::GameOver {
+        if self.match_config.mode == HQMServerMode::Match && self.game.state != HQMGameState::GameOver {
             if let Some(player) = & self.players[player_index] {
                 if player.is_admin{
                     self.game.time_break = 5*100;
@@ -450,7 +450,7 @@ impl HQMServer {
     pub(crate) fn start_game (& mut self, player_index: usize) {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin {
-                if self.config.mode == HQMServerMode::Match && self.game.state == HQMGameState::Warmup {
+                if self.match_config.mode == HQMServerMode::Match && self.game.state == HQMGameState::Warmup {
                     info!("{} ({}) started game", player.player_name, player_index);
                     let msg = format!("Game started by {}", player.player_name);
 
@@ -496,21 +496,21 @@ impl HQMServer {
             if player.is_admin{
                 match rule {
                     "on" | "touch" => {
-                        self.config.icing = HQMIcingConfiguration::Touch;
+                        self.match_config.icing = HQMIcingConfiguration::Touch;
                         info!("{} ({}) enabled touch icing",player.player_name, player_index);
                         let msg = format!("Touch icing enabled by {}",player.player_name);
 
                         self.add_server_chat_message(msg);
                     },
                     "notouch" => {
-                        self.config.icing = HQMIcingConfiguration::NoTouch;
+                        self.match_config.icing = HQMIcingConfiguration::NoTouch;
                         info!("{} ({}) enabled no-touch icing",player.player_name, player_index);
                         let msg = format!("No-touch icing enabled by {}",player.player_name);
 
                         self.add_server_chat_message(msg);
                     },
                     "off" => {
-                        self.config.icing = HQMIcingConfiguration::Off;
+                        self.match_config.icing = HQMIcingConfiguration::Off;
                         info!("{} ({}) disabled icing",player.player_name, player_index);
                         let msg = format!("Icing disabled by {}",player.player_name);
 
@@ -529,21 +529,21 @@ impl HQMServer {
             if player.is_admin{
                 match rule {
                     "on" | "delayed" => {
-                        self.config.offside = HQMOffsideConfiguration::Delayed;
+                        self.match_config.offside = HQMOffsideConfiguration::Delayed;
                         info!("{} ({}) enabled offside", player.player_name, player_index);
                         let msg = format!("Offside enabled by {}",player.player_name);
 
                         self.add_server_chat_message(msg);
                     },
                     "imm" | "immediate" => {
-                        self.config.offside = HQMOffsideConfiguration::Immediate;
+                        self.match_config.offside = HQMOffsideConfiguration::Immediate;
                         info!("{} ({}) enabled immediate offside", player.player_name, player_index);
                         let msg = format!("Immediate offside enabled by {}",player.player_name);
 
                         self.add_server_chat_message(msg);
                     },
                     "off" => {
-                        self.config.offside = HQMOffsideConfiguration::Off;
+                        self.match_config.offside = HQMOffsideConfiguration::Off;
                         info!("{} ({}) disabled offside",player.player_name, player_index);
                         let msg = format!("Offside disabled by {}",player.player_name);
 
@@ -561,7 +561,7 @@ impl HQMServer {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<u32>() {
-                    self.config.first_to = new_num;
+                    self.match_config.first_to = new_num;
 
                     if new_num > 0 {
                         info!("{} ({}) set first-to-goals rule to {} goals",player.player_name, player_index, new_num);
@@ -584,7 +584,7 @@ impl HQMServer {
         if let Some(player) = & self.players[player_index] {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<u32>() {
-                    self.config.mercy = new_num;
+                    self.match_config.mercy = new_num;
 
                     if new_num > 0 {
                         info!("{} ({}) set mercy rule to {} goals",player.player_name, player_index, new_num);
@@ -607,7 +607,7 @@ impl HQMServer {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<usize>() {
                     if new_num > 0 && new_num <= 15 {
-                        self.config.team_max = new_num;
+                        self.match_config.team_max = new_num;
 
                         info!("{} ({}) set team size to {}",player.player_name, player_index, new_num);
                         let msg = format!("Team size set to {} by {}", new_num, player.player_name);
@@ -657,7 +657,7 @@ impl HQMServer {
             if player.is_admin{
                 match rule {
                     "on" => {
-                        self.config.force_team_size_parity = true;
+                        self.match_config.force_team_size_parity = true;
 
                         info!("{} ({}) enabled team size parity",player.player_name, player_index);
                         let msg = format!("Team size parity enabled by {}", player.player_name);
@@ -665,7 +665,7 @@ impl HQMServer {
                         self.add_server_chat_message(msg);
                     },
                     "off" => {
-                        self.config.force_team_size_parity = false;
+                        self.match_config.force_team_size_parity = false;
 
                         info!("{} ({}) disabled team size parity",player.player_name, player_index);
                         let msg = format!("Team size parity disabled by {}", player.player_name);
@@ -684,7 +684,7 @@ impl HQMServer {
         if split.len() >= 2 {
             let gravity = split[1].parse::<f32>();
             if let Ok (gravity) = gravity {
-                self.game.world.gravity = gravity/10000.0;
+                self.game.world.physics_config.gravity = gravity/10000.0;
             }
         }
     }
