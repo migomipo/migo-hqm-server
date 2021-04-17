@@ -15,6 +15,7 @@ mod hqm_rules;
 
 use tracing_subscriber;
 use tracing_appender;
+use ini::ini::Properties;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -70,36 +71,37 @@ async fn main() -> std::io::Result<()> {
             .map(String::from)
             .filter(|x| !x.is_empty()).collect();
 
+        fn get_optional <U, F: FnOnce(&str) -> U>(section: Option<&Properties>, property: &str, default: U, f: F) -> U {
+            section.and_then( |x| x.get(property)).map_or(default, f)
+        }
+
         // Game
-        let game_section = conf.section(Some("Game")).unwrap();
+        let game_section = conf.section(Some("Game"));
 
-        let rules_time_period = game_section.get("time_period").map_or(300, |x| x.parse::<u32>().unwrap());
-        let rules_time_warmup = game_section.get("time_warmup").map_or(300, |x| x.parse::<u32>().unwrap());
-        let rule_time_break = game_section.get("time_break").map_or(10, |x| x.parse::<u32>().unwrap());
-        let rule_time_intermission = game_section.get("time_intermission").map_or(20, |x| x.parse::<u32>().unwrap());
-        let warmup_pucks = game_section.get("warmup_pucks").map_or_else(|| 1, |x| x.parse::<usize>().unwrap());
+        let rules_time_period = get_optional(game_section, "time_period", 300, |x| x.parse::<u32>().unwrap());
+        let rules_time_warmup = get_optional(game_section, "time_warmup", 300, |x| x.parse::<u32>().unwrap());
+        let rule_time_break = get_optional(game_section, "time_break", 10, |x| x.parse::<u32>().unwrap());
+        let rule_time_intermission = get_optional(game_section, "time_intermission", 20, |x| x.parse::<u32>().unwrap());
+        let warmup_pucks = get_optional(game_section, "warmup_pucks", 1, |x| x.parse::<usize>().unwrap());
 
-        let mercy = game_section.get("mercy").map_or(0, |x| x.parse::<u32>().unwrap());
-        let first_to = game_section.get("first").map_or(0, |x| x.parse::<u32>().unwrap());
+        let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, |x| x.eq_ignore_ascii_case("true"));
 
-        let limit_jump_speed = match game_section.get("limit_jump_speed") {
-            Some(s) => s.eq_ignore_ascii_case("true"),
-            None => false
-        };
+        let mercy = get_optional(game_section, "mercy", 0, |x| x.parse::<u32>().unwrap());
+        let first_to = get_optional(game_section, "first", 0, |x| x.parse::<u32>().unwrap());
 
-        let icing = game_section.get("icing").map_or(HQMIcingConfiguration::Off, |x| match x {
+        let icing = get_optional(game_section, "icing", HQMIcingConfiguration::Off, |x| match x {
             "on" | "touch" => HQMIcingConfiguration::Touch,
             "notouch" => HQMIcingConfiguration::NoTouch,
             _ => HQMIcingConfiguration::Off
         });
 
-        let offside = game_section.get("offside").map_or(HQMOffsideConfiguration::Off, |x| match x {
+        let offside = get_optional(game_section, "offside", HQMOffsideConfiguration::Off, |x| match x {
             "on" | "delayed" => HQMOffsideConfiguration::Delayed,
             "immediate" | "imm" => HQMOffsideConfiguration::Immediate,
             _ => HQMOffsideConfiguration::Off
         });
 
-        let spawn_point = game_section.get("spawn").map_or(HQMSpawnPoint::Center, |x| match x {
+        let spawn_point = get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
             "bench" => HQMSpawnPoint::Bench,
             _ => HQMSpawnPoint::Center
         });
