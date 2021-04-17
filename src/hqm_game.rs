@@ -130,6 +130,7 @@ pub(crate) struct HQMGame {
     pub(crate) active: bool,
 }
 
+#[derive(Debug, Clone)]
 pub struct HQMPhysicsConfiguration {
     pub(crate) gravity: f32,
     pub(crate) limit_jump_speed: bool,

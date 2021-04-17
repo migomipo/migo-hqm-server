@@ -684,7 +684,9 @@ impl HQMServer {
         if split.len() >= 2 {
             let gravity = split[1].parse::<f32>();
             if let Ok (gravity) = gravity {
-                self.game.world.physics_config.gravity = gravity/10000.0;
+                let converted_gravity = gravity/10000.0;
+                self.match_config.physics_config.gravity = converted_gravity;
+                self.game.world.physics_config.gravity = converted_gravity;
             }
         }
     }

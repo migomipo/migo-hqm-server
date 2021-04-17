@@ -1266,10 +1266,7 @@ pub async fn run_server(port: u16, public: bool,
 }
 
 fn create_game (game_id: u32, config: &HQMMatchConfiguration) -> HQMGame {
-    let mut game = HQMGame::new(game_id, config.warmup_pucks,HQMPhysicsConfiguration {
-        gravity: 0.000680555,
-        limit_jump_speed: config.limit_jump_speed
-    });
+    let mut game = HQMGame::new(game_id, config.warmup_pucks, config.physics_config.clone());
     let puck_line_start= game.world.rink.width / 2.0 - 0.4 * ((config.warmup_pucks - 1) as f32);
 
     for i in 0..config.warmup_pucks {
@@ -1731,11 +1728,9 @@ pub struct HQMMatchConfiguration {
     pub(crate) offside: HQMOffsideConfiguration,
     pub(crate) icing: HQMIcingConfiguration,
     pub(crate) warmup_pucks: usize,
-    pub(crate) limit_jump_speed: bool,
+    pub(crate) physics_config: HQMPhysicsConfiguration,
 
     pub(crate) cheats_enabled: bool,
-
-
 
     pub(crate) spawn_point: HQMSpawnPoint,
 }

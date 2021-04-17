@@ -16,6 +16,7 @@ mod hqm_rules;
 use tracing_subscriber;
 use tracing_appender;
 use ini::ini::Properties;
+use crate::hqm_game::HQMPhysicsConfiguration;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -127,10 +128,14 @@ async fn main() -> std::io::Result<()> {
             offside,
             warmup_pucks,
             force_team_size_parity,
-            limit_jump_speed,
+
             cheats_enabled,
             spawn_point,
             mode,
+            physics_config: HQMPhysicsConfiguration {
+                gravity: 0.000680555,
+                limit_jump_speed
+            }
         };
 
         let file_appender = tracing_appender::rolling::daily("log", log_name);
