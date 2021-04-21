@@ -4,19 +4,26 @@ use std::path::Path;
 extern crate ini;
 use ini::Ini;
 use std::env;
-use crate::hqm_server::{HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration, HQMServerMode, HQMSpawnPoint, HQMMatchConfiguration};
+use crate::hqm_server::{HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration, HQMSpawnPoint, HQMMatchConfiguration};
 
 mod hqm_parse;
 mod hqm_simulate;
 mod hqm_game;
 mod hqm_server;
 mod hqm_admin_commands;
-mod hqm_rules;
+mod hqm_match;
+mod hqm_warmup;
 
 use tracing_subscriber;
 use tracing_appender;
 use ini::ini::Properties;
 use crate::hqm_game::HQMPhysicsConfiguration;
+use crate::hqm_match::HQMMatchBehaviour;
+use crate::hqm_warmup::HQMPermanentWarmup;
+
+enum HQMServerMode {
+    Match, PermanentWarmup
+}
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -112,40 +119,50 @@ async fn main() -> std::io::Result<()> {
             password: server_password,
             player_max: server_player_max,
             replays_enabled,
-            server_name
-        };
-
-        let match_config = HQMMatchConfiguration {
+            server_name,
             team_max: server_team_max,
-
-            time_period: rules_time_period, 
-            time_warmup: rules_time_warmup, 
-            time_break: rule_time_break,
-            time_intermission: rule_time_intermission,
-            mercy,
-            first_to,
-            icing,
-            offside,
-            warmup_pucks,
-            force_team_size_parity,
-
-            cheats_enabled,
-            spawn_point,
-            mode,
-            physics_config: HQMPhysicsConfiguration {
-                gravity: 0.000680555,
-                limit_jump_speed
-            }
         };
-
         let file_appender = tracing_appender::rolling::daily("log", log_name);
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
         tracing_subscriber::fmt()
             .with_writer(non_blocking)
             .init();
 
-        // Config file didn't exist; use defaults as described
-        return hqm_server::run_server(server_port, server_public, config, match_config).await;
+        return match mode {
+            HQMServerMode::Match => {
+                let match_config = HQMMatchConfiguration {
+
+                    time_period: rules_time_period,
+                    time_warmup: rules_time_warmup,
+                    time_break: rule_time_break,
+                    time_intermission: rule_time_intermission,
+                    mercy,
+                    first_to,
+                    icing,
+                    offside,
+                    warmup_pucks,
+                    force_team_size_parity,
+
+                    cheats_enabled,
+                    spawn_point,
+                    physics_config: HQMPhysicsConfiguration {
+                        gravity: 0.000680555,
+                        limit_jump_speed
+                    }
+                };
+
+                hqm_server::run_server(server_port, server_public, config, HQMMatchBehaviour::new (match_config)).await
+            }
+            HQMServerMode::PermanentWarmup => {
+
+                hqm_server::run_server(server_port, server_public, config,
+                                       HQMPermanentWarmup::new(HQMPhysicsConfiguration {
+                    gravity: 0.000680555,
+                    limit_jump_speed
+                }, warmup_pucks, spawn_point)).await
+            }
+        }
+
     } else {
         println! ("Could not open configuration file {}!", config_path);
         return Ok(())

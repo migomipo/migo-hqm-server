@@ -1,27 +1,25 @@
-use std::net::{SocketAddr};
-
-use nalgebra::{Point3, Matrix3, Vector2, Rotation3};
-
 use std::cmp::min;
+use std::collections::HashSet;
+use std::collections::VecDeque;
+use std::error::Error;
+use std::net::SocketAddr;
+use std::net::IpAddr;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
-use crate::hqm_game::{HQMTeam, HQMGameObject, HQMGameState, HQMSkaterHand, HQMMessage, HQMGame, HQMPlayerInput, HQMIcingStatus, HQMOffsideStatus, HQMRulesState, HQMSkater, HQMPhysicsConfiguration};
-use tokio::net::UdpSocket;
-use std::rc::Rc;
-use std::collections::{HashSet};
-use std::sync::Arc;
-use bytes::{BytesMut, Bytes};
-
-use tracing::info;
-use std::collections::VecDeque;
-use std::f32::consts::{PI, FRAC_PI_2};
-
-use std::net::IpAddr;
-use std::error::Error;
-use tokio::io::AsyncWriteExt;
+use bytes::{Bytes, BytesMut};
+use nalgebra::{Point3, Rotation3, Vector2};
 use tokio::fs::File;
-use std::path::PathBuf;
+use tokio::io::AsyncWriteExt;
+use tokio::net::UdpSocket;
+use tracing::info;
+
+use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameState, HQMIcingStatus, HQMMessage, HQMOffsideStatus, HQMPhysicsConfiguration, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam};
+use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
+use crate::hqm_simulate::HQMSimulationEvent;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 const GAME_HEADER: &[u8] = b"Hock";
 
@@ -37,18 +35,18 @@ enum HQMServerReceivedData {
     }
 }
 
-pub struct HQMServer {
+pub struct HQMServer<B: HQMServerBehaviour> {
     pub(crate) players: Vec<Option<HQMConnectedPlayer>>,
     pub(crate) ban_list: HashSet<std::net::IpAddr>,
     pub(crate) allow_join: bool,
     pub(crate) config: HQMServerConfiguration,
-    pub(crate) match_config: HQMMatchConfiguration,
     pub(crate) game: HQMGame,
     game_alloc: u32,
-    pub(crate) is_muted:bool,
+    pub is_muted:bool,
+    pub behaviour: B,
 }
 
-impl HQMServer {
+impl <B:HQMServerBehaviour> HQMServer<B> {
     async fn handle_message(&mut self, addr: SocketAddr, socket: & Arc<UdpSocket>, msg: &[u8]) {
         let mut parser = HQMMessageReader::new(&msg);
         let header = parser.read_bytes_aligned(4);
@@ -89,7 +87,7 @@ impl HQMServer {
         let player_count  = self.player_count();
         writer.write_bits(8, player_count as u32);
         writer.write_bits(4, 4);
-        writer.write_bits(4, self.match_config.team_max as u32);
+        writer.write_bits(4, self.config.team_max as u32);
 
         writer.write_bytes_aligned_padded(32, self.config.server_name.as_ref());
 
@@ -241,7 +239,7 @@ impl HQMServer {
     }
 
 
-    fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
+    pub(crate) fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
         if let Some(player) = & mut self.players[player_index] {
             player.hand = hand;
             if let Some(skater_obj_index) = player.skater {
@@ -258,6 +256,7 @@ impl HQMServer {
             }
         }
     }
+
 
     fn process_command (&mut self, command: &str, arg: &str, player_index: usize) {
 
@@ -325,144 +324,12 @@ impl HQMServer {
             "clearbans" => {
                 self.clear_bans(player_index);
             },
-            "set" => {
-                let args = arg.split(" ").collect::<Vec<&str>>();
-                if args.len() > 1{
-                    match args[0]{
-                        "redscore" =>{
 
-                            let input_score = match args[1].parse::<i32>() {
-                                Ok(input_score) => input_score,
-                                Err(_) => -1
-                            };
-
-                            if input_score >= 0{
-                                self.set_score(HQMTeam::Red,input_score as u32,player_index)
-                            }
-                        },
-                        "bluescore" =>{
-                            let input_score = match args[1].parse::<i32>() {
-                                Ok(input_score) => input_score,
-                                Err(_) => -1
-                            };
-
-                            if input_score >= 0{
-                                self.set_score(HQMTeam::Blue,input_score as u32,player_index)
-                            }
-                        },
-                        "period" =>{
-                            let input_period = match args[1].parse::<i32>() {
-                                Ok(input_period) => input_period,
-                                Err(_) => -1
-                            };
-
-                            if input_period >= 0{
-                                self.set_period(input_period as u32,player_index)
-                            }
-                        },
-                        "clock" =>{
-
-                            let time_part_string = match args[1].parse::<String>(){
-                                Ok(time_part_string) => time_part_string,
-                                Err(_) => {return;}
-                            };
-
-                            let time_parts: Vec<&str> = time_part_string.split(':').collect();
-
-                            if time_parts.len() >= 2{
-                                let time_minutes = match time_parts[0].parse::<i32>() {
-                                    Ok(time_minutes) => time_minutes,
-                                    Err(_) => -1
-                                };
-
-                                let time_seconds = match time_parts[1].parse::<i32>() {
-                                    Ok(time_seconds) => time_seconds,
-                                    Err(_) => -1
-                                };
-
-                                if time_minutes < 0 || time_seconds < 0{
-                                    return;
-                                }
-
-                                self.set_clock(time_minutes as u32,time_seconds as u32, player_index);
-                            }
-                        },
-                        "hand" =>{
-                            match args[1]{
-                                "left" =>{
-                                    self.set_hand(HQMSkaterHand::Left, player_index);
-                                },
-                                "right" =>{
-                                    self.set_hand(HQMSkaterHand::Right, player_index);
-                                },
-                                _=>{}
-                            }
-                        },
-                        "icing" => {
-                            if let Some(arg) = args.get(1) {
-                                self.set_icing_rule(player_index, arg);
-                            }
-                        },
-                        "offside" => {
-                            if let Some(arg) = args.get(1) {
-                                self.set_offside_rule(player_index, arg);
-                            }
-                        },
-                        "mercy" => {
-                            if let Some(arg) = args.get(1) {
-                                self.set_mercy_rule(player_index, arg);
-                            }
-                        },
-                        "first" => {
-                            if let Some(arg) = args.get(1) {
-                                self.set_first_to_rule(player_index, arg);
-                            }
-                        }
-                        "teamsize" => {
-                            if let Some(arg) = args.get(1) {
-                                self.set_team_size(player_index, arg);
-                            }
-                        },
-                        "teamparity" => {
-                            if let Some(arg) = args.get(1) {
-                                self.set_team_parity(player_index, arg);
-                            }
-                        },
-                        "replay" => {
-                            if let Some(arg) = args.get(1) {
-                                self.set_replay(player_index, arg);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            },
             "sp" | "setposition" => {
                 self.set_preferred_faceoff_position(player_index, arg);
             },
             "admin" => {
                 self.admin_login(player_index,arg);
-            },
-            "faceoff" => {
-                self.faceoff(player_index);
-            },
-            "start" | "startgame" => {
-                self.start_game(player_index);
-            },
-            "reset" | "resetgame" => {
-                self.reset_game(player_index);
-            },
-            "pause" | "pausegame" => {
-                self.pause(player_index);
-            },
-            "unpause" | "unpausegame" => {
-                self.unpause(player_index);
-            },
-            "lefty" => {
-                self.set_hand(HQMSkaterHand::Left, player_index);
-            },
-            "righty" => {
-                self.set_hand(HQMSkaterHand::Right, player_index);
             },
             "list" => {
                 if arg.is_empty() {
@@ -473,19 +340,6 @@ impl HQMServer {
             },
             "search" => {
                 self.search_players(player_index, arg);
-            },
-            "view" => {
-                if let Ok(view_player_index) = arg.parse::<usize>() {
-                    self.view(view_player_index, player_index);
-                }
-            },
-            "restoreview" => {
-                if let Some(player) = & mut self.players[player_index] {
-                    if player.view_player_index != player_index {
-                        player.view_player_index = player_index;
-                        self.add_directed_server_chat_message("View has been restored".to_string(), player_index);
-                    }
-                }
             },
             "ping" => {
                 if let Ok(ping_player_index) = arg.parse::<usize>() {
@@ -526,54 +380,7 @@ impl HQMServer {
                     }
                 }
             }
-            "icing" => {
-                self.set_icing_rule (player_index, arg);
-            },
-            "offside" => {
-                self.set_offside_rule (player_index, arg);
-            },
-            "rules" => {
-                let offside_str = match self.match_config.offside {
-                    HQMOffsideConfiguration::Off => "Offside disabled",
-                    HQMOffsideConfiguration::Delayed => "Offside enabled",
-                    HQMOffsideConfiguration::Immediate => "Immediate offside enabled"
-                };
-                let icing_str = match self.match_config.icing {
-                    HQMIcingConfiguration::Off => "Icing disabled",
-                    HQMIcingConfiguration::Touch => "Icing enabled",
-                    HQMIcingConfiguration::NoTouch => "No-touch icing enabled"
-                };
-                let msg = format!("{}, {}", offside_str, icing_str);
-                self.add_directed_server_chat_message(msg, player_index);
-            },
-            "cheat" => {
-                if self.match_config.cheats_enabled {
-                    self.cheat(player_index, arg);
-                }
-            },
-            /*
-            "test" => {
-                let rink = &self.game.world.rink;
-                let faceoff_spot = match arg {
-                    "c" => Some(rink.center_faceoff_spot.clone()),
-                    "r1" => Some(rink.red_zone_faceoff_spots[0].clone()),
-                    "r2" => Some(rink.red_zone_faceoff_spots[1].clone()),
-                    "b1" => Some(rink.blue_zone_faceoff_spots[0].clone()),
-                    "b2" => Some(rink.blue_zone_faceoff_spots[1].clone()),
-                    "rn1" => Some(rink.red_neutral_faceoff_spots[0].clone()),
-                    "rn2" => Some(rink.red_neutral_faceoff_spots[1].clone()),
-                    "bn1" => Some(rink.blue_neutral_faceoff_spots[0].clone()),
-                    "bn2" => Some(rink.blue_neutral_faceoff_spots[1].clone()),
-                    _ => None
-                };
-                if let Some(faceoff_spot) = faceoff_spot {
-                    self.game.next_faceoff_spot = faceoff_spot;
-                    self.do_faceoff();
-                }
-            }
-            */
-
-            _ => {}, // matches have to be exhaustive
+            _ => B::handle_command(self, command, arg, player_index),
         }
 
     }
@@ -604,7 +411,7 @@ impl HQMServer {
         }
     }
 
-    fn view (& mut self, view_player_index: usize, player_index: usize) {
+    pub(crate) fn view (& mut self, view_player_index: usize, player_index: usize) {
         if view_player_index < self.players.len() {
             if let Some(view_player) = &self.players[view_player_index] {
                 let view_player_name = view_player.player_name.clone();
@@ -907,6 +714,42 @@ impl HQMServer {
         false
     }
 
+    pub fn move_to_team_spawnpoint (& mut self, player_index: usize, team: HQMTeam, spawn_point: HQMSpawnPoint) -> bool {
+        let (pos, rot) = match team {
+            HQMTeam::Red => match spawn_point {
+                HQMSpawnPoint::Center => {
+                    let (z, rot) = ((self.game.world.rink.length/2.0) + 3.0, 0.0);
+                    let pos = Point3::new (self.game.world.rink.width / 2.0, 2.0, z);
+                    let rot = Rotation3::from_euler_angles(0.0,rot,0.0);
+                    (pos, rot)
+
+                }
+                HQMSpawnPoint::Bench => {
+                    let z = (self.game.world.rink.length/2.0) + 4.0;
+                    let pos = Point3::new (0.5, 2.0, z);
+                    let rot = Rotation3::from_euler_angles(0.0,3.0 * FRAC_PI_2,0.0);
+                    (pos, rot)
+                }
+            }
+            HQMTeam::Blue => match spawn_point {
+                HQMSpawnPoint::Center => {
+                    let (z, rot) = ((self.game.world.rink.length/2.0) - 3.0, PI);
+                    let pos = Point3::new (self.game.world.rink.width / 2.0, 2.0, z);
+                    let rot = Rotation3::from_euler_angles(0.0,rot,0.0);
+                    (pos, rot)
+
+                }
+                HQMSpawnPoint::Bench => {
+                    let z = (self.game.world.rink.length/2.0) - 4.0;
+                    let pos = Point3::new (0.5, 2.0, z);
+                    let rot = Rotation3::from_euler_angles(0.0,3.0 * FRAC_PI_2,0.0);
+                    (pos, rot)
+                }
+            }
+        };
+        self.move_to_team (player_index, team, pos, rot)
+    }
+
     pub fn move_to_team(& mut self, player_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Rotation3<f32>) -> bool {
         if let Some(player) = & mut self.players[player_index] {
             if let Some(skater) = player.skater {
@@ -950,121 +793,13 @@ impl HQMServer {
         return self.players.iter().position(|x| x.is_none());
     }
 
-    fn update_players(&mut self) {
-
-        let mut chat_messages = vec![];
-
-        let inactive_players: Vec<(usize, String)> = self.players.iter_mut().enumerate().filter_map(|(player_index, player)| {
-            if let Some(player) = player {
-                player.inactivity += 1;
-                if player.inactivity > 500 {
-                    Some((player_index, player.player_name.clone()))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }).collect();
-        for (player_index, player_name) in inactive_players {
-            self.remove_player(player_index);
-            info!("{} ({}) timed out", player_name, player_index);
-            let chat_msg = format!("{} timed out", player_name);
-            chat_messages.push(chat_msg);
-        }
-        let mut spectating_players = vec![];
-        let mut joining_red = vec![];
-        let mut joining_blue = vec![];
-        for (player_index, player) in self.players.iter_mut().enumerate() {
-            if let Some(player) = player {
-                if player.skater.is_some() && player.input.spectate() {
-                    player.team_switch_timer = 500;
-                    spectating_players.push((player_index, player.player_name.clone()))
-                } else {
-                    player.team_switch_timer = player.team_switch_timer.saturating_sub(1);
-                }
-                if player.skater.is_none() && player.team_switch_timer == 0 {
-                    if player.input.join_red() {
-                        joining_red.push((player_index, player.player_name.clone()));
-                    } else if player.input.join_blue() {
-                        joining_blue.push((player_index, player.player_name.clone()));
-                    }
-                }
-            }
-        }
-        for (player_index, player_name) in spectating_players {
-            info!("{} ({}) is spectating", player_name, player_index);
-            self.move_to_spectator(player_index);
-        }
-
-        let mut red_player_count = 0usize;
-        let mut blue_player_count = 0usize;
-        for p in self.game.world.objects.iter () {
-            if let HQMGameObject::Player(player) = p {
-                if player.team == HQMTeam::Red {
-                    red_player_count += 1;
-                } else if player.team == HQMTeam::Blue {
-                    blue_player_count += 1;
-                }
-            }
-        }
-        let mut num_joining_red = joining_red.len().min(self.match_config.team_max.saturating_sub(red_player_count));
-        let mut num_joining_blue = joining_blue.len().min(self.match_config.team_max.saturating_sub(blue_player_count));
-
-        if self.match_config.force_team_size_parity {
-            num_joining_red = num_joining_red.min(blue_player_count + num_joining_blue + 1 - red_player_count);
-            num_joining_blue = num_joining_blue.min(red_player_count + num_joining_red + 1 - blue_player_count);
-        }
-        for (player_index, player_name) in &joining_red[0..num_joining_red] {
-            let (pos, rot) = match self.match_config.spawn_point {
-                HQMSpawnPoint::Center => {
-                    let (z, rot) = ((self.game.world.rink.length/2.0) + 3.0, 0.0);
-                    let pos = Point3::new (self.game.world.rink.width / 2.0, 2.0, z);
-                    let rot = Rotation3::from_euler_angles(0.0,rot,0.0);
-                    (pos, rot)
-
-                }
-                HQMSpawnPoint::Bench => {
-                    let z = (self.game.world.rink.length/2.0) + 4.0;
-                    let pos = Point3::new (0.5, 2.0, z);
-                    let rot = Rotation3::from_euler_angles(0.0,3.0 * FRAC_PI_2,0.0);
-                    (pos, rot)
-                }
-            };
-            info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Red);
-            self.move_to_team(*player_index, HQMTeam::Red, pos, rot);
-        }
-        for (player_index, player_name) in &joining_blue[0..num_joining_blue] {
-            let (pos, rot) = match self.match_config.spawn_point {
-                HQMSpawnPoint::Center => {
-                    let (z, rot) = ((self.game.world.rink.length/2.0) - 3.0, PI);
-                    let pos = Point3::new (self.game.world.rink.width / 2.0, 2.0, z);
-                    let rot = Rotation3::from_euler_angles(0.0,rot,0.0);
-                    (pos, rot)
-
-                }
-                HQMSpawnPoint::Bench => {
-                    let z = (self.game.world.rink.length/2.0) - 4.0;
-                    let pos = Point3::new (0.5, 2.0, z);
-                    let rot = Rotation3::from_euler_angles(0.0,3.0 * FRAC_PI_2,0.0);
-                    (pos, rot)
-                }
-            };
-            info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Blue);
-            self.move_to_team(*player_index, HQMTeam::Blue, pos, rot);
-        }
-
-        for message in chat_messages {
-            self.add_server_chat_message(message);
-        }
-    }
-
-
     async fn tick(&mut self, socket: & UdpSocket, write_buf: & mut [u8]) {
         if self.player_count() != 0 {
             self.game.active = true;
             tokio::task::block_in_place(|| {
-                self.update_players();
+
+                B::before_tick(self);
+
                 for player in self.players.iter_mut() {
                     if let Some(player) = player {
                         if let Some(skater) = player.skater {
@@ -1075,11 +810,8 @@ impl HQMServer {
                     }
                 }
                 let events = self.game.world.simulate_step();
-                if self.match_config.mode == HQMServerMode::Match {
-                    self.handle_events(events);
-                    self.update_clock();
-                    self.game.update_game_state();
-                }
+
+                B::after_tick(self, events);
 
                 let packets = get_packets(& self.game.world.objects);
 
@@ -1107,9 +839,8 @@ impl HQMServer {
     }
 
     pub(crate) fn new_game(&mut self) {
-
-        let old_game = std::mem::replace(& mut self.game,
-                                         create_game(self.game_alloc, &self.match_config));
+        let new_game = self.behaviour.create_game(self.game_alloc);
+        let old_game = std::mem::replace(& mut self.game, new_game);
         info!("New game {} started", self.game.game_id);
         self.game_alloc += 1;
 
@@ -1175,25 +906,26 @@ impl HQMServer {
 
 }
 
-pub async fn run_server(port: u16, public: bool,
+pub async fn run_server<B: HQMServerBehaviour>(port: u16, public: bool,
                         config: HQMServerConfiguration,
-                        match_config: HQMMatchConfiguration) -> std::io::Result<()> {
+                        mut behaviour: B) -> std::io::Result<()> {
     let mut player_vec = Vec::with_capacity(64);
     for _ in 0..64 {
         player_vec.push(None);
     }
+    let first_game = behaviour.create_game(1);
 
     let mut server = HQMServer {
         players: player_vec,
         ban_list: HashSet::new(),
         allow_join:true,
-        game: create_game(1, &match_config),
+        game: first_game,
         game_alloc: 2,
         is_muted:false,
         config,
-        match_config,
+        behaviour
     };
-
+    server.new_game();
     info!("Server started, new game {} started", 1);
 
     // Set up timers
@@ -1264,20 +996,6 @@ pub async fn run_server(port: u16, public: bool,
             }
     }
 }
-
-fn create_game (game_id: u32, config: &HQMMatchConfiguration) -> HQMGame {
-    let mut game = HQMGame::new(game_id, config.warmup_pucks, config.physics_config.clone());
-    let puck_line_start= game.world.rink.width / 2.0 - 0.4 * ((config.warmup_pucks - 1) as f32);
-
-    for i in 0..config.warmup_pucks {
-        let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, game.world.rink.length / 2.0);
-        let rot = Matrix3::identity();
-        game.world.create_puck_object(pos, rot);
-    }
-    game.time = config.time_warmup * 100;
-    game
-}
-
 
 
 fn write_message(writer: & mut HQMMessageWriter, message: &HQMMessage) {
@@ -1614,12 +1332,12 @@ pub(crate) struct HQMConnectedPlayer {
     pub(crate) preferred_faceoff_position: Option<String>,
     pub(crate) skater: Option<usize>,
     game_id: u32,
-    input: HQMPlayerInput,
+    pub(crate) input: HQMPlayerInput,
     known_packet: u32,
     known_msgpos: usize,
     chat_rep: Option<u8>,
     messages: Vec<Rc<HQMMessage>>,
-    inactivity: u32,
+    pub(crate) inactivity: u32,
     pub(crate) is_admin: bool,
     pub(crate) is_muted: HQMMuteStatus,
     pub(crate) team_switch_timer: u32,
@@ -1627,7 +1345,7 @@ pub(crate) struct HQMConnectedPlayer {
     pub(crate) mass: f32,
     deltatime: u32,
     last_ping: VecDeque<f32>,
-    view_player_index: usize
+    pub(crate) view_player_index: usize
 }
 
 impl HQMConnectedPlayer {
@@ -1698,26 +1416,18 @@ pub enum HQMSpawnPoint {
     Bench
 }
 
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMServerMode {
-    Match,
-    PermanentWarmup
-}
 
 pub struct HQMServerConfiguration {
     pub(crate) welcome: Vec<String>,
     pub(crate) password: String,
     pub(crate) player_max: usize,
+    pub(crate) team_max: usize,
     pub(crate) replays_enabled: bool,
     pub(crate) server_name: String,
 }
 
 pub struct HQMMatchConfiguration {
-
-    pub(crate) team_max: usize,
     pub(crate) force_team_size_parity: bool,
-    pub(crate) mode: HQMServerMode,
-
 
     pub(crate) time_period: u32,
     pub(crate) time_warmup: u32,
@@ -1733,5 +1443,14 @@ pub struct HQMMatchConfiguration {
     pub(crate) cheats_enabled: bool,
 
     pub(crate) spawn_point: HQMSpawnPoint,
+}
+
+
+pub trait HQMServerBehaviour {
+    fn before_tick (server: & mut HQMServer<Self>) where Self: Sized;
+    fn after_tick (server: & mut HQMServer<Self>, events: Vec<HQMSimulationEvent>) where Self: Sized;
+    fn handle_command (server: & mut HQMServer<Self>, cmd: &str, arg: &str, player_index: usize) where Self: Sized;
+
+    fn create_game (& mut self, game_id: u32) -> HQMGame where Self: Sized;
 }
 

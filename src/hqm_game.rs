@@ -55,7 +55,7 @@ impl HQMGameWorld {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub(crate) enum HQMIcingStatus {
+pub enum HQMIcingStatus {
     No,          // No icing
     NotTouched(HQMTeam, Point3<f32>),  // Puck has entered offensive half, but not reached the goal line
     Warning(HQMTeam, Point3<f32>),     // Puck has reached the goal line, delayed icing
@@ -79,7 +79,7 @@ impl HQMIcingStatus {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub(crate) enum HQMOffsideStatus {
+pub enum HQMOffsideStatus {
     InNeutralZone,                // No offside
     InOffensiveZone(HQMTeam),              // No offside, puck in offensive zone
     Warning(HQMTeam, Point3<f32>, usize),  // Warning, puck entered offensive zone in an offside situation but not touched yet
@@ -102,7 +102,7 @@ impl HQMOffsideStatus {
     }
 }
 
-pub(crate) struct HQMGame {
+pub struct HQMGame {
     pub(crate) start_time: DateTime<Utc>,
     pub(crate) state: HQMGameState,
     pub(crate) persistent_messages: Vec<Rc<HQMMessage>>,
@@ -111,20 +111,20 @@ pub(crate) struct HQMGame {
     pub(crate) replay_last_packet: u32,
     pub(crate) replay_messages: Vec<Rc<HQMMessage>>,
     pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
-    pub(crate) icing_status: HQMIcingStatus,
-    pub(crate) offside_status: HQMOffsideStatus,
+    pub icing_status: HQMIcingStatus,
+    pub offside_status: HQMOffsideStatus,
     pub(crate) next_faceoff_spot: HQMFaceoffSpot,
     pub(crate) world: HQMGameWorld,
-    pub(crate) red_score: u32,
-    pub(crate) blue_score: u32,
-    pub(crate) period: u32,
-    pub(crate) time: u32,
-    pub(crate) time_break: u32,
-    pub(crate) is_intermission_goal: bool,
-    pub(crate) paused: bool,
-    pub(crate) game_id: u32,
-    pub(crate) game_step: u32,
-    pub(crate) game_over: bool,
+    pub red_score: u32,
+    pub blue_score: u32,
+    pub period: u32,
+    pub time: u32,
+    pub time_break: u32,
+    pub is_intermission_goal: bool,
+    pub paused: bool,
+    pub game_id: u32,
+    pub game_step: u32,
+    pub game_over: bool,
     pub(crate) packet: u32,
 
     pub(crate) active: bool,
