@@ -21,27 +21,6 @@ impl HQMPermanentWarmup {
         }
     }
     fn update_players (server: & mut HQMServer<Self>) {
-
-        let mut chat_messages = vec![];
-
-        let inactive_players: Vec<(usize, String)> = server.players.iter_mut().enumerate().filter_map(|(player_index, player)| {
-            if let Some(player) = player {
-                player.inactivity += 1;
-                if player.inactivity > 500 {
-                    Some((player_index, player.player_name.clone()))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }).collect();
-        for (player_index, player_name) in inactive_players {
-            server.remove_player(player_index);
-            info!("{} ({}) timed out", player_name, player_index);
-            let chat_msg = format!("{} timed out", player_name);
-            chat_messages.push(chat_msg);
-        }
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
@@ -77,9 +56,6 @@ impl HQMPermanentWarmup {
             server.move_to_team_spawnpoint(player_index, HQMTeam::Blue, server.behaviour.spawn_point);
         }
 
-        for message in chat_messages {
-            server.add_server_chat_message(message);
-        }
     }
 }
 

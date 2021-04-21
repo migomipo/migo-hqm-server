@@ -1,9 +1,7 @@
-use std::collections::HashMap;
-
 use nalgebra::{Matrix3, Point3, Vector3};
 
 use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameState, HQMGameWorld, HQMIcingStatus, HQMOffsideStatus, HQMSkaterHand, HQMTeam};
-use crate::hqm_server::{HQMConnectedPlayer, HQMIcingConfiguration, HQMMatchConfiguration, HQMOffsideConfiguration, HQMServer, HQMServerBehaviour};
+use crate::hqm_server::{HQMIcingConfiguration, HQMMatchConfiguration, HQMOffsideConfiguration, HQMServer, HQMServerBehaviour};
 use crate::hqm_simulate::HQMSimulationEvent;
 
 use tracing::info;
@@ -22,26 +20,6 @@ impl HQMMatchBehaviour {
 
     fn update_players (server: & mut HQMServer<Self>) {
 
-        let mut chat_messages = vec![];
-
-        let inactive_players: Vec<(usize, String)> = server.players.iter_mut().enumerate().filter_map(|(player_index, player)| {
-            if let Some(player) = player {
-                player.inactivity += 1;
-                if player.inactivity > 500 {
-                    Some((player_index, player.player_name.clone()))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }).collect();
-        for (player_index, player_name) in inactive_players {
-            server.remove_player(player_index);
-            info!("{} ({}) timed out", player_name, player_index);
-            let chat_msg = format!("{} timed out", player_name);
-            chat_messages.push(chat_msg);
-        }
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
@@ -94,9 +72,6 @@ impl HQMMatchBehaviour {
             server.move_to_team_spawnpoint(*player_index, HQMTeam::Red, server.behaviour.config.spawn_point);
         }
 
-        for message in chat_messages {
-            server.add_server_chat_message(message);
-        }
     }
 
     pub(crate) fn set_team_parity(server: & mut HQMServer<Self>, player_index: usize, rule:&str) {
@@ -696,7 +671,8 @@ impl HQMMatchBehaviour {
                         if server.game.time == 0 {
                             server.game.time = server.behaviour.config.time_period*100;
                         }
-                        Self::do_faceoff(server);
+
+                        server.do_faceoff ();
                     }
 
                 }
@@ -715,49 +691,6 @@ impl HQMMatchBehaviour {
             }
 
         }
-    }
-
-    pub fn clear_pucks(server: & mut HQMServer<Self>) {
-        for object in server.game.world.objects.iter_mut() {
-            if let HQMGameObject::Puck(_puck) = object {
-                *object = HQMGameObject::None;
-            }
-        }
-    }
-
-
-    fn do_faceoff(server: & mut HQMServer<Self>){
-        let positions = get_faceoff_positions(& server.players, & server.game.world.objects,
-                                              &server.game.world.rink.allowed_positions);
-
-        Self::clear_pucks(server);
-
-        let puck_pos = &server.game.next_faceoff_spot.center_position + &(1.5f32*Vector3::y());
-
-        server.game.world.create_puck_object(puck_pos, Matrix3::identity());
-
-        for (player_index, (team, faceoff_position)) in positions {
-            let (player_position, player_rotation) = match team {
-                HQMTeam::Red => {
-                    server.game.next_faceoff_spot.red_player_positions[&faceoff_position].clone()
-                }
-                HQMTeam::Blue => {
-                    server.game.next_faceoff_spot.blue_player_positions[&faceoff_position].clone()
-                }
-            };
-            server.move_to_team (player_index, team, player_position, player_rotation);
-        }
-
-        let rink = &server.game.world.rink;
-        server.game.icing_status = HQMIcingStatus::No;
-        server.game.offside_status = if rink.red_lines_and_net.offensive_line.point_past_middle_of_line(&puck_pos) {
-            HQMOffsideStatus::InOffensiveZone(HQMTeam::Red)
-        } else if rink.blue_lines_and_net.offensive_line.point_past_middle_of_line(&puck_pos) {
-            HQMOffsideStatus::InOffensiveZone(HQMTeam::Blue)
-        } else {
-            HQMOffsideStatus::InNeutralZone
-        };
-
     }
 
 }
@@ -785,73 +718,7 @@ fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool 
     false
 }
 
-fn get_faceoff_positions (players: & [Option<HQMConnectedPlayer>], objects: & [HQMGameObject], allowed_positions: &[String]) -> HashMap<usize, (HQMTeam, String)> {
-    let mut res = HashMap::new();
 
-    let mut red_players= vec![];
-    let mut blue_players = vec![];
-    for (player_index, player) in players.iter().enumerate() {
-        if let Some(player) = player {
-            let team = player.skater.and_then(|i| match &objects[i] {
-                HQMGameObject::Player(skater) => { Some(skater.team)},
-                _ => None
-            });
-            if team == Some(HQMTeam::Red) {
-                red_players.push((player_index, player.preferred_faceoff_position.as_ref()));
-            } else if team == Some(HQMTeam::Blue) {
-                blue_players.push((player_index, player.preferred_faceoff_position.as_ref()));
-            }
-
-        }
-    }
-
-    fn setup_position (positions: & mut HashMap<usize, (HQMTeam, String)>, players: &[(usize, Option<&String>)], allowed_positions: &[String], team: HQMTeam) {
-        let mut available_positions = Vec::from(allowed_positions);
-
-        // First, we try to give each player its preferred position
-        for (player_index, player_position) in players.iter() {
-            if let Some(player_position) = player_position {
-                if let Some(x) = available_positions.iter().position(|x| *x == **player_position) {
-                    let s = available_positions.remove(x);
-                    positions.insert(*player_index, (team, s));
-                }
-            }
-        }
-        let c = String::from("C");
-        // Some players did not get their preferred positions because they didn't have one,
-        // or because it was already taken
-        for (player_index, player_position) in players.iter() {
-            if !positions.contains_key(player_index) {
-
-                let s = if let Some(x) = available_positions.iter().position(|x| *x == c) {
-                    // Someone needs to be C
-                    available_positions.remove(x);
-                    (team, c.clone())
-                } else if !available_positions.is_empty() {
-                    // Give out the remaining positions
-                    let x = available_positions.remove(0);
-                    (team, x)
-                } else {
-                    // Oh no, we're out of legal starting positions
-                    if let Some(player_position) = player_position {
-                        (team, (*player_position).clone())
-                    } else {
-                        (team, c.clone())
-                    }
-                };
-                positions.insert(*player_index, s);
-            }
-        }
-        if available_positions.contains(&c) && !players.is_empty() {
-            positions.insert(players[0].0, (team, c.clone()));
-        }
-    }
-
-    setup_position(& mut res, &red_players, allowed_positions, HQMTeam::Red);
-    setup_position(& mut res, &blue_players, allowed_positions, HQMTeam::Blue);
-
-    res
-}
 
 impl HQMServerBehaviour for HQMMatchBehaviour {
     fn before_tick(server: &mut HQMServer<Self>) where Self: Sized {
