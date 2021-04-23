@@ -179,25 +179,6 @@ impl HQMGame {
         }
     }
 
-    pub(crate) fn update_game_state(&mut self){
-        self.state = if !self.paused {
-            if self.game_over {
-                HQMGameState::GameOver
-            } else if self.time_break > 0 {
-                if self.is_intermission_goal {
-                    HQMGameState::GoalScored
-                } else {
-                    HQMGameState::Intermission
-                }
-            } else if self.period == 0 {
-                HQMGameState::Warmup
-            } else {
-                HQMGameState::Game
-            }
-        } else {
-            HQMGameState::Paused
-        };
-    }
 }
 
 #[derive(Debug, Clone)]

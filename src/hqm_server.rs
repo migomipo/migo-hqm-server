@@ -257,6 +257,146 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
         }
     }
 
+    pub fn call_goal (& mut self, team: HQMTeam, puck: usize,
+                  time_break: u32,
+                  time_gameover: u32,
+                  mercy: u32, first_to: u32) {
+        let (new_score, opponent_score) = match team {
+            HQMTeam::Red => {
+                self.game.red_score += 1;
+                (self.game.red_score, self.game.blue_score)
+            }
+            HQMTeam::Blue => {
+                self.game.blue_score += 1;
+                (self.game.blue_score, self.game.red_score)
+            }
+        };
+
+        self.game.is_intermission_goal = true;
+        self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
+
+        let game_over = if self.game.period > 3 && self.game.red_score != self.game.blue_score {
+            true
+        } else if mercy > 0 && new_score.saturating_sub(opponent_score) >= mercy {
+            true
+        } else if first_to > 0 && new_score >= first_to {
+            true
+        } else {
+            false
+        };
+
+        if game_over {
+            self.game.time_break = time_gameover;
+            self.game.game_over = true;
+        } else {
+            self.game.time_break = time_break;
+        }
+
+        let mut goal_scorer_index = None;
+        let mut assist_index = None;
+
+        if let HQMGameObject::Puck(this_puck) = & mut self.game.world.objects[puck] {
+            for touch in this_puck.touches.iter() {
+                if touch.team == team {
+                    let player_index = touch.player_index;
+                    if goal_scorer_index.is_none() {
+                        goal_scorer_index = Some(player_index);
+                    } else if assist_index.is_none() && Some(player_index) != goal_scorer_index {
+                        assist_index = Some(player_index);
+                        break;
+                    }
+                }
+            }
+        }
+
+        self.add_goal_message(team, goal_scorer_index, assist_index);
+    }
+
+    pub fn call_offside(& mut self, team: HQMTeam, pass_origin: &Point3<f32>, time_break: u32) {
+        self.game.next_faceoff_spot = self.game.world.rink.get_offside_faceoff_spot(pass_origin, team);
+        self.game.time_break = time_break;
+        self.game.offside_status = HQMOffsideStatus::Offside(team);
+        self.add_server_chat_message(String::from("Offside"));
+    }
+
+    pub fn call_icing(& mut self, team: HQMTeam, pass_origin: &Point3<f32>, time_break: u32) {
+        self.game.next_faceoff_spot = self.game.world.rink.get_icing_faceoff_spot(pass_origin, team);
+        self.game.time_break = time_break;
+        self.game.icing_status = HQMIcingStatus::Icing(team);
+        self.add_server_chat_message(String::from("Icing"));
+    }
+
+    pub fn update_clock(& mut self, period_length: u32, intermission_time: u32) {
+        if self.game.period == 0 && self.game.time > 2000 {
+            let mut has_red_players = false;
+            let mut has_blue_players = false;
+            for object in self.game.world.objects.iter() {
+                if let HQMGameObject::Player(skater) = object {
+                    match skater.team {
+                        HQMTeam::Red => {
+                            has_red_players = true;
+                        },
+                        HQMTeam::Blue => {
+                            has_blue_players = true;
+                        },
+                    }
+                }
+                if has_red_players && has_blue_players {
+                    self.game.time = 2000;
+                    break;
+                }
+            }
+        }
+
+        if !self.game.paused {
+            if self.game.time_break > 0 {
+                self.game.time_break -= 1;
+                if self.game.time_break == 0 {
+                    self.game.is_intermission_goal = false;
+                    if self.game.game_over {
+                        self.new_game();
+                    } else {
+                        if self.game.time == 0 {
+                            self.game.time = period_length;
+                        }
+
+                        self.do_faceoff ();
+                    }
+
+                }
+                self.game.state = if self.game.is_intermission_goal {
+                    HQMGameState::GoalScored
+                } else {
+                    HQMGameState::Intermission
+                }
+            } else if self.game.time > 0 {
+                self.game.time -= 1;
+                if self.game.time == 0 {
+                    self.game.period += 1;
+                    if self.game.period > 3 && self.game.red_score != self.game.blue_score {
+                        self.game.time_break = intermission_time;
+                        self.game.game_over = true;
+                    } else {
+                        self.game.time_break = intermission_time;
+                        self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
+                    }
+                }
+                self.game.state = if self.game.game_over {
+                    HQMGameState::GameOver
+                } else if self.game.period == 0 {
+                    HQMGameState::Warmup
+                } else {
+                    HQMGameState::Game
+                }
+            }
+
+        } else {
+            self.game.state = HQMGameState::Paused;
+        }
+
+
+    }
+
 
     fn process_command (&mut self, command: &str, arg: &str, player_index: usize) {
 
@@ -1310,9 +1450,9 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
     let packets = &game.saved_ticks;
 
     let rules_state =
-        if let HQMOffsideStatus::Offside(_) = game.offside_status{
+        if game.offside_status.is_offside() {
             HQMRulesState::Offside
-        } else if let HQMIcingStatus::Icing(_) = game.icing_status {
+        } else if game.icing_status.is_icing() {
             HQMRulesState::Icing
         } else {
             let icing_warning = game.icing_status.is_warning();
