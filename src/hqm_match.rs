@@ -44,32 +44,39 @@ impl HQMMatchBehaviour {
             info!("{} ({}) is spectating", player_name, player_index);
             server.move_to_spectator(player_index);
         }
-
-        let mut red_player_count = 0usize;
-        let mut blue_player_count = 0usize;
-        for p in server.game.world.objects.iter () {
-            if let HQMGameObject::Player(player) = p {
-                if player.team == HQMTeam::Red {
-                    red_player_count += 1;
-                } else if player.team == HQMTeam::Blue {
-                    blue_player_count += 1;
+        let (red_player_count, blue_player_count) = {
+            let mut red_player_count = 0usize;
+            let mut blue_player_count = 0usize;
+            for p in server.game.world.objects.iter () {
+                if let HQMGameObject::Player(player) = p {
+                    if player.team == HQMTeam::Red {
+                        red_player_count += 1;
+                    } else if player.team == HQMTeam::Blue {
+                        blue_player_count += 1;
+                    }
                 }
             }
-        }
-        let mut num_joining_red = joining_red.len().min(server.config.team_max.saturating_sub(red_player_count));
-        let mut num_joining_blue = joining_blue.len().min(server.config.team_max.saturating_sub(blue_player_count));
+            (red_player_count, blue_player_count)
+        };
+        let mut new_red_player_count = (red_player_count + joining_red.len()).min(server.config.team_max);
+        let mut new_blue_player_count = (blue_player_count + joining_blue.len()).min(server.config.team_max);
 
         if server.behaviour.config.force_team_size_parity {
-            num_joining_red = num_joining_red.min(blue_player_count + num_joining_blue + 1 - red_player_count);
-            num_joining_blue = num_joining_blue.min(red_player_count + num_joining_red + 1 - blue_player_count);
+            if new_red_player_count > new_blue_player_count + 1 {
+                new_red_player_count = new_blue_player_count + 1;
+            } else if blue_player_count > new_red_player_count + 1 {
+                new_blue_player_count = new_red_player_count + 1;
+            }
         }
+        let num_joining_red = new_red_player_count.saturating_sub(red_player_count);
+        let num_joining_blue = new_blue_player_count.saturating_sub(blue_player_count);
         for (player_index, player_name) in &joining_red[0..num_joining_red] {
             info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Red);
             server.move_to_team_spawnpoint(*player_index, HQMTeam::Red, server.behaviour.config.spawn_point);
         }
         for (player_index, player_name) in &joining_blue[0..num_joining_blue] {
             info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Blue);
-            server.move_to_team_spawnpoint(*player_index, HQMTeam::Red, server.behaviour.config.spawn_point);
+            server.move_to_team_spawnpoint(*player_index, HQMTeam::Blue, server.behaviour.config.spawn_point);
         }
 
     }
@@ -595,7 +602,7 @@ impl HQMMatchBehaviour {
                         if let HQMGameObject::Puck(puck) = & server.game.world.objects[puck] {
                             if let Some(touch) = puck.touches.front() {
                                 if team == touch.team &&
-                                    has_players_in_offensive_zone(& server.game.world, team) {
+                                    has_players_in_offensive_zone(& server.game.world, team, Some(touch.player_index)) {
                                     match server.behaviour.config.offside {
                                         HQMOffsideConfiguration::Delayed => {
                                             server.game.offside_status = HQMOffsideStatus::Warning(team, touch.puck_pos.clone(), touch.player_index);
@@ -631,7 +638,7 @@ impl HQMMatchBehaviour {
             }
         }
         if let HQMOffsideStatus::Warning(team, _, _) = server.game.offside_status {
-            if !has_players_in_offensive_zone(& server.game.world,team) {
+            if !has_players_in_offensive_zone(& server.game.world,team, None) {
                 server.game.offside_status = HQMOffsideStatus::InOffensiveZone(team);
                 server.add_server_chat_message(String::from("Offside waved off"));
             }
@@ -695,7 +702,7 @@ impl HQMMatchBehaviour {
 
 }
 
-fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool {
+fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam, ignore_player: Option<usize>) -> bool {
     let line = match team {
         HQMTeam::Red => & world.rink.red_lines_and_net.offensive_line,
         HQMTeam::Blue => & world.rink.blue_lines_and_net.offensive_line,
@@ -703,7 +710,8 @@ fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam) -> bool 
 
     for object in world.objects.iter() {
         if let HQMGameObject::Player(skater) = object {
-            if skater.team == team {
+            let player_index = skater.connected_player_index;
+            if skater.team == team && ignore_player != Some(player_index) {
                 let feet_pos = &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
                 let dot = (&feet_pos - &line.point).dot (&line.normal);
                 let leading_edge = -(line.width/2.0);
