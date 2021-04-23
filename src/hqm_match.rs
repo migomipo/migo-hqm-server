@@ -2,7 +2,7 @@ use nalgebra::{Matrix3, Point3, Vector3};
 use tracing::info;
 
 use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameState, HQMGameWorld, HQMIcingStatus, HQMOffsideStatus, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam};
-use crate::hqm_server::{HQMIcingConfiguration, HQMMatchConfiguration, HQMOffsideConfiguration, HQMServer, HQMServerBehaviour, HQMSpawnPoint};
+use crate::hqm_server::{HQMIcingConfiguration, HQMOffsideConfiguration, HQMServer, HQMServerBehaviour, HQMSpawnPoint};
 use crate::hqm_simulate::HQMSimulationEvent;
 
 pub struct HQMMatchConfiguration {

@@ -4,7 +4,7 @@ use std::path::Path;
 extern crate ini;
 use ini::Ini;
 use std::env;
-use crate::hqm_server::{HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration, HQMSpawnPoint, HQMMatchConfiguration};
+use crate::hqm_server::{HQMServerConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration, HQMSpawnPoint};
 
 mod hqm_parse;
 mod hqm_simulate;
@@ -18,7 +18,7 @@ use tracing_subscriber;
 use tracing_appender;
 use ini::ini::Properties;
 use crate::hqm_game::HQMPhysicsConfiguration;
-use crate::hqm_match::HQMMatchBehaviour;
+use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration};
 use crate::hqm_warmup::HQMPermanentWarmup;
 
 enum HQMServerMode {

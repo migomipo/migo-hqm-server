@@ -17,7 +17,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
 use tracing::info;
 
-use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameState, HQMIcingStatus, HQMMessage, HQMOffsideStatus, HQMPhysicsConfiguration, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam};
+use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameState, HQMIcingStatus, HQMMessage, HQMOffsideStatus, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam};
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
 
