@@ -1,16 +1,17 @@
 use std::cmp::min;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::error::Error;
-use std::net::SocketAddr;
+use std::f32::consts::{FRAC_PI_2, PI};
 use std::net::IpAddr;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
-use nalgebra::{Point3, Rotation3, Vector2, Vector3, Matrix3};
+use nalgebra::{Matrix3, Point3, Rotation3, Vector2, Vector3};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
@@ -19,7 +20,6 @@ use tracing::info;
 use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameState, HQMIcingStatus, HQMMessage, HQMOffsideStatus, HQMPhysicsConfiguration, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam};
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
-use std::f32::consts::{FRAC_PI_2, PI};
 
 const GAME_HEADER: &[u8] = b"Hock";
 
@@ -1691,25 +1691,6 @@ pub struct HQMServerConfiguration {
     pub(crate) team_max: usize,
     pub(crate) replays_enabled: bool,
     pub(crate) server_name: String,
-}
-
-pub struct HQMMatchConfiguration {
-    pub(crate) force_team_size_parity: bool,
-
-    pub(crate) time_period: u32,
-    pub(crate) time_warmup: u32,
-    pub(crate) time_break: u32,
-    pub(crate) time_intermission: u32,
-    pub(crate) mercy: u32,
-    pub(crate) first_to: u32,
-    pub(crate) offside: HQMOffsideConfiguration,
-    pub(crate) icing: HQMIcingConfiguration,
-    pub(crate) warmup_pucks: usize,
-    pub(crate) physics_config: HQMPhysicsConfiguration,
-
-    pub(crate) cheats_enabled: bool,
-
-    pub(crate) spawn_point: HQMSpawnPoint,
 }
 
 

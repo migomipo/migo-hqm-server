@@ -1,10 +1,28 @@
 use nalgebra::{Matrix3, Point3, Vector3};
+use tracing::info;
 
-use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameState, HQMGameWorld, HQMIcingStatus, HQMOffsideStatus, HQMSkaterHand, HQMTeam};
-use crate::hqm_server::{HQMIcingConfiguration, HQMMatchConfiguration, HQMOffsideConfiguration, HQMServer, HQMServerBehaviour};
+use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameState, HQMGameWorld, HQMIcingStatus, HQMOffsideStatus, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam};
+use crate::hqm_server::{HQMIcingConfiguration, HQMMatchConfiguration, HQMOffsideConfiguration, HQMServer, HQMServerBehaviour, HQMSpawnPoint};
 use crate::hqm_simulate::HQMSimulationEvent;
 
-use tracing::info;
+pub struct HQMMatchConfiguration {
+    pub(crate) force_team_size_parity: bool,
+
+    pub(crate) time_period: u32,
+    pub(crate) time_warmup: u32,
+    pub(crate) time_break: u32,
+    pub(crate) time_intermission: u32,
+    pub(crate) mercy: u32,
+    pub(crate) first_to: u32,
+    pub(crate) offside: HQMOffsideConfiguration,
+    pub(crate) icing: HQMIcingConfiguration,
+    pub(crate) warmup_pucks: usize,
+    pub(crate) physics_config: HQMPhysicsConfiguration,
+
+    pub(crate) cheats_enabled: bool,
+
+    pub(crate) spawn_point: HQMSpawnPoint,
+}
 
 
 pub struct HQMMatchBehaviour {
