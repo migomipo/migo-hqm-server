@@ -47,7 +47,7 @@ fn convert_rot_column_from_network(b: u8, v: u32) -> Vector3<f32> {
         let step = (v >> pos) & 3;
         let c1 = (temp1 + temp2).normalize();
         let c2 = (temp2 + temp3).normalize();
-        let c3 = (temp1 + temp2).normalize();
+        let c3 = (temp1 + temp3).normalize();
         match step {
             0 => {
                 temp2 = c1;
