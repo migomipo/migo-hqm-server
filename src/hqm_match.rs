@@ -587,6 +587,7 @@ impl HQMMatchBehaviour {
                     server.game.offside_status = HQMOffsideStatus::InNeutralZone;
 
                 }
+                _ => {}
             }
         }
         if let HQMOffsideStatus::Warning(team, _, _) = server.game.offside_status {

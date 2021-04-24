@@ -1,6 +1,6 @@
 
 
-use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld};
+use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld, HQMRinkNet};
 use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Point3, Vector2};
 use std::ops::{AddAssign};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
@@ -38,6 +38,10 @@ pub enum HQMSimulationEvent {
         team: HQMTeam,
         puck: usize
     },
+    PuckTouchedNet {
+        team: HQMTeam,
+        puck: usize
+    }
 
 }
 
@@ -146,23 +150,28 @@ fn update_sticks_and_pucks (players: & mut Vec<& mut HQMSkater>,
                     }
                 }
             }
-            do_puck_post_forces(puck, rink, &puck_linear_velocity_before, &puck_angular_velocity_before);
+            let red_net_collision = do_puck_post_forces(puck, & rink.red_lines_and_net.net, &puck_linear_velocity_before, &puck_angular_velocity_before);
+            let blue_net_collision = do_puck_post_forces(puck, & rink.blue_lines_and_net.net, &puck_linear_velocity_before, &puck_angular_velocity_before);
 
-            if let Some((overlap_pos, overlap, normal)) = collision_between_sphere_and_nets(&puck.body.pos, puck.radius, rink) {
-                let vertex_velocity = speed_of_point_including_rotation(&overlap_pos, &puck.body.pos, &puck_linear_velocity_before, &puck_angular_velocity_before);
-                let mut puck_force = normal.scale(overlap * 0.5) - vertex_velocity.scale(0.5);
+            let red_net_collision = red_net_collision | do_puck_net_forces(puck, & rink.red_lines_and_net.net, &puck_linear_velocity_before, &puck_angular_velocity_before);
+            let blue_net_collision = blue_net_collision | do_puck_net_forces(puck, & rink.blue_lines_and_net.net, &puck_linear_velocity_before, &puck_angular_velocity_before);
 
-                if normal.dot (&puck_force) > 0.0 {
-                    limit_rejection(& mut puck_force, & normal, 0.5);
-                    apply_acceleration_to_object(& mut puck.body, &puck_force, &overlap_pos);
-                    puck.body.linear_velocity *= 0.9875;
-                    puck.body.angular_velocity *= 0.95;
-                }
+            if red_net_collision {
+                events.push(HQMSimulationEvent::PuckTouchedNet {
+                    team: HQMTeam::Red,
+                    puck: puck.index
+                })
             }
-
+            if blue_net_collision {
+                events.push(HQMSimulationEvent::PuckTouchedNet {
+                    team: HQMTeam::Blue,
+                    puck: puck.index
+                })
+            }
         }
     }
 }
+
 
 fn update_stick(player: & mut HQMSkater, linear_velocity_before: & Vector3<f32>, angular_velocity_before: & Vector3<f32>, rink: & HQMRink) {
     let stick_input = Vector2::new (
@@ -496,25 +505,43 @@ fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<
     }
 }
 
-fn do_puck_post_forces(puck: & mut HQMPuck, rink: & HQMRink, puck_linear_velocity: & Vector3<f32>, puck_angular_velocity: & Vector3<f32>) {
-    for net in std::array::IntoIter::new([
-        (& rink.red_lines_and_net.net),
-        (& rink.blue_lines_and_net.net)])
-             {
-        for post in net.posts.iter() {
-            let collision = collision_between_sphere_and_post(&puck.body.pos, puck.radius, post);
-            if let Some((overlap, normal)) = collision {
-                let p = &puck.body.pos - puck.radius*normal;
-                let vertex_velocity = speed_of_point_including_rotation(&p, &puck.body.pos, puck_linear_velocity, puck_angular_velocity);
-                let mut puck_force = normal.scale(overlap * 0.125) - vertex_velocity.scale (0.25);
 
-                if normal.dot (&puck_force) > 0.0 {
-                    limit_rejection(&mut puck_force, &normal, 0.2);
-                    apply_acceleration_to_object(&mut puck.body, &puck_force, &p);
-                }
+
+fn do_puck_net_forces(puck: & mut HQMPuck, net: &HQMRinkNet, puck_linear_velocity: & Vector3<f32>, puck_angular_velocity: & Vector3<f32>) -> bool {
+    let mut res = false;
+    if let Some((overlap_pos, overlap, normal)) = collision_between_sphere_and_net(&puck.body.pos, puck.radius, net) {
+        res = true;
+        let vertex_velocity = speed_of_point_including_rotation(&overlap_pos, &puck.body.pos, &puck_linear_velocity, &puck_angular_velocity);
+        let mut puck_force = normal.scale(overlap * 0.5) - vertex_velocity.scale(0.5);
+
+        if normal.dot (&puck_force) > 0.0 {
+            limit_rejection(& mut puck_force, & normal, 0.5);
+            apply_acceleration_to_object(& mut puck.body, &puck_force, &overlap_pos);
+            puck.body.linear_velocity *= 0.9875;
+            puck.body.angular_velocity *= 0.95;
+        }
+    }
+    res
+}
+
+fn do_puck_post_forces(puck: & mut HQMPuck, net: &HQMRinkNet, puck_linear_velocity: & Vector3<f32>, puck_angular_velocity: & Vector3<f32>) -> bool {
+    let mut res = false;
+    for post in net.posts.iter() {
+        let collision = collision_between_sphere_and_post(&puck.body.pos, puck.radius, post);
+        if let Some((overlap, normal)) = collision {
+            res = true;
+            let p = &puck.body.pos - puck.radius*normal;
+            let vertex_velocity = speed_of_point_including_rotation(&p, &puck.body.pos, puck_linear_velocity, puck_angular_velocity);
+            let mut puck_force = normal.scale(overlap * 0.125) - vertex_velocity.scale (0.25);
+
+            if normal.dot (&puck_force) > 0.0 {
+                limit_rejection(&mut puck_force, &normal, 0.2);
+                apply_acceleration_to_object(&mut puck.body, &puck_force, &p);
             }
         }
     }
+    res
+
 }
 
 fn do_puck_stick_forces(puck: & mut HQMPuck, player: & mut HQMSkater, puck_vertices: &[Point3<f32>],
@@ -585,40 +612,37 @@ fn inside_surface(pos: &Point3<f32>, surface: &(Point3<f32>, Point3<f32>, Point3
         (pos - p4).cross(&(p1 - p4)).dot(&normal) >= 0.0
 }
 
-fn collision_between_sphere_and_nets(pos: &Point3<f32>, radius: f32, rink: & HQMRink) -> Option<(Point3<f32>, f32, Vector3<f32>)> {
+fn collision_between_sphere_and_net(pos: &Point3<f32>, radius: f32, net: & HQMRinkNet) -> Option<(Point3<f32>, f32, Vector3<f32>)> {
     let mut max_overlap = 0.0;
     let mut res: Option<(Point3<f32>, f32, Vector3<f32>)> = None;
-    for net in std::array::IntoIter::new([
-        (& rink.red_lines_and_net.net),
-        (& rink.blue_lines_and_net.net)
-    ]) {
-        for surface in net.surfaces.iter() {
-            let normal = (&surface.3 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
 
-            let diff = &surface.0 - pos;
-            let dot = diff.dot(&normal);
-            let overlap = dot + radius;
-            let overlap2 = -dot + radius;
+    for surface in net.surfaces.iter() {
+        let normal = (&surface.3 - &surface.0).cross(&(&surface.1 - &surface.0)).normalize();
 
-            if overlap > 0.0 && overlap < radius {
-                let overlap_pos = pos + (radius-overlap)*normal;
-                if inside_surface(&overlap_pos, surface, &normal) {
-                    if overlap > max_overlap {
-                        max_overlap = overlap;
-                        res = Some((overlap_pos, overlap, normal));
-                    }
+        let diff = &surface.0 - pos;
+        let dot = diff.dot(&normal);
+        let overlap = dot + radius;
+        let overlap2 = -dot + radius;
+
+        if overlap > 0.0 && overlap < radius {
+            let overlap_pos = pos + (radius-overlap)*normal;
+            if inside_surface(&overlap_pos, surface, &normal) {
+                if overlap > max_overlap {
+                    max_overlap = overlap;
+                    res = Some((overlap_pos, overlap, normal));
                 }
-            } else if overlap2 > 0.0 && overlap2 < radius {
-                let overlap_pos = pos + (radius-overlap)*normal;
-                if inside_surface(&overlap_pos, surface, &normal) {
-                    if overlap2 > max_overlap {
-                        max_overlap = overlap2;
-                        res = Some((overlap_pos, overlap2, -normal));
-                    }
+            }
+        } else if overlap2 > 0.0 && overlap2 < radius {
+            let overlap_pos = pos + (radius-overlap)*normal;
+            if inside_surface(&overlap_pos, surface, &normal) {
+                if overlap2 > max_overlap {
+                    max_overlap = overlap2;
+                    res = Some((overlap_pos, overlap2, -normal));
                 }
             }
         }
     }
+
     res
 }
 
