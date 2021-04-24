@@ -1,6 +1,6 @@
 
 
-use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld, HQMRinkNet};
+use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld, HQMRinkNet, LinesAndNet};
 use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Point3, Vector2};
 use std::ops::{AddAssign};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
@@ -113,7 +113,9 @@ impl HQMGameWorld {
             if puck.body.angular_velocity.norm() > 1.0/65536.0 {
                 rotate_matrix_around_axis(& mut puck.body.rot, &puck.body.angular_velocity.normalize(), puck.body.angular_velocity.norm())
             }
-            puck_detection(puck, puck.index, &old_puck_pos, & self.rink, & mut events);
+
+            puck_detection(puck, puck.index, &old_puck_pos, HQMTeam::Red, & self.rink.red_lines_and_net, & mut events);
+            puck_detection(puck, puck.index, &old_puck_pos, HQMTeam::Blue, & self.rink.blue_lines_and_net, & mut events);
         }
 
         apply_collisions (& mut players, & collisions);
@@ -446,65 +448,50 @@ fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: &[HQMColli
     }
 }
 
-fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<f32>, rink: & HQMRink, events: & mut Vec<HQMSimulationEvent>) {
-    for (team, line) in std::array::IntoIter::new([
-        (HQMTeam::Red, & rink.red_lines_and_net.mid_line),
-        (HQMTeam::Blue, & rink.blue_lines_and_net.mid_line)
-    ]) {
-        if line.sphere_reached_line(&puck.body.pos, puck.radius) && !line.sphere_reached_line(&old_puck_pos, puck.radius) {
-            let event = HQMSimulationEvent::PuckEnteredOtherHalf {
-                team,
-                puck: puck_index
-            };
-            events.push(event);
-        }
+fn puck_detection(puck: & mut HQMPuck, puck_index: usize, old_puck_pos: &Point3<f32>, team: HQMTeam, lines_and_net: &LinesAndNet, events: & mut Vec<HQMSimulationEvent>) {
+    let offensive_line = & lines_and_net.offensive_line;
+    let mid_line = & lines_and_net.mid_line;
+    let net = & lines_and_net.net;
+    if mid_line.sphere_reached_line(&puck.body.pos, puck.radius) && !mid_line.sphere_reached_line(&old_puck_pos, puck.radius) {
+        let event = HQMSimulationEvent::PuckEnteredOtherHalf {
+            team,
+            puck: puck_index
+        };
+        events.push(event);
     }
-    for (team, line) in std::array::IntoIter::new([
-        (HQMTeam::Red, & rink.red_lines_and_net.offensive_line),
-        (HQMTeam::Blue, & rink.blue_lines_and_net.offensive_line)
-    ]) {
-        if !line.sphere_reached_line(&puck.body.pos, puck.radius) && line.sphere_reached_line(old_puck_pos, puck.radius) {
-            let event = HQMSimulationEvent::PuckLeftOffensiveZone {
-                team,
-                puck: puck_index
-            };
-            events.push(event);
-        } else if line.sphere_past_leading_edge(&puck.body.pos, puck.radius) && !line.sphere_past_leading_edge(old_puck_pos, puck.radius) {
-            let event = HQMSimulationEvent::PuckEnteredOffensiveZone {
-                team,
-                puck: puck_index
-            };
-            events.push(event);
-        }
+    if !offensive_line.sphere_reached_line(&puck.body.pos, puck.radius) && offensive_line.sphere_reached_line(old_puck_pos, puck.radius) {
+        let event = HQMSimulationEvent::PuckLeftOffensiveZone {
+            team,
+            puck: puck_index
+        };
+        events.push(event);
+    } else if offensive_line.sphere_past_leading_edge(&puck.body.pos, puck.radius) && !offensive_line.sphere_past_leading_edge(old_puck_pos, puck.radius) {
+        let event = HQMSimulationEvent::PuckEnteredOffensiveZone {
+            team,
+            puck: puck_index
+        };
+        events.push(event);
     }
-
-    for (team, net) in std::array::IntoIter::new([
-        (HQMTeam::Red, & rink.red_lines_and_net.net),
-        (HQMTeam::Blue, & rink.blue_lines_and_net.net)
-    ]) {
-        if (&net.left_post - &puck.body.pos).dot(&net.normal) >= 0.0 {
-            if (&net.left_post - old_puck_pos).dot(&net.normal) < 0.0 {
-                if (&net.left_post - &puck.body.pos).dot(&net.left_post_inside) < 0.0 &&
-                    (&net.right_post - &puck.body.pos).dot(&net.right_post_inside) < 0.0
-                    && puck.body.pos.y < 1.0 {
-                    let event = HQMSimulationEvent::PuckEnteredNet {
-                        team,
-                        puck: puck_index
-                    };
-                    events.push(event);
-                } else {
-                    let event = HQMSimulationEvent::PuckPassedGoalLine {
-                        team,
-                        puck: puck_index
-                    };
-                    events.push(event);
-                }
+    if (&net.left_post - &puck.body.pos).dot(&net.normal) >= 0.0 {
+        if (&net.left_post - old_puck_pos).dot(&net.normal) < 0.0 {
+            if (&net.left_post - &puck.body.pos).dot(&net.left_post_inside) < 0.0 &&
+                (&net.right_post - &puck.body.pos).dot(&net.right_post_inside) < 0.0
+                && puck.body.pos.y < 1.0 {
+                let event = HQMSimulationEvent::PuckEnteredNet {
+                    team,
+                    puck: puck_index
+                };
+                events.push(event);
+            } else {
+                let event = HQMSimulationEvent::PuckPassedGoalLine {
+                    team,
+                    puck: puck_index
+                };
+                events.push(event);
             }
         }
-
     }
 }
-
 
 
 fn do_puck_net_forces(puck: & mut HQMPuck, net: &HQMRinkNet, puck_linear_velocity: & Vector3<f32>, puck_angular_velocity: & Vector3<f32>) -> bool {
