@@ -327,27 +327,6 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
     }
 
     pub fn update_clock(& mut self, period_length: u32, intermission_time: u32) {
-        if self.game.period == 0 && self.game.time > 2000 {
-            let mut has_red_players = false;
-            let mut has_blue_players = false;
-            for object in self.game.world.objects.iter() {
-                if let HQMGameObject::Player(skater) = object {
-                    match skater.team {
-                        HQMTeam::Red => {
-                            has_red_players = true;
-                        },
-                        HQMTeam::Blue => {
-                            has_blue_players = true;
-                        },
-                    }
-                }
-                if has_red_players && has_blue_players {
-                    self.game.time = 2000;
-                    break;
-                }
-            }
-        }
-
         if !self.game.paused {
             if self.game.time_break > 0 {
                 self.game.time_break -= 1;

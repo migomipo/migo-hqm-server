@@ -97,6 +97,10 @@ impl HQMMatchBehaviour {
             server.move_to_team_spawnpoint(*player_index, HQMTeam::Blue, server.behaviour.config.spawn_point);
         }
 
+        if server.game.period == 0 && server.game.time > 2000 && new_red_player_count > 0 && new_blue_player_count > 0 {
+            server.game.time = 2000;
+        }
+
     }
 
     pub(crate) fn set_team_parity(server: & mut HQMServer<Self>, player_index: usize, rule:&str) {
