@@ -755,6 +755,23 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                     server.view(view_player_index, player_index);
                 }
             },
+            "views" => {
+                if let Some((view_player_index, _name)) = server.player_exact_unique_match(arg) {
+                    server.view(view_player_index, player_index);
+                } else {
+                    let matches = server.player_search(arg);
+                    if matches.is_empty() {
+                        server.add_directed_server_chat_message("No matches found".to_string(), player_index);
+                    } else if matches.len() > 1 {
+                        server.add_directed_server_chat_message("Multiple matches found, use /view X".to_string(), player_index);
+                        for (found_player_index, found_player_name) in matches.into_iter().take(5) {
+                            server.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
+                        }
+                    } else {
+                        server.view(matches[0].0, player_index);
+                    }
+                }
+            }
             "restoreview" => {
                 if let Some(player) = & mut server.players[player_index] {
                     if player.view_player_index != player_index {

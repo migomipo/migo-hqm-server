@@ -68,13 +68,43 @@ impl HQMServerBehaviour for HQMPermanentWarmup {
         // Nothing
     }
 
-    fn handle_command(server: &mut HQMServer<Self>, cmd: &str, _arg: &str, player_index: usize) where Self: Sized {
+    fn handle_command(server: &mut HQMServer<Self>, cmd: &str, arg: &str, player_index: usize) where Self: Sized {
         match cmd {
             "lefty" => {
                 server.set_hand(HQMSkaterHand::Left, player_index);
             },
             "righty" => {
                 server.set_hand(HQMSkaterHand::Right, player_index);
+            },
+            "view" => {
+                if let Ok(view_player_index) = arg.parse::<usize>() {
+                    server.view(view_player_index, player_index);
+                }
+            },
+            "views" => {
+                if let Some((view_player_index, _name)) = server.player_exact_unique_match(arg) {
+                    server.view(view_player_index, player_index);
+                } else {
+                    let matches = server.player_search(arg);
+                    if matches.is_empty() {
+                        server.add_directed_server_chat_message("No matches found".to_string(), player_index);
+                    } else if matches.len() > 1 {
+                        server.add_directed_server_chat_message("Multiple matches found, use /view X".to_string(), player_index);
+                        for (found_player_index, found_player_name) in matches.into_iter().take(5) {
+                            server.add_directed_server_chat_message(format!("{}: {}", found_player_index, found_player_name), player_index);
+                        }
+                    } else {
+                        server.view(matches[0].0, player_index);
+                    }
+                }
+            }
+            "restoreview" => {
+                if let Some(player) = & mut server.players[player_index] {
+                    if player.view_player_index != player_index {
+                        player.view_player_index = player_index;
+                        server.add_directed_server_chat_message("View has been restored".to_string(), player_index);
+                    }
+                }
             },
             _ => {}
         }
