@@ -1,6 +1,6 @@
 use crate::hqm_server::{HQMServerBehaviour, HQMServer, HQMSpawnPoint};
 use crate::hqm_simulate::HQMSimulationEvent;
-use crate::hqm_game::{HQMSkaterHand, HQMPhysicsConfiguration, HQMTeam, HQMGame};
+use crate::hqm_game::{HQMPhysicsConfiguration, HQMTeam, HQMGame};
 use nalgebra::{Point3, Matrix3};
 
 use tracing::info;
@@ -70,12 +70,6 @@ impl HQMServerBehaviour for HQMPermanentWarmup {
 
     fn handle_command(server: &mut HQMServer<Self>, cmd: &str, arg: &str, player_index: usize) where Self: Sized {
         match cmd {
-            "lefty" => {
-                server.set_hand(HQMSkaterHand::Left, player_index);
-            },
-            "righty" => {
-                server.set_hand(HQMSkaterHand::Right, player_index);
-            },
             "view" => {
                 if let Ok(view_player_index) = arg.parse::<usize>() {
                     server.view(view_player_index, player_index);

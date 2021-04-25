@@ -749,12 +749,6 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
             "unpause" | "unpausegame" => {
                 Self::unpause(server, player_index);
             },
-            "lefty" => {
-                server.set_hand(HQMSkaterHand::Left, player_index);
-            },
-            "righty" => {
-                server.set_hand(HQMSkaterHand::Right, player_index);
-            },
             "view" => {
                 if let Ok(view_player_index) = arg.parse::<usize>() {
                     server.view(view_player_index, player_index);

@@ -426,7 +426,12 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
             "clearbans" => {
                 self.clear_bans(player_index);
             },
-
+            "lefty" => {
+                self.set_hand(HQMSkaterHand::Left, player_index);
+            },
+            "righty" => {
+                self.set_hand(HQMSkaterHand::Right, player_index);
+            },
             "sp" | "setposition" => {
                 self.set_preferred_faceoff_position(player_index, arg);
             },
