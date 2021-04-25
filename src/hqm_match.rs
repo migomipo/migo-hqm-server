@@ -1,7 +1,7 @@
 use nalgebra::{Matrix3, Point3, Vector3};
 use tracing::info;
 
-use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameState, HQMGameWorld, HQMIcingStatus, HQMOffsideStatus, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam};
+use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameWorld, HQMIcingStatus, HQMOffsideStatus, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam};
 use crate::hqm_server::{HQMIcingConfiguration, HQMOffsideConfiguration, HQMServer, HQMServerBehaviour, HQMSpawnPoint};
 use crate::hqm_simulate::HQMSimulationEvent;
 
@@ -315,7 +315,7 @@ impl HQMMatchBehaviour {
     }
 
     pub(crate) fn faceoff (server: & mut HQMServer<Self>, player_index: usize) {
-        if server.game.state != HQMGameState::GameOver {
+        if !server.game.game_over {
             if let Some(player) = & server.players[player_index] {
                 if player.is_admin{
                     server.game.time_break = 5*100;
@@ -349,7 +349,7 @@ impl HQMMatchBehaviour {
     pub(crate) fn start_game (server: & mut HQMServer<Self>, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin {
-                if server.game.state == HQMGameState::Warmup {
+                if server.game.period == 0 && server.game.time > 1 {
                     info!("{} ({}) started game", player.player_name, player_index);
                     let msg = format!("Game started by {}", player.player_name);
 
@@ -635,7 +635,11 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
 
     fn after_tick(server: &mut HQMServer<Self>, events: Vec<HQMSimulationEvent>) where Self: Sized {
 
-        if server.game.state == HQMGameState::Game {
+        if server.game.time_break == 0
+        && server.game.time > 0
+        && !server.game.game_over
+        && !server.game.paused
+        && server.game.period > 0 {
             Self::handle_events(server, events);
         }
         server.update_clock(

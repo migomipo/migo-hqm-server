@@ -104,7 +104,7 @@ impl HQMOffsideStatus {
 
 pub struct HQMGame {
     pub(crate) start_time: DateTime<Utc>,
-    pub(crate) state: HQMGameState,
+
     pub(crate) persistent_messages: Vec<Rc<HQMMessage>>,
     pub(crate) replay_data: Vec<u8>,
     pub(crate) replay_msg_pos: usize,
@@ -147,7 +147,7 @@ impl HQMGame {
 
         HQMGame {
             start_time: Utc::now(),
-            state:HQMGameState::Warmup,
+
             persistent_messages: vec![],
             replay_data: Vec::with_capacity(64 * 1024 * 1024),
             replay_msg_pos: 0,
@@ -834,31 +834,6 @@ impl Display for HQMTeam {
         match self {
             HQMTeam::Red => write!(f, "Red"),
             HQMTeam::Blue => write!(f, "Blue"),
-        }
-    }
-}
-
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum HQMGameState {
-    Warmup,
-    Game,
-    Intermission,
-    GoalScored,
-    Paused,
-    GameOver,
-}
-
-impl Display for HQMGameState {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            HQMGameState::Warmup => write!(f, "Warmup"),
-            HQMGameState::Game => write!(f, "Game"),
-            HQMGameState::Intermission => write!(f, "Intermission"),
-            HQMGameState::GoalScored => write!(f, "Timeout"),
-            HQMGameState::Paused => write!(f, "Paused"),
-            HQMGameState::GameOver => write!(f, "Game Over"),
-
         }
     }
 }

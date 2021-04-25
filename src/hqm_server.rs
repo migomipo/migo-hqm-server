@@ -17,7 +17,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
 use tracing::info;
 
-use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameState, HQMIcingStatus, HQMMessage, HQMOffsideStatus, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam};
+use crate::hqm_game::{HQMGame, HQMGameObject, HQMIcingStatus, HQMMessage, HQMOffsideStatus, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam};
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
 
@@ -244,7 +244,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
             player.hand = hand;
             if let Some(skater_obj_index) = player.skater {
                 if let HQMGameObject::Player(skater) = & mut self.game.world.objects[skater_obj_index] {
-                    if self.game.state == HQMGameState::Game {
+                    if self.game.period != 0 {
                         let msg = format!("Stick hand will change after next intermission");
                         self.add_directed_server_chat_message(msg, player_index);
 
@@ -343,11 +343,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
                     }
 
                 }
-                self.game.state = if self.game.is_intermission_goal {
-                    HQMGameState::GoalScored
-                } else {
-                    HQMGameState::Intermission
-                }
+
             } else if self.game.time > 0 {
                 self.game.time -= 1;
                 if self.game.time == 0 {
@@ -360,22 +356,9 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
                         self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
                     }
                 }
-                self.game.state = if self.game.game_over {
-                    HQMGameState::GameOver
-                } else if self.game.period == 0 {
-                    HQMGameState::Warmup
-                } else {
-                    HQMGameState::Game
-                }
             }
-
-        } else {
-            self.game.state = HQMGameState::Paused;
         }
-
-
     }
-
 
     fn process_command (&mut self, command: &str, arg: &str, player_index: usize) {
 
