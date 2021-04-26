@@ -1,9 +1,9 @@
-use crate::hqm_server::{HQMServer, HQMMuteStatus, HQMServerBehaviour};
+use crate::hqm_server::{HQMServer, HQMMuteStatus};
 
 use tracing::info;
 use std::net::SocketAddr;
 
-impl <B:HQMServerBehaviour> HQMServer<B> {
+impl HQMServer {
     pub(crate) fn admin_deny_message (& mut self, player_index: usize) {
         let msg = format!("Please log in before using that command");
         self.add_directed_server_chat_message(msg,player_index);

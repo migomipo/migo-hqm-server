@@ -121,7 +121,7 @@ pub struct HQMGame {
     pub time: u32,
     pub time_break: u32,
     pub is_intermission_goal: bool,
-    pub paused: bool,
+
     pub game_id: u32,
     pub game_step: u32,
     pub game_over: bool,
@@ -169,8 +169,6 @@ impl HQMGame {
             time: 30000,
             is_intermission_goal: false,
             time_break: 0,
-            paused: false,
-
             game_over: false,
             game_id,
             game_step: u32::MAX,

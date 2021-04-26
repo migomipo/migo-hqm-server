@@ -35,7 +35,7 @@ enum HQMServerReceivedData {
     }
 }
 
-pub struct HQMServer<B: HQMServerBehaviour> {
+pub struct HQMServer{
     pub(crate) players: Vec<Option<HQMConnectedPlayer>>,
     pub(crate) ban_list: HashSet<std::net::IpAddr>,
     pub(crate) allow_join: bool,
@@ -43,11 +43,10 @@ pub struct HQMServer<B: HQMServerBehaviour> {
     pub(crate) game: HQMGame,
     game_alloc: u32,
     pub is_muted:bool,
-    pub behaviour: B,
 }
 
-impl <B:HQMServerBehaviour> HQMServer<B> {
-    async fn handle_message(&mut self, addr: SocketAddr, socket: & Arc<UdpSocket>, msg: &[u8]) {
+impl HQMServer {
+    async fn handle_message<B: HQMServerBehaviour>(&mut self, addr: SocketAddr, socket: & Arc<UdpSocket>, msg: &[u8], behaviour: & mut B) {
         let mut parser = HQMMessageReader::new(&msg);
         let header = parser.read_bytes_aligned(4);
         if header != GAME_HEADER {
@@ -64,7 +63,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
             },
             // if 8 or 0x10, client is modded, probly want to send it to the player_update function to store it in the client/player struct, to use when responding to clients
             4 | 8 | 0x10 => {
-                self.player_update(addr, &mut parser, command);
+                self.player_update(addr, &mut parser, command, behaviour);
             },
             7 => {
                 self.player_exit(addr);
@@ -111,7 +110,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
         player_count
     }
 
-    fn player_update(&mut self, addr: SocketAddr, parser: &mut HQMMessageReader, command: u8) {
+    fn player_update<B: HQMServerBehaviour>(&mut self, addr: SocketAddr, parser: &mut HQMMessageReader, command: u8, behaviour: & mut B) {
         let current_slot = self.find_player_slot(addr);
         let (player_index, player) = match current_slot {
             Some(x) => {
@@ -193,7 +192,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
                 player.chat_rep = Some(rep);
                 let byte_num = parser.read_bits(8) as usize;
                 let message = parser.read_bytes_aligned(byte_num);
-                self.process_message(message, player_index);
+                self.process_message(message, player_index, behaviour);
             }
 
         }
@@ -326,41 +325,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
         self.add_server_chat_message(String::from("Icing"));
     }
 
-    pub fn update_clock(& mut self, period_length: u32, intermission_time: u32) {
-        if !self.game.paused {
-            if self.game.time_break > 0 {
-                self.game.time_break -= 1;
-                if self.game.time_break == 0 {
-                    self.game.is_intermission_goal = false;
-                    if self.game.game_over {
-                        self.new_game();
-                    } else {
-                        if self.game.time == 0 {
-                            self.game.time = period_length;
-                        }
-
-                        self.do_faceoff ();
-                    }
-
-                }
-
-            } else if self.game.time > 0 {
-                self.game.time -= 1;
-                if self.game.time == 0 {
-                    self.game.period += 1;
-                    if self.game.period > 3 && self.game.red_score != self.game.blue_score {
-                        self.game.time_break = intermission_time;
-                        self.game.game_over = true;
-                    } else {
-                        self.game.time_break = intermission_time;
-                        self.game.next_faceoff_spot = self.game.world.rink.center_faceoff_spot.clone();
-                    }
-                }
-            }
-        }
-    }
-
-    fn process_command (&mut self, command: &str, arg: &str, player_index: usize) {
+    fn process_command<B: HQMServerBehaviour> (&mut self, command: &str, arg: &str, player_index: usize, behaviour: & mut B) {
 
         match command{
             "enablejoin" => {
@@ -470,7 +435,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
                     }
                 }
             },
-            _ => B::handle_command(self, command, arg, player_index),
+            _ => behaviour.handle_command(self, command, arg, player_index),
         }
 
     }
@@ -591,7 +556,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
         found
     }
 
-    fn process_message(&mut self, bytes: Vec<u8>, player_index: usize) {
+    fn process_message<B: HQMServerBehaviour>(&mut self, bytes: Vec<u8>, player_index: usize, behaviour: & mut B) {
         let msg = match String::from_utf8(bytes) {
             Ok(s) => s,
             Err(_) => return
@@ -606,7 +571,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
                 } else {
                     &split[1]
                 };
-                self.process_command(command, arg, player_index);
+                self.process_command(command, arg, player_index, behaviour);
             } else {
                 if !self.is_muted {
                     match &self.players[player_index as usize] {
@@ -883,7 +848,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
         return self.players.iter().position(|x| x.is_none());
     }
 
-    async fn tick(&mut self, socket: & UdpSocket, write_buf: & mut [u8]) {
+    async fn tick<B: HQMServerBehaviour>(&mut self, socket: & UdpSocket, write_buf: & mut [u8], behaviour: & mut B) {
         if self.player_count() != 0 {
             self.game.active = true;
             tokio::task::block_in_place(|| {
@@ -912,7 +877,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
                     self.add_server_chat_message(message);
                 }
 
-                B::before_tick(self);
+                behaviour.before_tick(self);
 
                 for player in self.players.iter_mut() {
                     if let Some(player) = player {
@@ -925,7 +890,7 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
                 }
                 let events = self.game.world.simulate_step();
 
-                B::after_tick(self, events);
+                behaviour.after_tick(self, events);
 
                 let packets = get_packets(& self.game.world.objects);
 
@@ -946,14 +911,14 @@ impl <B:HQMServerBehaviour> HQMServer<B> {
             }
         } else if self.game.active {
             info!("Game {} abandoned", self.game.game_id);
-            self.new_game();
+            self.new_game(behaviour);
             self.allow_join=true;
         }
 
     }
 
-    pub(crate) fn new_game(&mut self) {
-        let new_game = self.behaviour.create_game(self.game_alloc);
+    pub(crate) fn new_game<B: HQMServerBehaviour>(&mut self, behaviour: & mut B) {
+        let new_game = behaviour.create_game(self.game_alloc);
         let old_game = std::mem::replace(& mut self.game, new_game);
         info!("New game {} started", self.game.game_id);
         self.game_alloc += 1;
@@ -1140,9 +1105,7 @@ pub async fn run_server<B: HQMServerBehaviour>(port: u16, public: bool,
         game_alloc: 2,
         is_muted:false,
         config,
-        behaviour
     };
-    server.new_game();
     info!("Server started, new game {} started", 1);
 
     // Set up timers
@@ -1200,14 +1163,14 @@ pub async fn run_server<B: HQMServerBehaviour>(port: u16, public: bool,
     loop {
         tokio::select! {
                 _ = tick_timer.tick() => {
-                    server.tick(& socket, & mut write_buf).await;
+                    server.tick(& socket, & mut write_buf, & mut behaviour).await;
                 }
                 x = msg_receiver.recv() => {
                     if let Some (HQMServerReceivedData::GameClientPacket {
                         addr,
                         data: msg
                     }) = x {
-                        server.handle_message(addr, & socket, & msg).await;
+                        server.handle_message(addr, & socket, & msg, & mut behaviour).await;
                     }
                 }
             }
@@ -1645,10 +1608,10 @@ pub struct HQMServerConfiguration {
 
 
 pub trait HQMServerBehaviour {
-    fn before_tick (server: & mut HQMServer<Self>) where Self: Sized;
-    fn after_tick (server: & mut HQMServer<Self>, events: Vec<HQMSimulationEvent>) where Self: Sized;
-    fn handle_command (server: & mut HQMServer<Self>, cmd: &str, arg: &str, player_index: usize) where Self: Sized;
+    fn before_tick (& mut self, server: & mut HQMServer) ;
+    fn after_tick (& mut self, server: & mut HQMServer, events: Vec<HQMSimulationEvent>) ;
+    fn handle_command (& mut self, server: & mut HQMServer, cmd: &str, arg: &str, player_index: usize) ;
 
-    fn create_game (& mut self, game_id: u32) -> HQMGame where Self: Sized;
+    fn create_game (& mut self, game_id: u32) -> HQMGame;
 }
 

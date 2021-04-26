@@ -20,7 +20,7 @@ impl HQMPermanentWarmup {
             spawn_point
         }
     }
-    fn update_players (server: & mut HQMServer<Self>) {
+    fn update_players (& mut self, server: & mut HQMServer) {
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
@@ -49,26 +49,26 @@ impl HQMPermanentWarmup {
 
         for (player_index, player_name) in joining_red {
             info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Red);
-            server.move_to_team_spawnpoint(player_index, HQMTeam::Red, server.behaviour.spawn_point);
+            server.move_to_team_spawnpoint(player_index, HQMTeam::Red, self.spawn_point);
         }
         for (player_index, player_name) in joining_blue {
             info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Blue);
-            server.move_to_team_spawnpoint(player_index, HQMTeam::Blue, server.behaviour.spawn_point);
+            server.move_to_team_spawnpoint(player_index, HQMTeam::Blue, self.spawn_point);
         }
 
     }
 }
 
 impl HQMServerBehaviour for HQMPermanentWarmup {
-    fn before_tick(server: &mut HQMServer<Self>) where Self: Sized {
-        Self::update_players(server);
+    fn before_tick(& mut self, server: &mut HQMServer) {
+        self.update_players(server);
     }
 
-    fn after_tick(_server: &mut HQMServer<Self>, _events: Vec<HQMSimulationEvent>) where Self: Sized {
+    fn after_tick(& mut self, _server: &mut HQMServer, _events: Vec<HQMSimulationEvent>)  {
         // Nothing
     }
 
-    fn handle_command(server: &mut HQMServer<Self>, cmd: &str, arg: &str, player_index: usize) where Self: Sized {
+    fn handle_command(& mut self, server: &mut HQMServer, cmd: &str, arg: &str, player_index: usize) {
         match cmd {
             "view" => {
                 if let Ok(view_player_index) = arg.parse::<usize>() {

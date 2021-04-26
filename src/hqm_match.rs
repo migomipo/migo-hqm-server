@@ -26,17 +26,19 @@ pub struct HQMMatchConfiguration {
 
 
 pub struct HQMMatchBehaviour {
-    config: HQMMatchConfiguration
+    config: HQMMatchConfiguration,
+    paused: bool
 }
 
 impl HQMMatchBehaviour {
     pub fn new (config: HQMMatchConfiguration) -> Self {
         HQMMatchBehaviour {
-            config
+            config,
+            paused: false
         }
     }
 
-    fn update_players (server: & mut HQMServer<Self>) {
+    fn update_players (& mut self, server: & mut HQMServer) {
 
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
@@ -79,7 +81,7 @@ impl HQMMatchBehaviour {
         let mut new_red_player_count = (red_player_count + joining_red.len()).min(server.config.team_max);
         let mut new_blue_player_count = (blue_player_count + joining_blue.len()).min(server.config.team_max);
 
-        if server.behaviour.config.force_team_size_parity {
+        if self.config.force_team_size_parity {
             if new_red_player_count > new_blue_player_count + 1 {
                 new_red_player_count = new_blue_player_count + 1;
             } else if blue_player_count > new_red_player_count + 1 {
@@ -90,11 +92,11 @@ impl HQMMatchBehaviour {
         let num_joining_blue = new_blue_player_count.saturating_sub(blue_player_count);
         for (player_index, player_name) in &joining_red[0..num_joining_red] {
             info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Red);
-            server.move_to_team_spawnpoint(*player_index, HQMTeam::Red, server.behaviour.config.spawn_point);
+            server.move_to_team_spawnpoint(*player_index, HQMTeam::Red, self.config.spawn_point);
         }
         for (player_index, player_name) in &joining_blue[0..num_joining_blue] {
             info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Blue);
-            server.move_to_team_spawnpoint(*player_index, HQMTeam::Blue, server.behaviour.config.spawn_point);
+            server.move_to_team_spawnpoint(*player_index, HQMTeam::Blue, self.config.spawn_point);
         }
 
         if server.game.period == 0 && server.game.time > 2000 && new_red_player_count > 0 && new_blue_player_count > 0 {
@@ -103,12 +105,12 @@ impl HQMMatchBehaviour {
 
     }
 
-    pub(crate) fn set_team_parity(server: & mut HQMServer<Self>, player_index: usize, rule:&str) {
+    pub(crate) fn set_team_parity(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 match rule {
                     "on" => {
-                        server.behaviour.config.force_team_size_parity = true;
+                        self.config.force_team_size_parity = true;
 
                         info!("{} ({}) enabled team size parity",player.player_name, player_index);
                         let msg = format!("Team size parity enabled by {}", player.player_name);
@@ -116,7 +118,7 @@ impl HQMMatchBehaviour {
                         server.add_server_chat_message(msg);
                     },
                     "off" => {
-                        server.behaviour.config.force_team_size_parity = false;
+                        self.config.force_team_size_parity = false;
 
                         info!("{} ({}) disabled team size parity",player.player_name, player_index);
                         let msg = format!("Team size parity disabled by {}", player.player_name);
@@ -131,18 +133,18 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn cheat_gravity (server: & mut HQMServer<Self>, split: &[&str]) {
+    fn cheat_gravity (& mut self, server: & mut HQMServer, split: &[&str]) {
         if split.len() >= 2 {
             let gravity = split[1].parse::<f32>();
             if let Ok (gravity) = gravity {
                 let converted_gravity = gravity/10000.0;
-                server.behaviour.config.physics_config.gravity = converted_gravity;
+                self.config.physics_config.gravity = converted_gravity;
                 server.game.world.physics_config.gravity = converted_gravity;
             }
         }
     }
 
-    fn cheat_mass (server: & mut HQMServer<Self>, split: &[&str]) {
+    fn cheat_mass (& mut self, server: & mut HQMServer, split: &[&str]) {
         if split.len() >= 3 {
             let player = split[1].parse::<usize>().ok()
                 .and_then(|x| server.players.get_mut(x).and_then(|x| x.as_mut()));
@@ -162,7 +164,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn cheat(server: & mut HQMServer<Self>, player_index: usize, arg:&str) {
+    pub(crate) fn cheat(& mut self, server: & mut HQMServer, player_index: usize, arg:&str) {
         if let Some(player) = & server.players[player_index] {
 
             if player.is_admin{
@@ -170,10 +172,10 @@ impl HQMMatchBehaviour {
                 if let Some(&command) = split.get(0) {
                     match command {
                         "mass" => {
-                            Self::cheat_mass(server, &split);
+                            self.cheat_mass(server, &split);
                         },
                         "gravity" => {
-                            Self::cheat_gravity(server, &split);
+                            self.cheat_gravity(server, &split);
                         }
                         _ => {}
                     }
@@ -185,7 +187,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_team_size(server: & mut HQMServer<Self>, player_index: usize, size:&str) {
+    pub(crate) fn set_team_size(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<usize>() {
@@ -204,26 +206,26 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_icing_rule(server: & mut HQMServer<Self>, player_index: usize, rule:&str) {
+    pub(crate) fn set_icing_rule(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 match rule {
                     "on" | "touch" => {
-                        server.behaviour.config.icing = HQMIcingConfiguration::Touch;
+                        self.config.icing = HQMIcingConfiguration::Touch;
                         info!("{} ({}) enabled touch icing",player.player_name, player_index);
                         let msg = format!("Touch icing enabled by {}",player.player_name);
 
                         server.add_server_chat_message(msg);
                     },
                     "notouch" => {
-                        server.behaviour.config.icing = HQMIcingConfiguration::NoTouch;
+                        self.config.icing = HQMIcingConfiguration::NoTouch;
                         info!("{} ({}) enabled no-touch icing",player.player_name, player_index);
                         let msg = format!("No-touch icing enabled by {}",player.player_name);
 
                         server.add_server_chat_message(msg);
                     },
                     "off" => {
-                        server.behaviour.config.icing = HQMIcingConfiguration::Off;
+                        self.config.icing = HQMIcingConfiguration::Off;
                         info!("{} ({}) disabled icing",player.player_name, player_index);
                         let msg = format!("Icing disabled by {}",player.player_name);
 
@@ -237,26 +239,26 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_offside_rule(server: & mut HQMServer<Self>, player_index: usize, rule:&str) {
+    pub(crate) fn set_offside_rule(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 match rule {
                     "on" | "delayed" => {
-                        server.behaviour.config.offside = HQMOffsideConfiguration::Delayed;
+                        self.config.offside = HQMOffsideConfiguration::Delayed;
                         info!("{} ({}) enabled offside", player.player_name, player_index);
                         let msg = format!("Offside enabled by {}",player.player_name);
 
                         server.add_server_chat_message(msg);
                     },
                     "imm" | "immediate" => {
-                        server.behaviour.config.offside = HQMOffsideConfiguration::Immediate;
+                        self.config.offside = HQMOffsideConfiguration::Immediate;
                         info!("{} ({}) enabled immediate offside", player.player_name, player_index);
                         let msg = format!("Immediate offside enabled by {}",player.player_name);
 
                         server.add_server_chat_message(msg);
                     },
                     "off" => {
-                        server.behaviour.config.offside = HQMOffsideConfiguration::Off;
+                        self.config.offside = HQMOffsideConfiguration::Off;
                         info!("{} ({}) disabled offside",player.player_name, player_index);
                         let msg = format!("Offside disabled by {}",player.player_name);
 
@@ -270,11 +272,11 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_first_to_rule(server: & mut HQMServer<Self>, player_index: usize, size:&str) {
+    pub(crate) fn set_first_to_rule(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<u32>() {
-                    server.behaviour.config.first_to = new_num;
+                    self.config.first_to = new_num;
 
                     if new_num > 0 {
                         info!("{} ({}) set first-to-goals rule to {} goals",player.player_name, player_index, new_num);
@@ -292,11 +294,11 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_mercy_rule(server: & mut HQMServer<Self>, player_index: usize, size:&str) {
+    pub(crate) fn set_mercy_rule(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<u32>() {
-                    server.behaviour.config.mercy = new_num;
+                    self.config.mercy = new_num;
 
                     if new_num > 0 {
                         info!("{} ({}) set mercy rule to {} goals",player.player_name, player_index, new_num);
@@ -314,12 +316,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn faceoff (server: & mut HQMServer<Self>, player_index: usize) {
+    pub(crate) fn faceoff (& mut self, server: & mut HQMServer, player_index: usize) {
         if !server.game.game_over {
             if let Some(player) = & server.players[player_index] {
                 if player.is_admin{
                     server.game.time_break = 5*100;
-                    server.game.paused = false; // Unpause if it's paused as well
+                    self.paused = false; // Unpause if it's paused as well
 
                     let msg = format!("Faceoff initiated by {}",player.player_name);
                     info!("{} ({}) initiated faceoff",player.player_name, player_index);
@@ -331,13 +333,13 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn reset_game (server: & mut HQMServer<Self>, player_index: usize) {
+    pub(crate) fn reset_game (& mut self, server: & mut HQMServer, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 info!("{} ({}) reset game",player.player_name, player_index);
                 let msg = format!("Game reset by {}",player.player_name);
 
-                server.new_game();
+                server.new_game(self);
 
                 server.add_server_chat_message(msg);
             } else {
@@ -346,13 +348,13 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn start_game (server: & mut HQMServer<Self>, player_index: usize) {
+    pub(crate) fn start_game (& mut self, server: & mut HQMServer, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin {
                 if server.game.period == 0 && server.game.time > 1 {
                     info!("{} ({}) started game", player.player_name, player_index);
                     let msg = format!("Game started by {}", player.player_name);
-
+                    self.paused = false;
                     server.game.time = 1;
 
                     server.add_server_chat_message(msg);
@@ -363,10 +365,10 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn pause (server: & mut HQMServer<Self>, player_index: usize) {
+    pub(crate) fn pause (& mut self, server: & mut HQMServer, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
-                server.game.paused=true;
+                self.paused=true;
                 info!("{} ({}) paused game",player.player_name, player_index);
                 let msg = format!("Game paused by {}",player.player_name);
                 server.add_server_chat_message(msg);
@@ -376,10 +378,10 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn unpause (server: & mut HQMServer<Self>, player_index: usize) {
+    pub(crate) fn unpause (& mut self, server: & mut HQMServer, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
-                server.game.paused=false;
+                self.paused=false;
                 info!("{} ({}) resumed game",player.player_name, player_index);
                 let msg = format!("Game resumed by {}",player.player_name);
 
@@ -390,7 +392,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_clock (server: & mut HQMServer<Self>, input_minutes: u32, input_seconds: u32, player_index: usize) {
+    pub(crate) fn set_clock (server: & mut HQMServer, input_minutes: u32, input_seconds: u32, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 server.game.time = (input_minutes * 60 * 100)+ (input_seconds * 100);
@@ -405,7 +407,7 @@ impl HQMMatchBehaviour {
 
     }
 
-    pub(crate) fn set_score (server: & mut HQMServer<Self>, input_team: HQMTeam, input_score: u32, player_index: usize) {
+    pub(crate) fn set_score (server: & mut HQMServer, input_team: HQMTeam, input_score: u32, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 match input_team {
@@ -430,7 +432,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_period (server: & mut HQMServer<Self>, input_period: u32, player_index: usize) {
+    pub(crate) fn set_period (server: & mut HQMServer, input_period: u32, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
 
@@ -446,161 +448,168 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn handle_events (server: & mut HQMServer<Self>, events: Vec<HQMSimulationEvent>) {
-        for event in events {
-            match event {
-                HQMSimulationEvent::PuckEnteredNet {
-                    team, puck
-                } => {
-                    match &server.game.offside_status {
-                        HQMOffsideStatus::Warning(offside_team, p, _) if *offside_team == team => {
-                            let copy = p.clone();
-                            server.call_offside( team, &copy, server.behaviour.config.time_break*100);
-                        }
-                        HQMOffsideStatus::Offside(_) => {},
-                        _ => {
-                            server.call_goal(team, puck,
-                                            server.behaviour.config.time_break*100,
-                                            server.behaviour.config.time_intermission*100,
-                                            server.behaviour.config.mercy,
-                                            server.behaviour.config.first_to);
-                        }
+}
+
+pub fn handle_events(server: & mut HQMServer, events: Vec<HQMSimulationEvent>, time_break: u32, time_intermission: u32,
+                                mercy: u32, first_to: u32, offside: HQMOffsideConfiguration, icing: HQMIcingConfiguration) {
+    if server.game.time_break > 0
+        || server.game.time == 0
+        || server.game.game_over
+        || server.game.period == 0 {
+        return;
+    }
+
+    for event in events {
+        match event {
+            HQMSimulationEvent::PuckEnteredNet {
+                team, puck
+            } => {
+                match &server.game.offside_status {
+                    HQMOffsideStatus::Warning(offside_team, p, _) if *offside_team == team => {
+                        let copy = p.clone();
+                        server.call_offside( team, &copy, time_break);
                     }
-                },
-                HQMSimulationEvent::PuckTouch {
-                    player, puck
-                } => {
-                    // Get connected player index from skater
-                    if let HQMGameObject::Player(skater) = & server.game.world.objects[player] {
-                        let this_connected_player_index = skater.connected_player_index;
-                        let touching_team = skater.team;
-                        let faceoff_position = skater.faceoff_position.clone();
+                    HQMOffsideStatus::Offside(_) => {},
+                    _ => {
+                        server.call_goal(team, puck,
+                                         time_break,
+                                         time_intermission,
+                                         mercy,
+                                         first_to);
+                    }
+                }
+            },
+            HQMSimulationEvent::PuckTouch {
+                player, puck
+            } => {
+                // Get connected player index from skater
+                if let HQMGameObject::Player(skater) = & server.game.world.objects[player] {
+                    let this_connected_player_index = skater.connected_player_index;
+                    let touching_team = skater.team;
+                    let faceoff_position = skater.faceoff_position.clone();
 
-                        if let HQMGameObject::Puck(puck) = & mut server.game.world.objects[puck] {
-                            puck.add_touch(this_connected_player_index, touching_team, server.game.time);
+                    if let HQMGameObject::Puck(puck) = & mut server.game.world.objects[puck] {
+                        puck.add_touch(this_connected_player_index, touching_team, server.game.time);
 
-                            let other_team = match touching_team {
-                                HQMTeam::Red => HQMTeam::Blue,
-                                HQMTeam::Blue => HQMTeam::Red
-                            };
+                        let other_team = match touching_team {
+                            HQMTeam::Red => HQMTeam::Blue,
+                            HQMTeam::Blue => HQMTeam::Red
+                        };
 
-                            if let HQMOffsideStatus::Warning(team, p, i) = &server.game.offside_status {
-                                if *team == touching_team {
-                                    let pass_origin = if this_connected_player_index == *i {
-                                        puck.body.pos.clone()
-                                    } else {
-                                        p.clone()
-                                    };
-                                    server.call_offside(touching_team, &pass_origin, server.behaviour.config.time_break*100);
-                                }
-                                continue;
-
-                            }
-                            if let HQMIcingStatus::Warning(team, p) = &server.game.icing_status {
-                                if touching_team != *team {
-                                    if faceoff_position == "G" {
-                                        server.game.icing_status = HQMIcingStatus::No;
-                                        server.add_server_chat_message(String::from("Icing waved off"));
-                                    } else {
-                                        let copy = p.clone();
-                                        server.call_icing(other_team, &copy, server.behaviour.config.time_break*100);
-                                    }
+                        if let HQMOffsideStatus::Warning(team, p, i) = &server.game.offside_status {
+                            if *team == touching_team {
+                                let pass_origin = if this_connected_player_index == *i {
+                                    puck.body.pos.clone()
                                 } else {
+                                    p.clone()
+                                };
+                                server.call_offside(touching_team, &pass_origin, time_break);
+                            }
+                            continue;
+
+                        }
+                        if let HQMIcingStatus::Warning(team, p) = &server.game.icing_status {
+                            if touching_team != *team {
+                                if faceoff_position == "G" {
                                     server.game.icing_status = HQMIcingStatus::No;
                                     server.add_server_chat_message(String::from("Icing waved off"));
+                                } else {
+                                    let copy = p.clone();
+                                    server.call_icing(other_team, &copy, time_break);
                                 }
-                            } else if let HQMIcingStatus::NotTouched (_, _) = server.game.icing_status {
+                            } else {
                                 server.game.icing_status = HQMIcingStatus::No;
+                                server.add_server_chat_message(String::from("Icing waved off"));
                             }
+                        } else if let HQMIcingStatus::NotTouched (_, _) = server.game.icing_status {
+                            server.game.icing_status = HQMIcingStatus::No;
                         }
                     }
-                },
-                HQMSimulationEvent::PuckEnteredOtherHalf {
-                    team, puck
-                } => {
+                }
+            },
+            HQMSimulationEvent::PuckEnteredOtherHalf {
+                team, puck
+            } => {
 
+                if let HQMGameObject::Puck(puck) = & server.game.world.objects[puck] {
+                    if let Some(touch) = puck.touches.front() {
+                        if team == touch.team && server.game.icing_status == HQMIcingStatus::No {
+                            server.game.icing_status = HQMIcingStatus::NotTouched(team, touch.puck_pos.clone());
+                        }
+                    }
+                }
+            },
+            HQMSimulationEvent::PuckPassedGoalLine {
+                team, puck: _
+            } => {
+
+                if let HQMIcingStatus::NotTouched(icing_team, p) = &server.game.icing_status {
+                    if team == *icing_team {
+                        match icing {
+                            HQMIcingConfiguration::Touch => {
+                                server.game.icing_status = HQMIcingStatus::Warning(team, p.clone());
+                                server.add_server_chat_message(String::from("Icing warning"));
+                            }
+                            HQMIcingConfiguration::NoTouch => {
+                                let copy = p.clone();
+                                server.call_icing(team, &copy, time_break);
+                            }
+                            HQMIcingConfiguration::Off => {}
+                        }
+                    }
+                }
+            },
+            HQMSimulationEvent::PuckEnteredOffensiveZone {
+                team, puck
+            } => {
+                if server.game.offside_status == HQMOffsideStatus::InNeutralZone {
                     if let HQMGameObject::Puck(puck) = & server.game.world.objects[puck] {
                         if let Some(touch) = puck.touches.front() {
-                            if team == touch.team && server.game.icing_status == HQMIcingStatus::No {
-                                server.game.icing_status = HQMIcingStatus::NotTouched(team, touch.puck_pos.clone());
-                            }
-                        }
-                    }
-                },
-                HQMSimulationEvent::PuckPassedGoalLine {
-                    team, puck: _
-                } => {
-
-                    if let HQMIcingStatus::NotTouched(icing_team, p) = &server.game.icing_status {
-                        if team == *icing_team {
-                            match server.behaviour.config.icing {
-                                HQMIcingConfiguration::Touch => {
-                                    server.game.icing_status = HQMIcingStatus::Warning(team, p.clone());
-                                    server.add_server_chat_message(String::from("Icing warning"));
-                                }
-                                HQMIcingConfiguration::NoTouch => {
-                                    let copy = p.clone();
-                                    server.call_icing(team, &copy, server.behaviour.config.time_break*100);
-                                }
-                                HQMIcingConfiguration::Off => {}
-                            }
-                        }
-                    }
-                },
-                HQMSimulationEvent::PuckEnteredOffensiveZone {
-                    team, puck
-                } => {
-                    if server.game.offside_status == HQMOffsideStatus::InNeutralZone {
-                        if let HQMGameObject::Puck(puck) = & server.game.world.objects[puck] {
-                            if let Some(touch) = puck.touches.front() {
-                                if team == touch.team &&
-                                    has_players_in_offensive_zone(& server.game.world, team, Some(touch.player_index)) {
-                                    match server.behaviour.config.offside {
-                                        HQMOffsideConfiguration::Delayed => {
-                                            server.game.offside_status = HQMOffsideStatus::Warning(team, touch.puck_pos.clone(), touch.player_index);
-                                            server.add_server_chat_message(String::from("Offside warning"));
-                                        }
-                                        HQMOffsideConfiguration::Immediate => {
-                                            let copy = touch.puck_pos.clone();
-                                            server.call_offside(team, &copy, server.behaviour.config.time_break*100);
-                                        },
-                                        HQMOffsideConfiguration::Off => {
-                                            server.game.offside_status = HQMOffsideStatus::InOffensiveZone(team);
-                                        }
+                            if team == touch.team &&
+                                has_players_in_offensive_zone(& server.game.world, team, Some(touch.player_index)) {
+                                match offside {
+                                    HQMOffsideConfiguration::Delayed => {
+                                        server.game.offside_status = HQMOffsideStatus::Warning(team, touch.puck_pos.clone(), touch.player_index);
+                                        server.add_server_chat_message(String::from("Offside warning"));
                                     }
-                                } else {
-                                    server.game.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+                                    HQMOffsideConfiguration::Immediate => {
+                                        let copy = touch.puck_pos.clone();
+                                        server.call_offside(team, &copy, time_break);
+                                    },
+                                    HQMOffsideConfiguration::Off => {
+                                        server.game.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+                                    }
                                 }
                             } else {
                                 server.game.offside_status = HQMOffsideStatus::InOffensiveZone(team);
                             }
+                        } else {
+                            server.game.offside_status = HQMOffsideStatus::InOffensiveZone(team);
                         }
                     }
-
-                },
-                HQMSimulationEvent::PuckLeftOffensiveZone {
-                    team: _, puck: _
-                } => {
-                    if let HQMOffsideStatus::Warning(_, _, _) = server.game.offside_status {
-                        server.add_server_chat_message(String::from("Offside waved off"));
-                    }
-                    server.game.offside_status = HQMOffsideStatus::InNeutralZone;
-
                 }
-                _ => {}
+
+            },
+            HQMSimulationEvent::PuckLeftOffensiveZone {
+                team: _, puck: _
+            } => {
+                if let HQMOffsideStatus::Warning(_, _, _) = server.game.offside_status {
+                    server.add_server_chat_message(String::from("Offside waved off"));
+                }
+                server.game.offside_status = HQMOffsideStatus::InNeutralZone;
+
             }
-        }
-        if let HQMOffsideStatus::Warning(team, _, _) = server.game.offside_status {
-            if !has_players_in_offensive_zone(& server.game.world,team, None) {
-                server.game.offside_status = HQMOffsideStatus::InOffensiveZone(team);
-                server.add_server_chat_message(String::from("Offside waved off"));
-            }
+            _ => {}
         }
     }
-
-
-
+    if let HQMOffsideStatus::Warning(team, _, _) = server.game.offside_status {
+        if !has_players_in_offensive_zone(& server.game.world,team, None) {
+            server.game.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+            server.add_server_chat_message(String::from("Offside waved off"));
+        }
+    }
 }
+
 
 fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam, ignore_player: Option<usize>) -> bool {
     let line = match team {
@@ -626,29 +635,62 @@ fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam, ignore_p
     false
 }
 
+pub fn update_clock<B: HQMServerBehaviour>(server: &mut HQMServer, behaviour: & mut B, period_length: u32, intermission_time: u32) {
+    if server.game.time_break > 0 {
+        server.game.time_break -= 1;
+        if server.game.time_break == 0 {
+            server.game.is_intermission_goal = false;
+            if server.game.game_over {
+                server.new_game(behaviour);
+            } else {
+                if server.game.time == 0 {
+                    server.game.time = period_length;
+                }
+
+                server.do_faceoff ();
+            }
+
+        }
+
+    } else if server.game.time > 0 {
+        server.game.time -= 1;
+        if server.game.time == 0 {
+            server.game.period += 1;
+            if server.game.period > 3 && server.game.red_score != server.game.blue_score {
+                server.game.time_break = intermission_time;
+                server.game.game_over = true;
+            } else {
+                server.game.time_break = intermission_time;
+                server.game.next_faceoff_spot = server.game.world.rink.center_faceoff_spot.clone();
+            }
+        }
+    }
+
+}
 
 
 impl HQMServerBehaviour for HQMMatchBehaviour {
-    fn before_tick(server: &mut HQMServer<Self>) where Self: Sized {
-        Self::update_players(server);
+    fn before_tick(& mut self, server: &mut HQMServer) {
+        self.update_players(server);
     }
 
-    fn after_tick(server: &mut HQMServer<Self>, events: Vec<HQMSimulationEvent>) where Self: Sized {
+    fn after_tick(& mut self, server: &mut HQMServer, events: Vec<HQMSimulationEvent>) {
+        if !self.paused {
+            handle_events(server, events, self.config.time_break*100,
+                          self.config.time_intermission*100,
+                          self.config.mercy,
+                          self.config.first_to,
+                          self.config.offside,
+                          self.config.icing
+            );
 
-        if server.game.time_break == 0
-        && server.game.time > 0
-        && !server.game.game_over
-        && !server.game.paused
-        && server.game.period > 0 {
-            Self::handle_events(server, events);
+            update_clock(server, self,
+                         self.config.time_period*100,
+                         self.config.time_intermission*100);
         }
-        server.update_clock(
-            server.behaviour.config.time_period*100,
-            server.behaviour.config.time_intermission*100);
-
     }
 
-    fn handle_command(server: &mut HQMServer<Self>, command: &str, arg: &str, player_index: usize) where Self: Sized {
+    fn handle_command(&mut self, server: &mut HQMServer, command: &str, arg: &str, player_index: usize) {
         match command{
             "set" => {
                 let args = arg.split(" ").collect::<Vec<&str>>();
@@ -697,32 +739,32 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                         },
                         "icing" => {
                             if let Some(arg) = args.get(1) {
-                                Self::set_icing_rule(server, player_index, arg);
+                                self.set_icing_rule(server, player_index, arg);
                             }
                         },
                         "offside" => {
                             if let Some(arg) = args.get(1) {
-                                Self::set_offside_rule(server, player_index, arg);
+                                self.set_offside_rule(server, player_index, arg);
                             }
                         },
                         "mercy" => {
                             if let Some(arg) = args.get(1) {
-                                Self::set_mercy_rule(server, player_index, arg);
+                                self.set_mercy_rule(server, player_index, arg);
                             }
                         },
                         "first" => {
                             if let Some(arg) = args.get(1) {
-                                Self::set_first_to_rule(server, player_index, arg);
+                                self.set_first_to_rule(server, player_index, arg);
                             }
                         }
                         "teamsize" => {
                             if let Some(arg) = args.get(1) {
-                                Self::set_team_size(server, player_index, arg);
+                                self.set_team_size(server, player_index, arg);
                             }
                         },
                         "teamparity" => {
                             if let Some(arg) = args.get(1) {
-                                Self::set_team_parity(server, player_index, arg);
+                                self.set_team_parity(server, player_index, arg);
                             }
                         },
                         "replay" => {
@@ -735,19 +777,19 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 }
             },
             "faceoff" => {
-                Self::faceoff(server, player_index);
+                self.faceoff(server, player_index);
             },
             "start" | "startgame" => {
-                Self::start_game(server, player_index);
+                self.start_game(server, player_index);
             },
             "reset" | "resetgame" => {
-                Self::reset_game(server, player_index);
+                self.reset_game(server, player_index);
             },
             "pause" | "pausegame" => {
-                Self::pause(server, player_index);
+                self.pause(server, player_index);
             },
             "unpause" | "unpausegame" => {
-                Self::unpause(server, player_index);
+                self.unpause(server, player_index);
             },
             "view" => {
                 if let Ok(view_player_index) = arg.parse::<usize>() {
@@ -780,18 +822,18 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 }
             },
             "icing" => {
-                Self::set_icing_rule (server, player_index, arg);
+                self.set_icing_rule (server, player_index, arg);
             },
             "offside" => {
-                Self::set_offside_rule (server, player_index, arg);
+                self.set_offside_rule (server, player_index, arg);
             },
             "rules" => {
-                let offside_str = match server.behaviour.config.offside {
+                let offside_str = match self.config.offside {
                     HQMOffsideConfiguration::Off => "Offside disabled",
                     HQMOffsideConfiguration::Delayed => "Offside enabled",
                     HQMOffsideConfiguration::Immediate => "Immediate offside enabled"
                 };
-                let icing_str = match server.behaviour.config.icing {
+                let icing_str = match self.config.icing {
                     HQMIcingConfiguration::Off => "Icing disabled",
                     HQMIcingConfiguration::Touch => "Icing enabled",
                     HQMIcingConfiguration::NoTouch => "No-touch icing enabled"
@@ -800,8 +842,8 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 server.add_directed_server_chat_message(msg, player_index);
             },
             "cheat" => {
-                if server.behaviour.config.cheats_enabled {
-                    Self::cheat(server, player_index, arg);
+                if self.config.cheats_enabled {
+                    self.cheat(server, player_index, arg);
                 }
             },
             _ => {}
