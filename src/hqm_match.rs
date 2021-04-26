@@ -652,8 +652,8 @@ pub fn update_clock<B: HQMServerBehaviour>(server: &mut HQMServer, behaviour: & 
 
         }
 
-    } else if server.game.time > 0 {
-        server.game.time -= 1;
+    } else {
+        server.game.time = server.game.time.saturating_sub(1);
         if server.game.time == 0 {
             server.game.period += 1;
             if server.game.period > 3 && server.game.red_score != server.game.blue_score {
