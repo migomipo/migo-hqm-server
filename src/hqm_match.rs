@@ -450,7 +450,7 @@ impl HQMMatchBehaviour {
 
 }
 
-pub fn handle_events(server: & mut HQMServer, events: Vec<HQMSimulationEvent>, time_break: u32, time_intermission: u32,
+pub fn handle_events(server: & mut HQMServer, events: &[HQMSimulationEvent], time_break: u32, time_intermission: u32,
                                 mercy: u32, first_to: u32, offside: HQMOffsideConfiguration, icing: HQMIcingConfiguration) {
     if server.game.time_break > 0
         || server.game.time == 0
@@ -464,6 +464,7 @@ pub fn handle_events(server: & mut HQMServer, events: Vec<HQMSimulationEvent>, t
             HQMSimulationEvent::PuckEnteredNet {
                 team, puck
             } => {
+                let (team, puck) = (*team, *puck);
                 match &server.game.offside_status {
                     HQMOffsideStatus::Warning(offside_team, p, _) if *offside_team == team => {
                         let copy = p.clone();
@@ -482,6 +483,7 @@ pub fn handle_events(server: & mut HQMServer, events: Vec<HQMSimulationEvent>, t
             HQMSimulationEvent::PuckTouch {
                 player, puck
             } => {
+                let (player, puck) = (*player, *puck);
                 // Get connected player index from skater
                 if let HQMGameObject::Player(skater) = & server.game.world.objects[player] {
                     let this_connected_player_index = skater.connected_player_index;
@@ -530,7 +532,7 @@ pub fn handle_events(server: & mut HQMServer, events: Vec<HQMSimulationEvent>, t
             HQMSimulationEvent::PuckEnteredOtherHalf {
                 team, puck
             } => {
-
+                let (team, puck) = (*team, *puck);
                 if let HQMGameObject::Puck(puck) = & server.game.world.objects[puck] {
                     if let Some(touch) = puck.touches.front() {
                         if team == touch.team && server.game.icing_status == HQMIcingStatus::No {
@@ -542,7 +544,7 @@ pub fn handle_events(server: & mut HQMServer, events: Vec<HQMSimulationEvent>, t
             HQMSimulationEvent::PuckPassedGoalLine {
                 team, puck: _
             } => {
-
+                let team = *team;
                 if let HQMIcingStatus::NotTouched(icing_team, p) = &server.game.icing_status {
                     if team == *icing_team {
                         match icing {
@@ -562,6 +564,7 @@ pub fn handle_events(server: & mut HQMServer, events: Vec<HQMSimulationEvent>, t
             HQMSimulationEvent::PuckEnteredOffensiveZone {
                 team, puck
             } => {
+                let (team, puck) = (*team, *puck);
                 if server.game.offside_status == HQMOffsideStatus::InNeutralZone {
                     if let HQMGameObject::Puck(puck) = & server.game.world.objects[puck] {
                         if let Some(touch) = puck.touches.front() {
@@ -674,7 +677,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         self.update_players(server);
     }
 
-    fn after_tick(& mut self, server: &mut HQMServer, events: Vec<HQMSimulationEvent>) {
+    fn after_tick(& mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
         if !self.paused {
             handle_events(server, events, self.config.time_break*100,
                           self.config.time_intermission*100,

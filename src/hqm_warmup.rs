@@ -64,7 +64,7 @@ impl HQMServerBehaviour for HQMPermanentWarmup {
         self.update_players(server);
     }
 
-    fn after_tick(& mut self, _server: &mut HQMServer, _events: Vec<HQMSimulationEvent>)  {
+    fn after_tick(& mut self, _server: &mut HQMServer, _events: &[HQMSimulationEvent])  {
         // Nothing
     }
 

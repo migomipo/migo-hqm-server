@@ -894,7 +894,7 @@ impl HQMServer {
                 }
                 let events = self.game.world.simulate_step();
 
-                behaviour.after_tick(self, events);
+                behaviour.after_tick(self, &events);
 
                 let packets = get_packets(& self.game.world.objects);
 
@@ -1613,7 +1613,7 @@ pub struct HQMServerConfiguration {
 
 pub trait HQMServerBehaviour {
     fn before_tick (& mut self, server: & mut HQMServer) ;
-    fn after_tick (& mut self, server: & mut HQMServer, events: Vec<HQMSimulationEvent>) ;
+    fn after_tick (& mut self, server: & mut HQMServer, events: &[HQMSimulationEvent]) ;
     fn handle_command (& mut self, server: & mut HQMServer, cmd: &str, arg: &str, player_index: usize) ;
 
     fn create_game (& mut self, game_id: u32) -> HQMGame;
