@@ -1,4 +1,4 @@
-use crate::hqm_server::{HQMServer, HQMMuteStatus};
+use crate::hqm_server::{HQMServer, HQMMuteStatus, HQMServerBehaviour};
 
 use tracing::info;
 use std::net::SocketAddr;
@@ -187,7 +187,7 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn kick_all_matching (& mut self, admin_player_index: usize, kick_player_name: &str, ban_player: bool) {
+    pub(crate) fn kick_all_matching<B: HQMServerBehaviour> (& mut self, admin_player_index: usize, kick_player_name: &str, ban_player: bool, behaviour: & mut B) {
 
         if let Some(player) = & self.players[admin_player_index]{
             if player.is_admin {
@@ -246,6 +246,7 @@ impl HQMServer {
                 if !kick_player_list.is_empty() {
                     for (player_index, player_name, player_addr) in kick_player_list {
                         if player_index != admin_player_index {
+                            behaviour.before_player_exit(self, player_index);
                             self.remove_player(player_index);
 
                             if ban_player{
@@ -298,7 +299,7 @@ impl HQMServer {
 
     }
 
-    pub(crate) fn kick_player (& mut self, admin_player_index: usize, kick_player_index: usize, ban_player: bool) {
+    pub(crate) fn kick_player<B: HQMServerBehaviour> (& mut self, admin_player_index: usize, kick_player_index: usize, ban_player: bool, behaviour: & mut B) {
 
         if let Some(player) = & self.players[admin_player_index]{
             if player.is_admin {
@@ -309,6 +310,7 @@ impl HQMServer {
                         if let Some(kick_player) = & mut self.players[kick_player_index as usize] {
                             let kick_player_name = kick_player.player_name.clone ();
                             let kick_ip = kick_player.addr.ip().clone();
+                            behaviour.before_player_exit(self, kick_player_index);
                             self.remove_player(kick_player_index);
 
                             if ban_player {

@@ -59,14 +59,14 @@ impl HQMServer {
                 self.request_info(socket, addr, &mut parser);
             },
             2 => {
-                self.player_join(addr, &mut parser);
+                self.player_join(addr, &mut parser, behaviour);
             },
             // if 8 or 0x10, client is modded, probly want to send it to the player_update function to store it in the client/player struct, to use when responding to clients
             4 | 8 | 0x10 => {
                 self.player_update(addr, &mut parser, command, behaviour);
             },
             7 => {
-                self.player_exit(addr);
+                self.player_exit(addr, behaviour);
             },
             _ => {}
         }
@@ -198,7 +198,7 @@ impl HQMServer {
         }
     }
 
-    fn player_join(&mut self, addr: SocketAddr, parser: &mut HQMMessageReader) {
+    fn player_join<B: HQMServerBehaviour>(&mut self, addr: SocketAddr, parser: &mut HQMMessageReader, behaviour: & mut B) {
         let player_count = self.player_count();
         let max_player_count = self.config.player_max;
         if player_count >= max_player_count {
@@ -228,6 +228,7 @@ impl HQMServer {
         match player_name {
             Some(name) => {
                 if let Some(player_index) = self.add_player(name.clone(), addr) {
+                    behaviour.after_player_join(self,player_index);
                     info!("{} ({}) joined server from address {:?}", name, player_index, addr);
                     let msg = format!("{} joined", name);
                     self.add_server_chat_message(&msg);
@@ -371,22 +372,22 @@ impl HQMServer {
             "kick" => {
                 if let Ok(kick_player_index) = arg.parse::<usize>() {
                     if kick_player_index < self.players.len() {
-                        self.kick_player(player_index, kick_player_index, false);
+                        self.kick_player(player_index, kick_player_index, false, behaviour);
                     }
                 }
             },
             "kickall" => {
-                self.kick_all_matching(player_index, arg,false);
+                self.kick_all_matching(player_index, arg,false, behaviour);
             },
             "ban" => {
                 if let Ok(kick_player_index) = arg.parse::<usize>() {
                     if kick_player_index < self.players.len() {
-                        self.kick_player(player_index, kick_player_index, true);
+                        self.kick_player(player_index, kick_player_index, true, behaviour);
                     }
                 }
             },
             "banall" => {
-                self.kick_all_matching(player_index, arg,true);
+                self.kick_all_matching(player_index, arg,true, behaviour);
             },
             "clearbans" => {
                 self.clear_bans(player_index);
@@ -597,10 +598,11 @@ impl HQMServer {
         }
     }
 
-    fn player_exit(&mut self, addr: SocketAddr) {
+    fn player_exit<B: HQMServerBehaviour>(&mut self, addr: SocketAddr, behaviour: & mut B) {
         let player_index = self.find_player_slot(addr);
         match player_index {
             Some(player_index) => {
+                behaviour.before_player_exit(self, player_index);
                 let player_name = {
                     let player = self.players[player_index].as_ref().unwrap();
                     player.player_name.clone()
@@ -872,6 +874,7 @@ impl HQMServer {
                     }
                 }).collect();
                 for (player_index, player_name) in inactive_players {
+                    behaviour.before_player_exit(self, player_index);
                     self.remove_player(player_index);
                     info!("{} ({}) timed out", player_name, player_index);
                     let chat_msg = format!("{} timed out", player_name);
@@ -1617,5 +1620,13 @@ pub trait HQMServerBehaviour {
     fn handle_command (& mut self, server: & mut HQMServer, cmd: &str, arg: &str, player_index: usize) ;
 
     fn create_game (& mut self, game_id: u32) -> HQMGame;
+
+    fn before_player_exit (& mut self, server: & mut HQMServer, player_index: usize) {
+
+    }
+
+    fn after_player_join (& mut self, server: & mut HQMServer, player_index: usize) {
+
+    }
 }
 
