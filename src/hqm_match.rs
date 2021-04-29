@@ -369,6 +369,11 @@ impl HQMMatchBehaviour {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 self.paused=true;
+                if server.game.time_break > 0 && server.game.time_break < self.config.time_break {
+                    // If we're currently in a break, with very little time left,
+                    // we reset the timer
+                    server.game.time_break = self.config.time_break;
+                }
                 info!("{} ({}) paused game",player.player_name, player_index);
                 let msg = format!("Game paused by {}",player.player_name);
                 server.add_server_chat_message(&msg);
