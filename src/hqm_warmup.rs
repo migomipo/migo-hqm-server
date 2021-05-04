@@ -105,9 +105,9 @@ impl HQMServerBehaviour for HQMPermanentWarmup {
         }
     }
 
-    fn create_game(&mut self, game_id: u32) -> HQMGame where Self: Sized {
+    fn create_game(&mut self) -> HQMGame where Self: Sized {
         let warmup_pucks = self.pucks;
-        let mut game = HQMGame::new(game_id, warmup_pucks, self.physics_config.clone());
+        let mut game = HQMGame::new(warmup_pucks, self.physics_config.clone());
         let puck_line_start= game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {

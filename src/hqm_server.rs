@@ -41,7 +41,7 @@ pub struct HQMServer{
     pub(crate) allow_join: bool,
     pub(crate) config: HQMServerConfiguration,
     pub(crate) game: HQMGame,
-    game_alloc: u32,
+    game_id: u32,
     pub is_muted:bool,
 }
 
@@ -912,30 +912,29 @@ impl HQMServer {
 
             });
 
-            send_updates(&self.game, & self.players, socket, write_buf).await;
+            send_updates(self.game_id, &self.game, & self.players, socket, write_buf).await;
             if self.config.replays_enabled {
                 write_replay(& mut self.game, write_buf);
             }
         } else if self.game.active {
-            info!("Game {} abandoned", self.game.game_id);
-            self.new_game(behaviour);
+            info!("Game {} abandoned", self.game_id);
+            let new_game = behaviour.create_game();
+            self.new_game(new_game);
             self.allow_join=true;
         }
 
     }
 
-    pub(crate) fn new_game<B: HQMServerBehaviour>(&mut self, behaviour: & mut B) {
-        let new_game = behaviour.create_game(self.game_alloc);
+    pub(crate) fn new_game(&mut self, new_game: HQMGame) {
+        let game_id = self.game_id;
         let old_game = std::mem::replace(& mut self.game, new_game);
-        info!("New game {} started", self.game.game_id);
-        self.game_alloc += 1;
+        self.game_id += 1;
+        info!("New game {} started", self.game_id);
 
         if self.config.replays_enabled && old_game.period != 0 {
             let time = old_game.start_time.format("%Y-%m-%dT%H%M%S").to_string();
             let file_name = format!("{}.{}.hrp", self.config.server_name, time);
             let replay_data = old_game.replay_data;
-
-            let game_id = old_game.game_id;
 
             tokio::spawn(async move {
                 if tokio::fs::create_dir_all("replays").await.is_err() {
@@ -1102,16 +1101,16 @@ pub async fn run_server<B: HQMServerBehaviour>(port: u16, public: bool,
     for _ in 0..64 {
         player_vec.push(None);
     }
-    let first_game = behaviour.create_game(1);
+    let first_game = behaviour.create_game();
 
     let mut server = HQMServer {
         players: player_vec,
         ban_list: HashSet::new(),
         allow_join:true,
         game: first_game,
-        game_alloc: 2,
         is_muted:false,
         config,
+        game_id: 1
     };
     info!("Server started, new game {} started", 1);
 
@@ -1365,7 +1364,7 @@ fn write_replay (game: & mut HQMGame, write_buf: & mut [u8]) {
     game.replay_data.extend_from_slice(slice);
 }
 
-async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], socket: & UdpSocket, write_buf: & mut [u8]) {
+async fn send_updates(game_id: u32, game: &HQMGame, players: &[Option<HQMConnectedPlayer>], socket: & UdpSocket, write_buf: & mut [u8]) {
 
     let packets = &game.saved_ticks;
 
@@ -1386,14 +1385,14 @@ async fn send_updates(game: &HQMGame, players: &[Option<HQMConnectedPlayer>], so
         if let Some(player) = player {
             let mut writer = HQMMessageWriter::new(write_buf);
 
-            if player.game_id != game.game_id {
+            if player.game_id != game_id {
                 writer.write_bytes_aligned(GAME_HEADER);
                 writer.write_byte_aligned(6);
-                writer.write_u32_aligned(game.game_id);
+                writer.write_u32_aligned(game_id);
             } else {
                 writer.write_bytes_aligned(GAME_HEADER);
                 writer.write_byte_aligned(5);
-                writer.write_u32_aligned(game.game_id);
+                writer.write_u32_aligned(game_id);
                 writer.write_u32_aligned(game.game_step);
                 writer.write_bits(1, match game.game_over {
                     true => 1,
@@ -1619,13 +1618,13 @@ pub trait HQMServerBehaviour {
     fn after_tick (& mut self, server: & mut HQMServer, events: &[HQMSimulationEvent]) ;
     fn handle_command (& mut self, server: & mut HQMServer, cmd: &str, arg: &str, player_index: usize) ;
 
-    fn create_game (& mut self, game_id: u32) -> HQMGame;
+    fn create_game (& mut self) -> HQMGame;
 
-    fn before_player_exit (& mut self, server: & mut HQMServer, player_index: usize) {
+    fn before_player_exit (& mut self, _server: & mut HQMServer, _player_index: usize) {
 
     }
 
-    fn after_player_join (& mut self, server: & mut HQMServer, player_index: usize) {
+    fn after_player_join (& mut self, _server: & mut HQMServer, _player_index: usize) {
 
     }
 }

@@ -339,7 +339,7 @@ impl HQMMatchBehaviour {
                 info!("{} ({}) reset game",player.player_name, player_index);
                 let msg = format!("Game reset by {}",player.player_name);
 
-                server.new_game(self);
+                server.new_game(self.create_game());
 
                 server.add_server_chat_message(&msg);
             } else {
@@ -649,7 +649,7 @@ pub fn update_clock<B: HQMServerBehaviour>(server: &mut HQMServer, behaviour: & 
         if server.game.time_break == 0 {
             server.game.is_intermission_goal = false;
             if server.game.game_over {
-                server.new_game(behaviour);
+                server.new_game(behaviour.create_game());
             } else {
                 if server.game.time == 0 {
                     server.game.time = period_length;
@@ -860,9 +860,9 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
 
     }
 
-    fn create_game(& mut self, game_id: u32) -> HQMGame {
+    fn create_game(& mut self) -> HQMGame {
         let warmup_pucks = self.config.warmup_pucks;
-        let mut game = HQMGame::new(game_id, warmup_pucks, self.config.physics_config.clone());
+        let mut game = HQMGame::new(warmup_pucks, self.config.physics_config.clone());
         let puck_line_start= game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {

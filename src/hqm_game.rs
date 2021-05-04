@@ -122,7 +122,6 @@ pub struct HQMGame {
     pub time_break: u32,
     pub is_intermission_goal: bool,
 
-    pub game_id: u32,
     pub game_step: u32,
     pub game_over: bool,
     pub(crate) packet: u32,
@@ -137,7 +136,7 @@ pub struct HQMPhysicsConfiguration {
 }
 
 impl HQMGame {
-    pub(crate) fn new (game_id: u32, puck_slots: usize, config: HQMPhysicsConfiguration) -> Self {
+    pub(crate) fn new (puck_slots: usize, config: HQMPhysicsConfiguration) -> Self {
         let mut object_vec = Vec::with_capacity(32);
         for _ in 0..32 {
             object_vec.push(HQMGameObject::None);
@@ -170,7 +169,6 @@ impl HQMGame {
             is_intermission_goal: false,
             time_break: 0,
             game_over: false,
-            game_id,
             game_step: u32::MAX,
             packet: u32::MAX,
             active: false,
