@@ -861,6 +861,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
     }
 
     fn create_game(& mut self) -> HQMGame {
+        self.paused = false;
         let warmup_pucks = self.config.warmup_pucks;
         let mut game = HQMGame::new(warmup_pucks, self.config.physics_config.clone());
         let puck_line_start= game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
