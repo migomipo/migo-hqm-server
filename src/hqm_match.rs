@@ -936,6 +936,16 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
 impl HQMGeneralMatchBehaviour for HQMMatchBehaviour {
 
     fn goal_scored(&mut self, server: &mut HQMServer, team: HQMTeam, _goal_index: Option<usize>, _assist_index: Option<usize>) {
+        if server.game.time < 1000 {
+            let time = server.game.time;
+            let seconds = time / 100;
+            let centi = time % 100;
+
+            let s = format!("Goal scored with {}.{:02} seconds left", seconds, centi);
+            server.add_server_chat_message(&s);
+
+        }
+
         let (new_score, opponent_score) = match team {
             HQMTeam::Red => {
                 (server.game.red_score, server.game.blue_score)
