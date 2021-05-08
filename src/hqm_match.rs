@@ -503,10 +503,7 @@ pub fn handle_events<B: HQMGeneralMatchBehaviour>(server: & mut HQMServer, event
                     if let HQMGameObject::Puck(puck) = & mut server.game.world.objects[puck] {
                         puck.add_touch(this_connected_player_index, touching_team, server.game.time);
 
-                        let other_team = match touching_team {
-                            HQMTeam::Red => HQMTeam::Blue,
-                            HQMTeam::Blue => HQMTeam::Red
-                        };
+                        let other_team = touching_team.get_other_team();
 
                         if let HQMOffsideStatus::Warning(team, p, i) = &server.game.offside_status {
                             if *team == touching_team {

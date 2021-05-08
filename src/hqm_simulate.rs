@@ -790,7 +790,7 @@ fn limit_vector_length2 (v: &Vector2<f32>, max_len: f32) -> Vector2<f32> {
     res
 }
 
-fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
+pub fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     let projection_length = v.dot(&normal);
     let projection = normal.scale(projection_length);
     let rejection = &*v - &projection;

@@ -13,6 +13,7 @@ mod hqm_server;
 mod hqm_admin_commands;
 mod hqm_match;
 mod hqm_warmup;
+mod hqm_russian;
 
 use tracing_subscriber;
 use tracing_appender;
@@ -20,9 +21,10 @@ use ini::ini::Properties;
 use crate::hqm_game::HQMPhysicsConfiguration;
 use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration};
 use crate::hqm_warmup::HQMPermanentWarmup;
+use crate::hqm_russian::HQMRussianBehaviour;
 
 enum HQMServerMode {
-    Match, PermanentWarmup
+    Match, PermanentWarmup, Russian
 }
 
 #[tokio::main]
@@ -58,6 +60,7 @@ async fn main() -> std::io::Result<()> {
             match x {
                 "warmup" => HQMServerMode::PermanentWarmup,
                 "match" => HQMServerMode::Match,
+                "russian" => HQMServerMode::Russian,
                 _ => HQMServerMode::Match
             }
         });
@@ -86,33 +89,10 @@ async fn main() -> std::io::Result<()> {
         // Game
         let game_section = conf.section(Some("Game"));
 
-        let rules_time_period = get_optional(game_section, "time_period", 300, |x| x.parse::<u32>().unwrap());
-        let rules_time_warmup = get_optional(game_section, "time_warmup", 300, |x| x.parse::<u32>().unwrap());
-        let rule_time_break = get_optional(game_section, "time_break", 10, |x| x.parse::<u32>().unwrap());
-        let rule_time_intermission = get_optional(game_section, "time_intermission", 20, |x| x.parse::<u32>().unwrap());
-        let warmup_pucks = get_optional(game_section, "warmup_pucks", 1, |x| x.parse::<usize>().unwrap());
 
         let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, |x| x.eq_ignore_ascii_case("true"));
 
-        let mercy = get_optional(game_section, "mercy", 0, |x| x.parse::<u32>().unwrap());
-        let first_to = get_optional(game_section, "first", 0, |x| x.parse::<u32>().unwrap());
 
-        let icing = get_optional(game_section, "icing", HQMIcingConfiguration::Off, |x| match x {
-            "on" | "touch" => HQMIcingConfiguration::Touch,
-            "notouch" => HQMIcingConfiguration::NoTouch,
-            _ => HQMIcingConfiguration::Off
-        });
-
-        let offside = get_optional(game_section, "offside", HQMOffsideConfiguration::Off, |x| match x {
-            "on" | "delayed" => HQMOffsideConfiguration::Delayed,
-            "immediate" | "imm" => HQMOffsideConfiguration::Immediate,
-            _ => HQMOffsideConfiguration::Off
-        });
-
-        let spawn_point = get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
-            "bench" => HQMSpawnPoint::Bench,
-            _ => HQMSpawnPoint::Center
-        });
 
         let config = HQMServerConfiguration {
             welcome: welcome_str,
@@ -140,6 +120,33 @@ async fn main() -> std::io::Result<()> {
 
         return match mode {
             HQMServerMode::Match => {
+                let rules_time_period = get_optional(game_section, "time_period", 300, |x| x.parse::<u32>().unwrap());
+                let rules_time_warmup = get_optional(game_section, "time_warmup", 300, |x| x.parse::<u32>().unwrap());
+                let rule_time_break = get_optional(game_section, "time_break", 10, |x| x.parse::<u32>().unwrap());
+                let rule_time_intermission = get_optional(game_section, "time_intermission", 20, |x| x.parse::<u32>().unwrap());
+                let warmup_pucks = get_optional(game_section, "warmup_pucks", 1, |x| x.parse::<usize>().unwrap());
+
+
+                let mercy = get_optional(game_section, "mercy", 0, |x| x.parse::<u32>().unwrap());
+                let first_to = get_optional(game_section, "first", 0, |x| x.parse::<u32>().unwrap());
+
+                let icing = get_optional(game_section, "icing", HQMIcingConfiguration::Off, |x| match x {
+                    "on" | "touch" => HQMIcingConfiguration::Touch,
+                    "notouch" => HQMIcingConfiguration::NoTouch,
+                    _ => HQMIcingConfiguration::Off
+                });
+
+                let offside = get_optional(game_section, "offside", HQMOffsideConfiguration::Off, |x| match x {
+                    "on" | "delayed" => HQMOffsideConfiguration::Delayed,
+                    "immediate" | "imm" => HQMOffsideConfiguration::Immediate,
+                    _ => HQMOffsideConfiguration::Off
+                });
+
+                let spawn_point = get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
+                    "bench" => HQMSpawnPoint::Bench,
+                    _ => HQMSpawnPoint::Center
+                });
+
                 let match_config = HQMMatchConfiguration {
 
                     time_period: rules_time_period,
@@ -161,9 +168,20 @@ async fn main() -> std::io::Result<()> {
                 hqm_server::run_server(server_port, server_public, config, HQMMatchBehaviour::new (match_config)).await
             }
             HQMServerMode::PermanentWarmup => {
+                let warmup_pucks = get_optional(game_section, "warmup_pucks", 1, |x| x.parse::<usize>().unwrap());
+
+                let spawn_point = get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
+                    "bench" => HQMSpawnPoint::Bench,
+                    _ => HQMSpawnPoint::Center
+                });
 
                 hqm_server::run_server(server_port, server_public, config,
                                        HQMPermanentWarmup::new(physics_config, warmup_pucks, spawn_point)).await
+            }
+            HQMServerMode::Russian => {
+                let attempts = get_optional(game_section, "attempts", 10, |x| x.parse::<u32>().unwrap());
+
+                hqm_server::run_server(server_port, server_public, config, HQMRussianBehaviour::new (attempts, physics_config)).await
             }
         }
 

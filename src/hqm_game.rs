@@ -823,6 +823,13 @@ impl HQMTeam {
             HQMTeam::Blue => 1,
         }
     }
+
+    pub fn get_other_team(self) -> Self {
+        match self {
+            HQMTeam::Red => HQMTeam::Blue,
+            HQMTeam::Blue => HQMTeam::Red,
+        }
+    }
 }
 
 impl Display for HQMTeam {
