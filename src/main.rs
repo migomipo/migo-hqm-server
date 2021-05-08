@@ -122,6 +122,16 @@ async fn main() -> std::io::Result<()> {
             server_name,
             team_max: server_team_max,
         };
+
+        // Physics
+        let physics_section = conf.section(Some("Physics"));
+        let gravity = get_optional (physics_section, "gravity", 6.80555, |x| x.parse::<f32>().unwrap()) / 10000.0;
+
+        let physics_config = HQMPhysicsConfiguration {
+            gravity,
+            limit_jump_speed
+        };
+
         let file_appender = tracing_appender::rolling::daily("log", log_name);
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
         tracing_subscriber::fmt()
@@ -145,10 +155,7 @@ async fn main() -> std::io::Result<()> {
 
                     cheats_enabled,
                     spawn_point,
-                    physics_config: HQMPhysicsConfiguration {
-                        gravity: 0.000680555,
-                        limit_jump_speed
-                    }
+                    physics_config
                 };
 
                 hqm_server::run_server(server_port, server_public, config, HQMMatchBehaviour::new (match_config)).await
@@ -156,10 +163,7 @@ async fn main() -> std::io::Result<()> {
             HQMServerMode::PermanentWarmup => {
 
                 hqm_server::run_server(server_port, server_public, config,
-                                       HQMPermanentWarmup::new(HQMPhysicsConfiguration {
-                    gravity: 0.000680555,
-                    limit_jump_speed
-                }, warmup_pucks, spawn_point)).await
+                                       HQMPermanentWarmup::new(physics_config, warmup_pucks, spawn_point)).await
             }
         }
 
