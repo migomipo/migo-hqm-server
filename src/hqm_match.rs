@@ -535,11 +535,7 @@ pub fn do_faceoff(server: & mut HQMServer){
                                           & server.game.world.objects,
                                           &server.game.world.rink.allowed_positions);
 
-    for object in server.game.world.objects.iter_mut() {
-        if let HQMGameObject::Puck(_puck) = object {
-            *object = HQMGameObject::None;
-        }
-    }
+    server.game.world.clear_pucks ();
 
     let puck_pos = &server.game.next_faceoff_spot.center_position + &(1.5f32*Vector3::y());
 

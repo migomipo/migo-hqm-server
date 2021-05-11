@@ -92,11 +92,7 @@ impl HQMRussianBehaviour {
     }
 
     fn place_puck_for_team (& mut self, server: & mut HQMServer, team: HQMTeam) {
-        for object in server.game.world.objects.iter_mut() {
-            if let HQMGameObject::Puck(_puck) = object {
-                *object = HQMGameObject::None;
-            }
-        }
+        server.game.world.clear_pucks();
 
         let z = match team {
             HQMTeam::Red => 55.0,

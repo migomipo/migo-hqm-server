@@ -52,6 +52,13 @@ impl HQMGameWorld {
         }
         None
     }
+
+    pub fn clear_pucks (& mut self) {
+        for x in self.objects[0..self.puck_slots].iter_mut() {
+            *x = HQMGameObject::None;
+        }
+
+    }
 }
 
 #[derive(PartialEq, Debug, Clone)]
