@@ -118,4 +118,8 @@ impl HQMServerBehaviour for HQMPermanentWarmup {
         game.time = 30000; // Permanently locked to 5 minutes
         game
     }
+
+    fn get_number_of_players(&self) -> u32 {
+        0
+    }
 }

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 pub struct HQMMatchConfiguration {
     pub(crate) force_team_size_parity: bool,
-
+    pub(crate) team_max: usize,
     pub(crate) time_period: u32,
     pub(crate) time_warmup: u32,
     pub(crate) time_break: u32,
@@ -85,8 +85,8 @@ impl HQMMatchBehaviour {
             }
             (red_player_count, blue_player_count)
         };
-        let mut new_red_player_count = (red_player_count + joining_red.len()).min(server.config.team_max);
-        let mut new_blue_player_count = (blue_player_count + joining_blue.len()).min(server.config.team_max);
+        let mut new_red_player_count = (red_player_count + joining_red.len()).min(self.config.team_max);
+        let mut new_blue_player_count = (blue_player_count + joining_blue.len()).min(self.config.team_max);
 
         if self.config.force_team_size_parity {
             if new_red_player_count > new_blue_player_count + 1 {
@@ -199,7 +199,7 @@ impl HQMMatchBehaviour {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<usize>() {
                     if new_num > 0 && new_num <= 15 {
-                        server.config.team_max = new_num;
+                        self.config.team_max = new_num;
 
                         info!("{} ({}) set team size to {}",player.player_name, player_index, new_num);
                         let msg = format!("Team size set to {} by {}", new_num, player.player_name);
@@ -1031,6 +1031,10 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         }
         game.time = self.config.time_warmup * 100;
         game
+    }
+
+    fn get_number_of_players(&self) -> u32 {
+        self.config.team_max as u32
     }
 }
 

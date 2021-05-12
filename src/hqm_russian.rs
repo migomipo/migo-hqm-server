@@ -18,17 +18,19 @@ enum HQMRussianStatus {
 }
 
 pub(crate) struct HQMRussianBehaviour {
-    pub(crate) attempts: u32,
-    pub(crate) physics_config: HQMPhysicsConfiguration,
-    status: HQMRussianStatus
+    attempts: u32,
+    physics_config: HQMPhysicsConfiguration,
+    status: HQMRussianStatus,
+    team_max: usize
 }
 
 impl HQMRussianBehaviour {
-    pub fn new (attempts: u32, physics_config: HQMPhysicsConfiguration) -> Self {
+    pub fn new (attempts: u32, team_max: usize, physics_config: HQMPhysicsConfiguration) -> Self {
         HQMRussianBehaviour {
             attempts,
             physics_config,
-            status: HQMRussianStatus::Pause
+            status: HQMRussianStatus::Pause,
+            team_max
         }
     }
 
@@ -71,8 +73,8 @@ impl HQMRussianBehaviour {
             }
             (red_player_count, blue_player_count)
         };
-        let new_red_player_count = (red_player_count + joining_red.len()).min(server.config.team_max);
-        let new_blue_player_count = (blue_player_count + joining_blue.len()).min(server.config.team_max);
+        let new_red_player_count = (red_player_count + joining_red.len()).min(self.team_max);
+        let new_blue_player_count = (blue_player_count + joining_blue.len()).min(self.team_max);
 
         let num_joining_red = new_red_player_count.saturating_sub(red_player_count);
         let num_joining_blue = new_blue_player_count.saturating_sub(blue_player_count);
@@ -121,6 +123,9 @@ impl HQMRussianBehaviour {
                 } else if remaining_attempts == 1 {
                     let msg = format!("Last attempt for {}", team);
                     server.add_server_chat_message(&msg);
+                } else {
+                    let msg = format!("Tie-breaker round for {}", team);
+                    server.add_server_chat_message(&msg);
                 }
             }
             HQMRussianStatus::Game {
@@ -139,6 +144,9 @@ impl HQMRussianBehaviour {
                         server.add_server_chat_message(&msg);
                     } else if remaining_attempts == 1 {
                         let msg = format!("Last attempt for {}", team);
+                        server.add_server_chat_message(&msg);
+                    } else {
+                        let msg = format!("Tie-breaker round for {}", team);
                         server.add_server_chat_message(&msg);
                     }
                 }
@@ -370,5 +378,9 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
 
         game.time = 1000;
         game
+    }
+
+    fn get_number_of_players(&self) -> u32 {
+        self.team_max as u32
     }
 }

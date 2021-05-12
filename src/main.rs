@@ -14,6 +14,7 @@ mod hqm_admin_commands;
 mod hqm_match;
 mod hqm_warmup;
 mod hqm_russian;
+mod hqm_shootout;
 
 use tracing_subscriber;
 use tracing_appender;
@@ -22,9 +23,10 @@ use crate::hqm_game::HQMPhysicsConfiguration;
 use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration};
 use crate::hqm_warmup::HQMPermanentWarmup;
 use crate::hqm_russian::HQMRussianBehaviour;
+use crate::hqm_shootout::HQMShootoutBehaviour;
 
 enum HQMServerMode {
-    Match, PermanentWarmup, Russian
+    Match, PermanentWarmup, Russian, Shootout
 }
 
 #[tokio::main]
@@ -61,6 +63,7 @@ async fn main() -> std::io::Result<()> {
                 "warmup" => HQMServerMode::PermanentWarmup,
                 "match" => HQMServerMode::Match,
                 "russian" => HQMServerMode::Russian,
+                "shootout" => HQMServerMode::Shootout,
                 _ => HQMServerMode::Match
             }
         });
@@ -100,7 +103,6 @@ async fn main() -> std::io::Result<()> {
             player_max: server_player_max,
             replays_enabled,
             server_name,
-            team_max: server_team_max,
         };
 
         // Physics
@@ -162,7 +164,8 @@ async fn main() -> std::io::Result<()> {
 
                     cheats_enabled,
                     spawn_point,
-                    physics_config
+                    physics_config,
+                    team_max: server_team_max
                 };
 
                 hqm_server::run_server(server_port, server_public, config, HQMMatchBehaviour::new (match_config)).await
@@ -181,7 +184,12 @@ async fn main() -> std::io::Result<()> {
             HQMServerMode::Russian => {
                 let attempts = get_optional(game_section, "attempts", 10, |x| x.parse::<u32>().unwrap());
 
-                hqm_server::run_server(server_port, server_public, config, HQMRussianBehaviour::new (attempts, physics_config)).await
+                hqm_server::run_server(server_port, server_public, config, HQMRussianBehaviour::new (attempts, server_team_max, physics_config)).await
+            },
+            HQMServerMode::Shootout => {
+                let attempts = get_optional(game_section, "attempts", 5, |x| x.parse::<u32>().unwrap());
+
+                hqm_server::run_server(server_port, server_public, config, HQMShootoutBehaviour::new (attempts, physics_config)).await
             }
         }
 

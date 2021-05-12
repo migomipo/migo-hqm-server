@@ -54,7 +54,7 @@ impl HQMServer {
         let command = parser.read_byte_aligned();
         match command {
             0 => {
-                self.request_info(socket, addr, &mut parser);
+                self.request_info(socket, addr, &mut parser, behaviour);
             },
             2 => {
                 self.player_join(addr, &mut parser, behaviour);
@@ -70,7 +70,7 @@ impl HQMServer {
         }
     }
 
-    fn request_info<'a>(&self, socket: & Arc<UdpSocket>, addr: SocketAddr, parser: &mut HQMMessageReader<'a>) {
+    fn request_info<'a, B: HQMServerBehaviour>(&self, socket: & Arc<UdpSocket>, addr: SocketAddr, parser: &mut HQMMessageReader<'a>, behaviour: & B) {
         let mut write_buf = [0u8;128];
         let _player_version = parser.read_bits(8);
         let ping = parser.read_u32_aligned();
@@ -84,7 +84,7 @@ impl HQMServer {
         let player_count  = self.player_count();
         writer.write_bits(8, player_count as u32);
         writer.write_bits(4, 4);
-        writer.write_bits(4, self.config.team_max as u32);
+        writer.write_bits(4, behaviour.get_number_of_players() as u32);
 
         writer.write_bytes_aligned_padded(32, self.config.server_name.as_ref());
 
@@ -1434,7 +1434,7 @@ pub struct HQMServerConfiguration {
     pub(crate) welcome: Vec<String>,
     pub(crate) password: String,
     pub(crate) player_max: usize,
-    pub(crate) team_max: usize,
+
     pub(crate) replays_enabled: bool,
     pub(crate) server_name: String,
 }
@@ -1454,5 +1454,7 @@ pub trait HQMServerBehaviour {
     fn after_player_join (& mut self, _server: & mut HQMServer, _player_index: usize) {
 
     }
+
+    fn get_number_of_players (& self) -> u32;
 }
 
