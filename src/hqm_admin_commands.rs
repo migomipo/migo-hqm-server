@@ -156,20 +156,6 @@ impl HQMServer {
 
     }
 
-    pub(crate) fn set_preferred_faceoff_position(& mut self, player_index: usize, input_position:&str) {
-        let input_position = input_position.to_uppercase();
-        if self.game.world.rink.allowed_positions.contains(& input_position) {
-            if let Some(player) = & mut self.players[player_index] {
-                info!("{} ({}) set position {}", player.player_name, player_index, input_position);
-                let msg = format!("{} position {}", player.player_name, input_position);
-
-                player.preferred_faceoff_position = Some(input_position);
-                self.add_server_chat_message(&msg);
-
-            }
-        }
-    }
-
     pub(crate) fn admin_login (& mut self, player_index: usize, password:&str) {
         if let Some(player) = & mut self.players[player_index] {
 

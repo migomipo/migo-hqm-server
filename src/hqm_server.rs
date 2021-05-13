@@ -15,7 +15,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
 use tracing::info;
 
-use crate::hqm_game::{HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam};
+use crate::hqm_game::{HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam, HQMRuleIndication};
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
 
@@ -326,9 +326,6 @@ impl HQMServer {
             },
             "righty" => {
                 self.set_hand(HQMSkaterHand::Right, player_index);
-            },
-            "sp" | "setposition" => {
-                self.set_preferred_faceoff_position(player_index, arg);
             },
             "admin" => {
                 self.admin_login(player_index,arg);
@@ -1196,13 +1193,13 @@ async fn send_updates(game_id: u32, game: &HQMGame, players: &[Option<HQMConnect
     let packets = &game.saved_ticks;
 
     let rules_state =
-        if game.offside_status.is_offside() {
+        if game.offside_indication == HQMRuleIndication::Yes {
             HQMRulesState::Offside
-        } else if game.icing_status.is_icing() {
+        } else if game.icing_indication == HQMRuleIndication::Yes {
             HQMRulesState::Icing
         } else {
-            let icing_warning = game.icing_status.is_warning();
-            let offside_warning = game.offside_status.is_warning();
+            let icing_warning = game.icing_indication == HQMRuleIndication::Warning;
+            let offside_warning = game.offside_indication == HQMRuleIndication::Warning;
             HQMRulesState::Regular {
                 offside_warning, icing_warning
             }
@@ -1342,7 +1339,6 @@ pub(crate) struct HQMConnectedPlayer {
     pub(crate) player_name: String,
     pub(crate) addr: SocketAddr,
     client_version: u8,
-    pub(crate) preferred_faceoff_position: Option<String>,
     pub(crate) skater: Option<usize>,
     game_id: u32,
     pub(crate) input: HQMPlayerInput,
@@ -1367,7 +1363,6 @@ impl HQMConnectedPlayer {
             player_name,
             addr,
             client_version: 0,
-            preferred_faceoff_position: None,
             skater: None,
             game_id: u32::MAX,
             known_packet: u32::MAX,

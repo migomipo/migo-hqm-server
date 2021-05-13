@@ -61,52 +61,9 @@ impl HQMGameWorld {
     }
 }
 
-#[derive(PartialEq, Debug, Clone)]
-pub enum HQMIcingStatus {
-    No,          // No icing
-    NotTouched(HQMTeam, Point3<f32>),  // Puck has entered offensive half, but not reached the goal line
-    Warning(HQMTeam, Point3<f32>),     // Puck has reached the goal line, delayed icing
-    Icing(HQMTeam)       // Icing has been called
-}
-
-impl HQMIcingStatus {
-    pub(crate) fn is_warning(&self) -> bool {
-        match self {
-            HQMIcingStatus::Warning(_, _) => true,
-            _ => false
-        }
-    }
-
-    pub(crate) fn is_icing(&self) -> bool {
-        match self {
-            HQMIcingStatus::Icing(_) => true,
-            _ => false
-        }
-    }
-}
-
-#[derive(PartialEq, Debug, Clone)]
-pub enum HQMOffsideStatus {
-    InNeutralZone,                // No offside
-    InOffensiveZone(HQMTeam),              // No offside, puck in offensive zone
-    Warning(HQMTeam, Point3<f32>, usize),  // Warning, puck entered offensive zone in an offside situation but not touched yet
-    Offside(HQMTeam)                       // Offside has been called
-}
-
-impl HQMOffsideStatus {
-    pub(crate) fn is_warning(&self) -> bool {
-        match self {
-            HQMOffsideStatus::Warning(_, _, _) => true,
-            _ => false
-        }
-    }
-
-    pub(crate) fn is_offside(&self) -> bool {
-        match self {
-            HQMOffsideStatus::Offside(_) => true,
-            _ => false
-        }
-    }
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum HQMRuleIndication {
+    No, Warning, Yes
 }
 
 pub struct HQMGame {
@@ -118,9 +75,8 @@ pub struct HQMGame {
     pub(crate) replay_last_packet: u32,
     pub(crate) replay_messages: Vec<Rc<HQMMessage>>,
     pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
-    pub icing_status: HQMIcingStatus,
-    pub offside_status: HQMOffsideStatus,
-    pub(crate) next_faceoff_spot: HQMFaceoffSpot,
+    pub icing_indication: HQMRuleIndication,
+    pub offside_indication: HQMRuleIndication,
     pub(crate) world: HQMGameWorld,
     pub red_score: u32,
     pub blue_score: u32,
@@ -149,7 +105,6 @@ impl HQMGame {
             object_vec.push(HQMGameObject::None);
         }
         let rink = HQMRink::new(30.0, 61.0, 8.5);
-        let mid_faceoff = rink.center_faceoff_spot.clone();
 
         HQMGame {
             start_time: Utc::now(),
@@ -160,9 +115,8 @@ impl HQMGame {
             replay_last_packet: u32::MAX,
             replay_messages: vec![],
             saved_ticks: VecDeque::with_capacity(256),
-            icing_status: HQMIcingStatus::No,
-            offside_status: HQMOffsideStatus::InNeutralZone,
-            next_faceoff_spot: mid_faceoff,
+            icing_indication: HQMRuleIndication::No,
+            offside_indication: HQMRuleIndication::No,
             world: HQMGameWorld {
                 objects: object_vec,
                 puck_slots,
@@ -298,6 +252,18 @@ pub(crate) struct HQMFaceoffSpot {
     pub(crate) center_position: Point3<f32>,
     pub(crate) red_player_positions: HashMap<String, (Point3<f32>, Rotation3<f32>)>,
     pub(crate) blue_player_positions: HashMap<String, (Point3<f32>, Rotation3<f32>)>
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum HQMRinkSide {
+    Left, Right
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum HQMRinkFaceoffSpot {
+    Center,
+    DefensiveZone(HQMTeam, HQMRinkSide),
+    Offside(HQMTeam, HQMRinkSide),
 }
 
 #[derive(Debug, Clone)]
@@ -503,37 +469,59 @@ impl HQMRink {
         }
     }
 
-    pub fn get_offside_faceoff_spot(& self, pos: &Point3<f32>, team: HQMTeam) -> HQMFaceoffSpot {
-        let left_side = if pos.x <= self.width/2.0 { 0usize } else { 1usize };
-        let (lines_and_net, f1, f2, f3) = match team {
-            HQMTeam::Red => {
-                (& self.red_lines_and_net, &self.blue_neutral_faceoff_spots, &self.red_neutral_faceoff_spots, &self.red_zone_faceoff_spots)
+    pub fn get_faceoff_spot (& self, spot: HQMRinkFaceoffSpot) -> & HQMFaceoffSpot {
+        match spot {
+            HQMRinkFaceoffSpot::Center => & self.center_faceoff_spot,
+            HQMRinkFaceoffSpot::DefensiveZone(team, side) => {
+                let faceoff_spots = match team {
+                    HQMTeam::Red => & self.red_zone_faceoff_spots,
+                    HQMTeam::Blue => & self.blue_zone_faceoff_spots
+                };
+                let index = match side {
+                    HQMRinkSide::Left => 0,
+                    HQMRinkSide::Right => 1
+                };
+                & faceoff_spots[index]
             }
-            HQMTeam::Blue => {
-                (& self.blue_lines_and_net, &self.red_neutral_faceoff_spots, &self.blue_neutral_faceoff_spots, &self.blue_zone_faceoff_spots)
+            HQMRinkFaceoffSpot::Offside(team, side) => {
+                let faceoff_spots = match team {
+                    HQMTeam::Red => & self.red_neutral_faceoff_spots,
+                    HQMTeam::Blue => & self.blue_neutral_faceoff_spots
+                };
+                let index = match side {
+                    HQMRinkSide::Left => 0,
+                    HQMRinkSide::Right => 1
+                };
+                & faceoff_spots[index]
             }
-        };
-        if lines_and_net.offensive_line.point_past_middle_of_line(pos) {
-            f1[left_side].clone()
-        } else if lines_and_net.mid_line.point_past_middle_of_line(pos) {
-            self.center_faceoff_spot.clone()
-        } else if lines_and_net.defensive_line.point_past_middle_of_line(pos) {
-            f2[left_side].clone()
-        } else {
-            f3[left_side].clone()
         }
     }
 
-    pub fn get_icing_faceoff_spot(& self, pos: &Point3<f32>, team: HQMTeam) -> HQMFaceoffSpot {
-        let left_side = if pos.x <= self.width/2.0 { 0usize } else { 1usize };
-        match team {
+    pub fn get_offside_faceoff_spot(& self, pos: &Point3<f32>, team: HQMTeam) -> HQMRinkFaceoffSpot {
+        let side = if pos.x <= self.width/2.0 { HQMRinkSide::Left } else { HQMRinkSide::Right };
+        let lines_and_net = match team {
             HQMTeam::Red => {
-                self.red_zone_faceoff_spots[left_side].clone()
+                & self.red_lines_and_net
             }
             HQMTeam::Blue => {
-                self.blue_zone_faceoff_spots[left_side].clone()
-            },
+                & self.blue_lines_and_net
+            }
+        };
+        if lines_and_net.offensive_line.point_past_middle_of_line(pos) {
+            HQMRinkFaceoffSpot::Offside(team.get_other_team(), side)
+        } else if lines_and_net.mid_line.point_past_middle_of_line(pos) {
+            HQMRinkFaceoffSpot::Center
+        } else if lines_and_net.defensive_line.point_past_middle_of_line(pos) {
+            HQMRinkFaceoffSpot::Offside(team, side)
+        } else {
+            HQMRinkFaceoffSpot::DefensiveZone(team, side)
         }
+    }
+
+    pub fn get_icing_faceoff_spot(& self, pos: &Point3<f32>, team: HQMTeam) -> HQMRinkFaceoffSpot {
+        let side = if pos.x <= self.width/2.0 { HQMRinkSide::Left } else { HQMRinkSide::Right };
+
+        HQMRinkFaceoffSpot::DefensiveZone(team, side)
     }
 }
 
