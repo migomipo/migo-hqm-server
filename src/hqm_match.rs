@@ -96,11 +96,11 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub fn do_faceoff(& mut self, server: & mut HQMServer){
+    fn do_faceoff(& mut self, server: & mut HQMServer){
         let positions = get_faceoff_positions(& server.players,
                                               & self.preferred_positions,
                                               & server.game.world.objects,
-                                              &server.game.world.rink.allowed_positions);
+                                              & server.game.world.rink.allowed_positions);
 
         server.game.world.clear_pucks ();
 
@@ -134,7 +134,7 @@ impl HQMMatchBehaviour {
 
     }
 
-    pub fn call_goal(& mut self, server: & mut HQMServer, team: HQMTeam, puck: usize,
+    fn call_goal(& mut self, server: & mut HQMServer, team: HQMTeam, puck: usize,
                      time_break: u32,
                      time_gameover: u32) {
 
@@ -178,7 +178,7 @@ impl HQMMatchBehaviour {
         server.add_goal_message(team, goal_scorer_index, assist_index);
     }
 
-    pub fn handle_events(& mut self, server: & mut HQMServer, events: &[HQMSimulationEvent], time_break: u32, time_intermission: u32,
+    fn handle_events(& mut self, server: & mut HQMServer, events: &[HQMSimulationEvent], time_break: u32, time_intermission: u32,
                          offside: HQMOffsideConfiguration, icing: HQMIcingConfiguration) {
         if server.game.time_break > 0
             || server.game.time == 0
@@ -336,14 +336,14 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub fn call_offside(& mut self, server: & mut HQMServer, team: HQMTeam, pass_origin: &Point3<f32>, time_break: u32) {
+    fn call_offside(& mut self, server: & mut HQMServer, team: HQMTeam, pass_origin: &Point3<f32>, time_break: u32) {
         self.next_faceoff_spot = server.game.world.rink.get_offside_faceoff_spot(pass_origin, team);
         server.game.time_break = time_break;
         self.offside_status = HQMOffsideStatus::Offside(team);
         server.add_server_chat_message("Offside");
     }
 
-    pub fn call_icing(& mut self, server: & mut HQMServer, team: HQMTeam, pass_origin: &Point3<f32>, time_break: u32) {
+    fn call_icing(& mut self, server: & mut HQMServer, team: HQMTeam, pass_origin: &Point3<f32>, time_break: u32) {
         self.next_faceoff_spot = server.game.world.rink.get_icing_faceoff_spot(pass_origin, team);
         server.game.time_break = time_break;
         self.icing_status = HQMIcingStatus::Icing(team);
@@ -418,7 +418,7 @@ impl HQMMatchBehaviour {
 
     }
 
-    pub(crate) fn set_team_parity(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
+    fn set_team_parity(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 match rule {
@@ -477,7 +477,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn cheat(& mut self, server: & mut HQMServer, player_index: usize, arg:&str) {
+    fn cheat(& mut self, server: & mut HQMServer, player_index: usize, arg:&str) {
         if let Some(player) = & server.players[player_index] {
 
             if player.is_admin{
@@ -500,7 +500,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_team_size(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
+    fn set_team_size(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<usize>() {
@@ -519,7 +519,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_icing_rule(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
+    fn set_icing_rule(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 match rule {
@@ -552,7 +552,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_offside_rule(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
+    fn set_offside_rule(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 match rule {
@@ -585,7 +585,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_first_to_rule(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
+    fn set_first_to_rule(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<u32>() {
@@ -607,7 +607,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_mercy_rule(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
+    fn set_mercy_rule(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<u32>() {
@@ -629,7 +629,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn faceoff (& mut self, server: & mut HQMServer, player_index: usize) {
+    fn faceoff (& mut self, server: & mut HQMServer, player_index: usize) {
         if !server.game.game_over {
             if let Some(player) = & server.players[player_index] {
                 if player.is_admin{
@@ -646,7 +646,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn reset_game (& mut self, server: & mut HQMServer, player_index: usize) {
+    fn reset_game (& mut self, server: & mut HQMServer, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 info!("{} ({}) reset game",player.player_name, player_index);
@@ -661,7 +661,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn start_game (& mut self, server: & mut HQMServer, player_index: usize) {
+    fn start_game (& mut self, server: & mut HQMServer, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin {
                 if server.game.period == 0 && server.game.time > 1 {
@@ -678,7 +678,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn pause (& mut self, server: & mut HQMServer, player_index: usize) {
+    fn pause (& mut self, server: & mut HQMServer, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 self.paused=true;
@@ -696,7 +696,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn unpause (& mut self, server: & mut HQMServer, player_index: usize) {
+    fn unpause (& mut self, server: & mut HQMServer, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 self.paused=false;
@@ -710,7 +710,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_clock (server: & mut HQMServer, input_minutes: u32, input_seconds: u32, player_index: usize) {
+    fn set_clock (server: & mut HQMServer, input_minutes: u32, input_seconds: u32, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 server.game.time = (input_minutes * 60 * 100)+ (input_seconds * 100);
@@ -725,7 +725,7 @@ impl HQMMatchBehaviour {
 
     }
 
-    pub(crate) fn set_score (server: & mut HQMServer, input_team: HQMTeam, input_score: u32, player_index: usize) {
+    fn set_score (server: & mut HQMServer, input_team: HQMTeam, input_score: u32, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
                 match input_team {
@@ -750,7 +750,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_period (server: & mut HQMServer, input_period: u32, player_index: usize) {
+    fn set_period (server: & mut HQMServer, input_period: u32, player_index: usize) {
         if let Some(player) = & server.players[player_index] {
             if player.is_admin{
 
@@ -766,7 +766,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_preferred_faceoff_position(& mut self, server: & mut HQMServer, player_index: usize, input_position:&str) {
+    fn set_preferred_faceoff_position(& mut self, server: & mut HQMServer, player_index: usize, input_position:&str) {
         let input_position = input_position.to_uppercase();
         if server.game.world.rink.allowed_positions.contains(& input_position) {
             if let Some(player) = & mut server.players[player_index] {
@@ -780,7 +780,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub fn update_clock(& mut self, server: &mut HQMServer, period_length: u32, intermission_time: u32) {
+    fn update_clock(& mut self, server: &mut HQMServer, period_length: u32, intermission_time: u32) {
         if server.game.time_break > 0 {
             server.game.time_break -= 1;
             if server.game.time_break == 0 {
