@@ -363,6 +363,37 @@ impl HQMServer {
                     }
                 }
             },
+            "view" => {
+                if let Ok(view_player_index) = arg.parse::<usize>() {
+                    self.view(view_player_index, player_index);
+                }
+            },
+            "views" => {
+                if let Some((view_player_index, _name)) = self.player_exact_unique_match(arg) {
+                    self.view(view_player_index, player_index);
+                } else {
+                    let matches = self.player_search(arg);
+                    if matches.is_empty() {
+                        self.add_directed_server_chat_message("No matches found", player_index);
+                    } else if matches.len() > 1 {
+                        self.add_directed_server_chat_message("Multiple matches found, use /view X", player_index);
+                        for (found_player_index, found_player_name) in matches.into_iter().take(5) {
+                            let str = format!("{}={}", found_player_index, found_player_name);
+                            self.add_directed_server_chat_message(&str, player_index);
+                        }
+                    } else {
+                        self.view(matches[0].0, player_index);
+                    }
+                }
+            }
+            "restoreview" => {
+                if let Some(player) = & mut self.players[player_index] {
+                    if player.view_player_index != player_index {
+                        player.view_player_index = player_index;
+                        self.add_directed_server_chat_message("View has been restored", player_index);
+                    }
+                }
+            },
             _ => behaviour.handle_command(self, command, arg, player_index),
         }
 
@@ -402,14 +433,16 @@ impl HQMServer {
                 let view_player_name = view_player.player_name.clone();
                 if let Some(player) = &mut self.players[player_index] {
                     if view_player_index != player.view_player_index {
-                        player.view_player_index = view_player_index;
-                        if player_index != view_player_index {
-                            info!("{} ({}) is spectating", player.player_name, player_index);
-                            self.move_to_spectator(player_index);
-                            let str = format!("You are now viewing {}", view_player_name);
-                            self.add_directed_server_chat_message(&str, player_index);
+                        if player.skater.is_some() {
+                            self.add_directed_server_chat_message("You must be a spectator to change view", player_index);
                         } else {
-                            self.add_directed_server_chat_message("View has been restored", player_index);
+                            player.view_player_index = view_player_index;
+                            if player_index != view_player_index {
+                                let str = format!("You are now viewing {}", view_player_name);
+                                self.add_directed_server_chat_message(&str, player_index);
+                            } else {
+                                self.add_directed_server_chat_message("View has been restored", player_index);
+                            }
                         }
                     }
                 }
