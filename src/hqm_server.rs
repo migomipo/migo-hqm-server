@@ -949,8 +949,6 @@ impl HQMServer {
 
 }
 
-
-
 pub async fn run_server<B: HQMServerBehaviour>(port: u16, public: bool,
                         config: HQMServerConfiguration,
                         mut behaviour: B) -> std::io::Result<()> {
@@ -1438,33 +1436,19 @@ impl HQMConnectedPlayer {
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMIcingConfiguration {
-    Off,
-    Touch,
-    NoTouch
-}
-
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMOffsideConfiguration {
-    Off,
-    Delayed,
-    Immediate
-}
-
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub enum HQMSpawnPoint {
     Center,
     Bench
 }
 
-
+#[derive(Debug, Clone)]
 pub struct HQMServerConfiguration {
-    pub(crate) welcome: Vec<String>,
-    pub(crate) password: String,
-    pub(crate) player_max: usize,
+    pub welcome: Vec<String>,
+    pub password: String,
+    pub player_max: usize,
 
-    pub(crate) replays_enabled: bool,
-    pub(crate) server_name: String,
+    pub replays_enabled: bool,
+    pub server_name: String,
 }
 
 

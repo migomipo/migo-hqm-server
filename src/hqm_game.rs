@@ -12,9 +12,9 @@ use chrono::{DateTime, Utc};
 
 pub(crate) struct HQMGameWorld {
     pub(crate) objects: Vec<HQMGameObject>,
-    pub(crate) puck_slots: usize,
+    puck_slots: usize,
     pub(crate) rink: HQMRink,
-    pub(crate) physics_config: HQMPhysicsConfiguration
+    pub physics_config: HQMPhysicsConfiguration
 }
 
 impl HQMGameWorld {
@@ -94,8 +94,8 @@ pub struct HQMGame {
 
 #[derive(Debug, Clone)]
 pub struct HQMPhysicsConfiguration {
-    pub(crate) gravity: f32,
-    pub(crate) limit_jump_speed: bool,
+    pub gravity: f32,
+    pub limit_jump_speed: bool,
 }
 
 impl HQMGame {

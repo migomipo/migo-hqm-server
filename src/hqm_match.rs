@@ -2,32 +2,46 @@ use nalgebra::{Matrix3, Point3, Vector3};
 use tracing::info;
 
 use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameWorld, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam, HQMRinkFaceoffSpot, HQMRuleIndication};
-use crate::hqm_server::{HQMIcingConfiguration, HQMOffsideConfiguration, HQMServer, HQMServerBehaviour, HQMSpawnPoint, HQMConnectedPlayer};
+use crate::hqm_server::{HQMServer, HQMServerBehaviour, HQMSpawnPoint, HQMConnectedPlayer};
 use crate::hqm_simulate::HQMSimulationEvent;
 use std::collections::HashMap;
 
 pub struct HQMMatchConfiguration {
-    pub(crate) force_team_size_parity: bool,
-    pub(crate) team_max: usize,
-    pub(crate) time_period: u32,
-    pub(crate) time_warmup: u32,
-    pub(crate) time_break: u32,
-    pub(crate) time_intermission: u32,
-    pub(crate) mercy: u32,
-    pub(crate) first_to: u32,
-    pub(crate) offside: HQMOffsideConfiguration,
-    pub(crate) icing: HQMIcingConfiguration,
-    pub(crate) warmup_pucks: usize,
-    pub(crate) physics_config: HQMPhysicsConfiguration,
+    pub force_team_size_parity: bool,
+    pub team_max: usize,
+    pub time_period: u32,
+    pub time_warmup: u32,
+    pub time_break: u32,
+    pub time_intermission: u32,
+    pub mercy: u32,
+    pub first_to: u32,
+    pub offside: HQMOffsideConfiguration,
+    pub icing: HQMIcingConfiguration,
+    pub warmup_pucks: usize,
+    pub physics_config: HQMPhysicsConfiguration,
 
-    pub(crate) cheats_enabled: bool,
+    pub cheats_enabled: bool,
 
-    pub(crate) spawn_point: HQMSpawnPoint,
+    pub spawn_point: HQMSpawnPoint,
+}
+
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum HQMIcingConfiguration {
+    Off,
+    Touch,
+    NoTouch
+}
+
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum HQMOffsideConfiguration {
+    Off,
+    Delayed,
+    Immediate
 }
 
 pub struct HQMMatchBehaviour {
-    config: HQMMatchConfiguration,
-    paused: bool,
+    pub config: HQMMatchConfiguration,
+    pub paused: bool,
     next_faceoff_spot: HQMRinkFaceoffSpot,
     icing_status: HQMIcingStatus,
     offside_status: HQMOffsideStatus,
