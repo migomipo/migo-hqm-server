@@ -33,12 +33,55 @@ enum HQMServerReceivedData {
     }
 }
 
+pub struct HQMServerPlayerList {
+    players: Vec<Option<HQMConnectedPlayer>>
+}
+
+
+impl HQMServerPlayerList {
+    pub fn len (&self) -> usize {
+        self.players.len ()
+    }
+
+    pub fn iter (& self) -> impl Iterator<Item=Option<&HQMConnectedPlayer>> {
+        self.players.iter().map(|x| x.as_ref())
+    }
+
+    pub fn iter_mut (& mut self) -> impl Iterator<Item=Option<& mut HQMConnectedPlayer>> {
+        self.players.iter_mut().map(|x| x.as_mut())
+    }
+
+    pub fn get(& self, player_index: usize) -> Option<&HQMConnectedPlayer> {
+        if let Some(x) = self.players.get(player_index) {
+            x.as_ref()
+        } else {
+            None
+        }
+    }
+
+    pub fn get_mut(& mut self, player_index: usize) -> Option<& mut HQMConnectedPlayer> {
+        if let Some(x) = self.players.get_mut(player_index) {
+            x.as_mut()
+        } else {
+            None
+        }
+    }
+
+    fn remove_player (& mut self, player_index: usize) {
+        self.players[player_index] = None;
+    }
+
+    fn add_player (& mut self, player_index: usize, player: HQMConnectedPlayer) {
+        self.players[player_index] = Some(player);
+    }
+}
+
 pub struct HQMServer{
-    pub(crate) players: Vec<Option<HQMConnectedPlayer>>,
+    pub players: HQMServerPlayerList,
     pub(crate) ban_list: HashSet<std::net::IpAddr>,
     pub(crate) allow_join: bool,
-    pub(crate) config: HQMServerConfiguration,
-    pub(crate) game: HQMGame,
+    pub config: HQMServerConfiguration,
+    pub game: HQMGame,
     game_id: u32,
     pub is_muted:bool,
 }
@@ -100,7 +143,7 @@ impl HQMServer {
 
     fn player_count (& self) -> usize {
         let mut player_count = 0;
-        for player in &self.players {
+        for player in self.players.iter() {
             if player.is_some() {
                 player_count += 1;
             }
@@ -112,7 +155,7 @@ impl HQMServer {
         let current_slot = self.find_player_slot(addr);
         let (player_index, player) = match current_slot {
             Some(x) => {
-                (x, self.players[x].as_mut().unwrap())
+                (x, self.players.get_mut(x).unwrap())
             }
             None => {
                 return;
@@ -238,7 +281,7 @@ impl HQMServer {
 
 
     pub(crate) fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = self.players.get_mut(player_index) {
             player.hand = hand;
             if let Some(skater_obj_index) = player.skater {
                 if let HQMGameObject::Player(skater) = & mut self.game.world.objects[skater_obj_index] {
@@ -387,7 +430,7 @@ impl HQMServer {
                 }
             }
             "restoreview" => {
-                if let Some(player) = & mut self.players[player_index] {
+                if let Some(player) = self.players.get_mut(player_index) {
                     if player.view_player_index != player_index {
                         player.view_player_index = player_index;
                         self.add_directed_server_chat_message("View has been restored", player_index);
@@ -402,7 +445,7 @@ impl HQMServer {
     fn list_players (& mut self, player_index: usize, first_index: usize) {
         let mut found = vec![];
         for player_index in first_index..self.players.len() {
-            if let Some(player) = & self.players[player_index] {
+            if let Some(player) = self.players.get(player_index) {
                 found.push((player_index, player.player_name.clone()));
                 if found.len() >= 5 {
                     break;
@@ -429,9 +472,9 @@ impl HQMServer {
 
     pub(crate) fn view (& mut self, view_player_index: usize, player_index: usize) {
         if view_player_index < self.players.len() {
-            if let Some(view_player) = &self.players[view_player_index] {
+            if let Some(view_player) = self.players.get(view_player_index) {
                 let view_player_name = view_player.player_name.clone();
-                if let Some(player) = &mut self.players[player_index] {
+                if let Some(player) = self.players.get_mut(player_index) {
                     if view_player_index != player.view_player_index {
                         if player.skater.is_some() {
                             self.add_directed_server_chat_message("You must be a spectator to change view", player_index);
@@ -454,7 +497,7 @@ impl HQMServer {
 
     fn ping (& mut self, ping_player_index: usize, player_index: usize) {
         if ping_player_index < self.players.len() {
-            if let Some(ping_player) = & self.players[ping_player_index] {
+            if let Some(ping_player) = self.players.get(ping_player_index) {
                 if ping_player.last_ping.is_empty() {
                     let msg = format!("No ping values found for {}", ping_player.player_name);
                     self.add_directed_server_chat_message(&msg, player_index);
@@ -526,7 +569,7 @@ impl HQMServer {
             Err(_) => return
         };
 
-        if self.players[player_index].is_some() {
+        if self.players.get(player_index).is_some() {
             if msg.starts_with("/") {
                 let split: Vec<&str> = msg.splitn(2, " ").collect();
                 let command = &split[0][1..];
@@ -538,7 +581,7 @@ impl HQMServer {
                 self.process_command(command, arg, player_index, behaviour);
             } else {
                 if !self.is_muted {
-                    match &self.players[player_index as usize] {
+                    match self.players.get(player_index) {
                         Some(player) => {
                             match player.is_muted {
                                 HQMMuteStatus::NotMuted => {
@@ -563,7 +606,7 @@ impl HQMServer {
             Some(player_index) => {
                 behaviour.before_player_exit(self, player_index);
                 let player_name = {
-                    let player = self.players[player_index].as_ref().unwrap();
+                    let player = self.players.get(player_index).unwrap();
                     player.player_name.clone()
                 };
                 self.remove_player(player_index);
@@ -600,7 +643,7 @@ impl HQMServer {
 
                 let new_player = HQMConnectedPlayer::new(player_index, player_name, addr, messages);
 
-                self.players[player_index] = Some(new_player);
+                self.players.add_player(player_index, new_player);
 
                 Some(player_index)
             }
@@ -612,7 +655,7 @@ impl HQMServer {
 
         let mut admin_check:bool = false;
 
-        match &self.players[player_index as usize] {
+        match self.players.get(player_index) {
             Some(player) => {
                 let update = HQMMessage::PlayerUpdate {
                     player_name: player.player_name.clone(),
@@ -630,7 +673,7 @@ impl HQMServer {
 
                 self.add_global_message(update, true);
 
-                self.players[player_index as usize] = None;
+                self.players.remove_player(player_index as usize);
             }
             None => {
 
@@ -655,7 +698,7 @@ impl HQMServer {
     }
 
     fn add_user_chat_message(&mut self, message: &str, sender_index: usize) {
-        if let Some(player) = & self.players[sender_index] {
+        if let Some(player) = self.players.get_mut(sender_index) {
             info!("{} ({}): {}", &player.player_name, sender_index, &message);
             let chat = HQMMessage::Chat {
                 player_index: Some(sender_index),
@@ -676,7 +719,7 @@ impl HQMServer {
 
     pub fn add_directed_chat_message(&mut self, message: &str, receiver_index: usize, sender_index: Option<usize>) {
         // This message will only be visible to a single player
-        if let Some(player) = & mut self.players[receiver_index] {
+        if let Some(player) = self.players.get_mut(receiver_index) {
             player.add_directed_user_chat_message2(message, sender_index);
         }
     }
@@ -715,7 +758,7 @@ impl HQMServer {
     }
 
     pub fn move_to_spectator(&mut self, player_index: usize) -> bool {
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = self.players.get_mut(player_index) {
             if let Some (i) = player.skater {
                 self.game.world.objects[i] = HQMGameObject::None;
                 player.skater = None;
@@ -771,7 +814,7 @@ impl HQMServer {
     }
 
     pub fn move_to_team(& mut self, player_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Rotation3<f32>) -> bool {
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = self.players.get_mut(player_index) {
             if let Some(skater) = player.skater {
                 self.game.world.objects[skater] = HQMGameObject::Player(HQMSkater::new(skater, team, pos, rot.matrix().clone_owned(), player.hand, player_index, player.mass));
                 let player_name = player.player_name.clone();
@@ -871,7 +914,7 @@ impl HQMServer {
 
             });
 
-            send_updates(self.game_id, &self.game, & self.players, socket, write_buf).await;
+            send_updates(self.game_id, &self.game, & self.players.players, socket, write_buf).await;
             if self.config.replays_enabled {
                 write_replay(& mut self.game, write_buf);
             }
@@ -959,7 +1002,9 @@ pub async fn run_server<B: HQMServerBehaviour>(port: u16, public: bool,
     let first_game = behaviour.create_game();
 
     let mut server = HQMServer {
-        players: player_vec,
+        players: HQMServerPlayerList {
+            players: player_vec
+        },
         ban_list: HashSet::new(),
         allow_join:true,
         game: first_game,
@@ -1366,7 +1411,7 @@ pub(crate) enum HQMMuteStatus {
     Muted
 }
 
-pub(crate) struct HQMConnectedPlayer {
+pub struct HQMConnectedPlayer {
     pub(crate) player_name: String,
     pub(crate) addr: SocketAddr,
     client_version: u8,

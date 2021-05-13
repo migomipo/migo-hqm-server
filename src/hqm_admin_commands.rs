@@ -9,7 +9,7 @@ impl HQMServer {
     }
 
     pub(crate) fn set_allow_join (& mut self, player_index: usize, allowed: bool) {
-        if let Some(player) = & self.players[player_index] {
+        if let Some(player) = self.players.get(player_index) {
             if player.is_admin{
                 self.allow_join=allowed;
 
@@ -30,12 +30,12 @@ impl HQMServer {
     }
 
     pub(crate) fn mute_player (& mut self, admin_player_index: usize, mute_player_index: usize) {
-        if let Some(admin_player) = & self.players[admin_player_index] {
+        if let Some(admin_player) = self.players.get(admin_player_index) {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
                 if mute_player_index < self.players.len() {
-                    if let Some(mute_player) = & mut self.players[mute_player_index] {
+                    if let Some(mute_player) = self.players.get_mut(mute_player_index) {
                         mute_player.is_muted = HQMMuteStatus::Muted;
                         info!("{} ({}) muted {} ({})", admin_player_name, admin_player_index, mute_player.player_name, mute_player_index);
                         let msg = format!("{} muted by {}", mute_player.player_name ,admin_player_name);
@@ -51,12 +51,12 @@ impl HQMServer {
     }
 
     pub(crate) fn unmute_player (& mut self, admin_player_index: usize, mute_player_index: usize) {
-        if let Some(admin_player) = & self.players[admin_player_index] {
+        if let Some(admin_player) = self.players.get(admin_player_index) {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
                 if mute_player_index < self.players.len() {
-                    if let Some(mute_player) = & mut self.players[mute_player_index] {
+                    if let Some(mute_player) = self.players.get_mut(mute_player_index) {
                         let old_status = mute_player.is_muted;
                         mute_player.is_muted = HQMMuteStatus::NotMuted;
                         info!("{} ({}) unmuted {} ({})", admin_player_name, admin_player_index, mute_player.player_name, mute_player_index);
@@ -78,12 +78,12 @@ impl HQMServer {
 
     #[allow(dead_code)]
     pub(crate) fn shadowmute_player (& mut self, admin_player_index: usize, mute_player_index: usize) {
-        if let Some(admin_player) = & self.players[admin_player_index] {
+        if let Some(admin_player) = self.players.get(admin_player_index) {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
                 if mute_player_index < self.players.len() {
-                    if let Some(mute_player) = & mut self.players[mute_player_index] {
+                    if let Some(mute_player) = self.players.get_mut(mute_player_index) {
                         let old_status = mute_player.is_muted;
                         mute_player.is_muted = HQMMuteStatus::ShadowMuted;
                         info!("{} ({}) shadowmuted {} ({})", admin_player_name, admin_player_index, mute_player.player_name, mute_player_index);
@@ -103,7 +103,7 @@ impl HQMServer {
     }
 
     pub(crate) fn mute_chat (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
+        if let Some(player) = self.players.get(player_index) {
             if player.is_admin{
                 self.is_muted=true;
 
@@ -117,7 +117,7 @@ impl HQMServer {
     }
 
     pub(crate) fn unmute_chat (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
+        if let Some(player) = self.players.get(player_index) {
             if player.is_admin{
                 self.is_muted=false;
 
@@ -133,13 +133,13 @@ impl HQMServer {
 
     pub(crate) fn force_player_off_ice (& mut self, admin_player_index: usize, force_player_index: usize) {
 
-        if let Some(player) = & self.players[admin_player_index] {
+        if let Some(player) = self.players.get(admin_player_index) {
             if player.is_admin {
                 let admin_player_name = player.player_name.clone();
 
                 if force_player_index < self.players.len() {
                     if self.move_to_spectator(force_player_index) {
-                        if let Some(force_player) = & mut self.players[force_player_index] {
+                        if let Some(force_player) = self.players.get_mut(force_player_index) {
                             force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
                             let force_player_name = force_player.player_name.clone();
                             let msg = format!("{} forced off ice by {}",force_player_name,admin_player_name);
@@ -157,7 +157,7 @@ impl HQMServer {
     }
 
     pub(crate) fn admin_login (& mut self, player_index: usize, password:&str) {
-        if let Some(player) = & mut self.players[player_index] {
+        if let Some(player) = self.players.get_mut(player_index) {
 
             let msg = if player.is_admin {
                 "You are already logged in as administrator"
@@ -175,7 +175,7 @@ impl HQMServer {
 
     pub(crate) fn kick_all_matching<B: HQMServerBehaviour> (& mut self, admin_player_index: usize, kick_player_name: &str, ban_player: bool, behaviour: & mut B) {
 
-        if let Some(player) = & self.players[admin_player_index]{
+        if let Some(player) = self.players.get(admin_player_index) {
             if player.is_admin {
                 let admin_player_name = player.player_name.clone();
 
@@ -287,13 +287,13 @@ impl HQMServer {
 
     pub(crate) fn kick_player<B: HQMServerBehaviour> (& mut self, admin_player_index: usize, kick_player_index: usize, ban_player: bool, behaviour: & mut B) {
 
-        if let Some(player) = & self.players[admin_player_index]{
+        if let Some(player) = self.players.get(admin_player_index) {
             if player.is_admin {
                 let admin_player_name = player.player_name.clone();
 
                 if kick_player_index != admin_player_index {
                     if kick_player_index < self.players.len() {
-                        if let Some(kick_player) = & mut self.players[kick_player_index as usize] {
+                        if let Some(kick_player) = self.players.get(kick_player_index) {
                             let kick_player_name = kick_player.player_name.clone ();
                             let kick_ip = kick_player.addr.ip().clone();
                             behaviour.before_player_exit(self, kick_player_index);
@@ -328,7 +328,7 @@ impl HQMServer {
     }
 
     pub(crate) fn clear_bans (& mut self, player_index: usize) {
-        if let Some(player) = & self.players[player_index] {
+        if let Some(player) = self.players.get(player_index) {
             if player.is_admin{
                 self.ban_list.clear();
                 info!("{} ({}) cleared bans", player.player_name, player_index);
@@ -342,7 +342,7 @@ impl HQMServer {
     }
 
     pub(crate) fn set_replay (& mut self, player_index: usize, rule:&str) {
-        if let Some(player) = & self.players[player_index] {
+        if let Some(player) = self.players.get(player_index) {
             if player.is_admin{
                 match rule {
                     "on" => {

@@ -2,7 +2,7 @@ use nalgebra::{Matrix3, Point3, Vector3};
 use tracing::info;
 
 use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameWorld, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam, HQMRinkFaceoffSpot, HQMRuleIndication};
-use crate::hqm_server::{HQMServer, HQMServerBehaviour, HQMSpawnPoint, HQMConnectedPlayer};
+use crate::hqm_server::{HQMServer, HQMServerBehaviour, HQMSpawnPoint, HQMServerPlayerList};
 use crate::hqm_simulate::HQMSimulationEvent;
 use std::collections::HashMap;
 
@@ -433,7 +433,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_team_parity(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 match rule {
                     "on" => {
@@ -474,7 +474,7 @@ impl HQMMatchBehaviour {
     fn cheat_mass (& mut self, server: & mut HQMServer, split: &[&str]) {
         if split.len() >= 3 {
             let player = split[1].parse::<usize>().ok()
-                .and_then(|x| server.players.get_mut(x).and_then(|x| x.as_mut()));
+                .and_then(|x| server.players.get_mut(x));
             let mass = split[2].parse::<f32>();
             if let Some(player) = player {
                 if let Ok(mass) = mass {
@@ -492,7 +492,7 @@ impl HQMMatchBehaviour {
     }
 
     fn cheat(& mut self, server: & mut HQMServer, player_index: usize, arg:&str) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
 
             if player.is_admin{
                 let split: Vec<&str> = arg.split_whitespace().collect();
@@ -515,7 +515,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_team_size(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<usize>() {
                     if new_num > 0 && new_num <= 15 {
@@ -534,7 +534,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_icing_rule(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 match rule {
                     "on" | "touch" => {
@@ -567,7 +567,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_offside_rule(& mut self, server: & mut HQMServer, player_index: usize, rule:&str) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 match rule {
                     "on" | "delayed" => {
@@ -600,7 +600,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_first_to_rule(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<u32>() {
                     self.config.first_to = new_num;
@@ -622,7 +622,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_mercy_rule(& mut self, server: & mut HQMServer, player_index: usize, size:&str) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 if let Ok(new_num) = size.parse::<u32>() {
                     self.config.mercy = new_num;
@@ -645,7 +645,7 @@ impl HQMMatchBehaviour {
 
     fn faceoff (& mut self, server: & mut HQMServer, player_index: usize) {
         if !server.game.game_over {
-            if let Some(player) = & server.players[player_index] {
+            if let Some(player) = server.players.get(player_index) {
                 if player.is_admin{
                     server.game.time_break = 5*100;
                     self.paused = false; // Unpause if it's paused as well
@@ -661,7 +661,7 @@ impl HQMMatchBehaviour {
     }
 
     fn reset_game (& mut self, server: & mut HQMServer, player_index: usize) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 info!("{} ({}) reset game",player.player_name, player_index);
                 let msg = format!("Game reset by {}",player.player_name);
@@ -676,7 +676,7 @@ impl HQMMatchBehaviour {
     }
 
     fn start_game (& mut self, server: & mut HQMServer, player_index: usize) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 if server.game.period == 0 && server.game.time > 1 {
                     info!("{} ({}) started game", player.player_name, player_index);
@@ -693,7 +693,7 @@ impl HQMMatchBehaviour {
     }
 
     fn pause (& mut self, server: & mut HQMServer, player_index: usize) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 self.paused=true;
                 if server.game.time_break > 0 && server.game.time_break < self.config.time_break {
@@ -711,7 +711,7 @@ impl HQMMatchBehaviour {
     }
 
     fn unpause (& mut self, server: & mut HQMServer, player_index: usize) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 self.paused=false;
                 info!("{} ({}) resumed game",player.player_name, player_index);
@@ -725,7 +725,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_clock (server: & mut HQMServer, input_minutes: u32, input_seconds: u32, player_index: usize) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 server.game.time = (input_minutes * 60 * 100)+ (input_seconds * 100);
 
@@ -740,7 +740,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_score (server: & mut HQMServer, input_team: HQMTeam, input_score: u32, player_index: usize) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
                 match input_team {
                     HQMTeam::Red =>{
@@ -765,7 +765,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_period (server: & mut HQMServer, input_period: u32, player_index: usize) {
-        if let Some(player) = & server.players[player_index] {
+        if let Some(player) = server.players.get(player_index) {
             if player.is_admin{
 
                 server.game.period = input_period;
@@ -783,7 +783,7 @@ impl HQMMatchBehaviour {
     fn set_preferred_faceoff_position(& mut self, server: & mut HQMServer, player_index: usize, input_position:&str) {
         let input_position = input_position.to_uppercase();
         if server.game.world.rink.allowed_positions.contains(& input_position) {
-            if let Some(player) = & mut server.players[player_index] {
+            if let Some(player) = server.players.get(player_index) {
                 info!("{} ({}) set position {}", player.player_name, player_index, input_position);
                 let msg = format!("{} position {}", player.player_name, input_position);
 
@@ -863,7 +863,7 @@ impl HQMMatchBehaviour {
 
 }
 
-fn get_faceoff_positions (players: & [Option<HQMConnectedPlayer>],
+fn get_faceoff_positions (players: & HQMServerPlayerList,
                           preferred_positions: &HashMap<usize, String>,
                           objects: & [HQMGameObject],
                           allowed_positions: &[String]) -> HashMap<usize, (HQMTeam, String)> {
