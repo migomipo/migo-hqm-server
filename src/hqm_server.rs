@@ -773,7 +773,7 @@ impl HQMServer {
     pub fn move_to_team(& mut self, player_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Rotation3<f32>) -> bool {
         if let Some(player) = & mut self.players[player_index] {
             if let Some(skater) = player.skater {
-                self.game.world.objects[skater] = HQMGameObject::Player(HQMSkater::new(skater, team, pos, rot.matrix().clone_owned(), player.hand, player_index, "".to_string(), player.mass));
+                self.game.world.objects[skater] = HQMGameObject::Player(HQMSkater::new(skater, team, pos, rot.matrix().clone_owned(), player.hand, player_index, player.mass));
                 let player_name = player.player_name.clone();
                 self.add_global_message(HQMMessage::PlayerUpdate {
                     player_name,
@@ -783,7 +783,7 @@ impl HQMServer {
                 }, true);
             } else {
                 if let Some(skater) = self.game.world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index,
-                                                                           "".to_string(), player.mass) {
+                                                                           player.mass) {
                     player.skater = Some(skater);
                     player.view_player_index = player_index;
                     let player_name = player.player_name.clone();

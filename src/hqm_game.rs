@@ -19,10 +19,10 @@ pub(crate) struct HQMGameWorld {
 
 impl HQMGameWorld {
     pub fn create_player_object (& mut self, team: HQMTeam, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand,
-                                        connected_player_index: usize, faceoff_position: String, mass: f32) -> Option<usize> {
+                                        connected_player_index: usize, mass: f32) -> Option<usize> {
         let object_slot = self.find_empty_player_slot();
         if let Some(i) = object_slot {
-            self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, team, start, rot, hand, connected_player_index, faceoff_position, mass));
+            self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, team, start, rot, hand, connected_player_index, mass));
         }
         return object_slot;
     }
@@ -552,7 +552,6 @@ pub(crate) struct HQMSkater {
     pub(crate) stick_placement_delta: Vector2<f32>, // Change in azimuth and inclination per hundred of a second
     pub(crate) collision_balls: Vec<HQMSkaterCollisionBall>,
     pub(crate) hand: HQMSkaterHand,
-    pub(crate) faceoff_position: String
 }
 
 impl HQMSkater {
@@ -568,7 +567,7 @@ impl HQMSkater {
         collision_balls
     }
 
-    pub(crate) fn new(object_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize, faceoff_position: String, mass: f32) -> Self {
+    pub(crate) fn new(object_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize, mass: f32) -> Self {
         let linear_velocity = Vector3::new (0.0, 0.0, 0.0);
         let collision_balls = HQMSkater::get_collision_balls(&pos, &rot, &linear_velocity, mass);
         HQMSkater {
@@ -594,7 +593,6 @@ impl HQMSkater {
             stick_placement_delta: Vector2::new(0.0, 0.0),
             hand,
             collision_balls,
-            faceoff_position
         }
     }
 

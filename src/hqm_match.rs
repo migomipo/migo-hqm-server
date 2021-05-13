@@ -45,7 +45,8 @@ pub struct HQMMatchBehaviour {
     next_faceoff_spot: HQMRinkFaceoffSpot,
     icing_status: HQMIcingStatus,
     offside_status: HQMOffsideStatus,
-    preferred_positions: HashMap<usize, String>
+    preferred_positions: HashMap<usize, String>,
+    started_as_goalie: Vec<usize>
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -92,7 +93,8 @@ impl HQMMatchBehaviour {
             next_faceoff_spot: HQMRinkFaceoffSpot::Center,
             icing_status: HQMIcingStatus::No,
             offside_status: HQMOffsideStatus::InNeutralZone,
-            preferred_positions: HashMap::new()
+            preferred_positions: HashMap::new(),
+            started_as_goalie: vec![]
         }
     }
 
@@ -110,6 +112,7 @@ impl HQMMatchBehaviour {
 
         server.game.world.create_puck_object(puck_pos, Matrix3::identity());
 
+        self.started_as_goalie.clear();
         for (player_index, (team, faceoff_position)) in positions {
             let (player_position, player_rotation) = match team {
                 HQMTeam::Red => {
@@ -120,6 +123,9 @@ impl HQMMatchBehaviour {
                 }
             };
             server.move_to_team (player_index, team, player_position, player_rotation);
+            if faceoff_position == "G" {
+                self.started_as_goalie.push(player_index);
+            }
         }
 
         let rink = &server.game.world.rink;
@@ -214,7 +220,7 @@ impl HQMMatchBehaviour {
                     if let HQMGameObject::Player(skater) = & server.game.world.objects[player] {
                         let this_connected_player_index = skater.connected_player_index;
                         let touching_team = skater.team;
-                        let faceoff_position = skater.faceoff_position.clone();
+
 
                         if let HQMGameObject::Puck(puck) = & mut server.game.world.objects[puck] {
                             puck.add_touch(this_connected_player_index, touching_team, server.game.time);
@@ -235,7 +241,7 @@ impl HQMMatchBehaviour {
                             }
                             if let HQMIcingStatus::Warning(team, p) = &self.icing_status {
                                 if touching_team != *team {
-                                    if faceoff_position == "G" {
+                                    if self.started_as_goalie.contains(&this_connected_player_index) {
                                         self.icing_status = HQMIcingStatus::No;
                                         server.add_server_chat_message("Icing waved off");
                                     } else {
@@ -406,10 +412,18 @@ impl HQMMatchBehaviour {
         for (player_index, player_name) in &joining_red[0..num_joining_red] {
             info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Red);
             server.move_to_team_spawnpoint(*player_index, HQMTeam::Red, self.config.spawn_point);
+
+            if let Some(x) = self.started_as_goalie.iter().position(|x| *x == *player_index) {
+                self.started_as_goalie.remove(x);
+            }
         }
         for (player_index, player_name) in &joining_blue[0..num_joining_blue] {
             info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Blue);
             server.move_to_team_spawnpoint(*player_index, HQMTeam::Blue, self.config.spawn_point);
+
+            if let Some(x) = self.started_as_goalie.iter().position(|x| *x == *player_index) {
+                self.started_as_goalie.remove(x);
+            }
         }
 
         if server.game.period == 0 && server.game.time > 2000 && new_red_player_count > 0 && new_blue_player_count > 0 {
@@ -1121,6 +1135,9 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
     }
 
     fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: usize) {
+        if let Some(x) = self.started_as_goalie.iter().position(|x| *x == player_index) {
+            self.started_as_goalie.remove(x);
+        }
         self.preferred_positions.remove(&player_index);
     }
 
