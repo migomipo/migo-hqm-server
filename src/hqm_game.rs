@@ -10,10 +10,10 @@ use std::f32::consts::PI;
 use std::rc::Rc;
 use chrono::{DateTime, Utc};
 
-pub(crate) struct HQMGameWorld {
-    pub(crate) objects: Vec<HQMGameObject>,
+pub struct HQMGameWorld {
+    pub objects: Vec<HQMGameObject>,
     puck_slots: usize,
-    pub(crate) rink: HQMRink,
+    pub rink: HQMRink,
     pub physics_config: HQMPhysicsConfiguration
 }
 
@@ -77,7 +77,7 @@ pub struct HQMGame {
     pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
     pub icing_indication: HQMRuleIndication,
     pub offside_indication: HQMRuleIndication,
-    pub(crate) world: HQMGameWorld,
+    pub world: HQMGameWorld,
     pub red_score: u32,
     pub blue_score: u32,
     pub period: u32,
@@ -248,10 +248,10 @@ pub(crate) struct LinesAndNet {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMFaceoffSpot {
-    pub(crate) center_position: Point3<f32>,
-    pub(crate) red_player_positions: HashMap<String, (Point3<f32>, Rotation3<f32>)>,
-    pub(crate) blue_player_positions: HashMap<String, (Point3<f32>, Rotation3<f32>)>
+pub struct HQMFaceoffSpot {
+    pub center_position: Point3<f32>,
+    pub red_player_positions: HashMap<String, (Point3<f32>, Rotation3<f32>)>,
+    pub blue_player_positions: HashMap<String, (Point3<f32>, Rotation3<f32>)>
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -267,7 +267,7 @@ pub enum HQMRinkFaceoffSpot {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMRink {
+pub struct HQMRink {
     pub(crate) planes: Vec<(Point3<f32>, Vector3<f32>)>,
     pub(crate) corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
     pub(crate) red_lines_and_net: LinesAndNet,
@@ -526,7 +526,7 @@ impl HQMRink {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMBody {
+pub struct HQMBody {
     pub(crate) pos: Point3<f32>,                // Measured in meters
     pub(crate) linear_velocity: Vector3<f32>,   // Measured in meters per hundred of a second
     pub(crate) rot: Matrix3<f32>,               // Rotation matrix
@@ -535,7 +535,7 @@ pub(crate) struct HQMBody {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMSkater {
+pub struct HQMSkater {
     pub(crate) index: usize,
     pub(crate) connected_player_index: usize,
     pub(crate) body: HQMBody,
@@ -676,11 +676,11 @@ impl HQMPlayerInput {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub(crate) enum HQMSkaterHand {
+pub enum HQMSkaterHand {
     Left, Right
 }
 #[derive(Debug, Clone)]
-pub(crate) struct HQMPuckTouch {
+pub struct HQMPuckTouch {
     pub(crate) player_index: usize,
     pub(crate) team: HQMTeam,
     pub(crate) puck_pos: Point3<f32>,
@@ -689,11 +689,11 @@ pub(crate) struct HQMPuckTouch {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMPuck {
+pub struct HQMPuck {
     pub(crate) index: usize,
-    pub(crate) body: HQMBody,
-    pub(crate) radius: f32,
-    pub(crate) height: f32,
+    pub body: HQMBody,
+    pub radius: f32,
+    pub height: f32,
     pub(crate) touches: VecDeque<HQMPuckTouch>,
 }
 
@@ -775,7 +775,7 @@ impl HQMPuck {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum HQMGameObject {
+pub enum HQMGameObject {
     None,
     Player(HQMSkater),
     Puck(HQMPuck),
