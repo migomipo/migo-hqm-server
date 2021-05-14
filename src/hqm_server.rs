@@ -283,18 +283,18 @@ impl HQMServer {
     pub(crate) fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
         if let Some(player) = self.players.get_mut(player_index) {
             player.hand = hand;
-            if let Some(skater_obj_index) = player.skater {
-                if let HQMGameObject::Player(skater) = & mut self.game.world.objects[skater_obj_index] {
-                    if self.game.period != 0 {
-                        let msg = format!("Stick hand will change after next intermission");
-                        self.add_directed_server_chat_message(&msg, player_index);
 
-                        return;
-                    }
+            if let Some(skater) = self.game.world.get_skater_object_mut(player_index) {
+                if self.game.period != 0 {
+                    let msg = format!("Stick hand will change after next intermission");
+                    self.add_directed_server_chat_message(&msg, player_index);
 
-                    skater.hand = hand;
+                    return;
                 }
+
+                skater.hand = hand;
             }
+
         }
     }
 
@@ -476,7 +476,7 @@ impl HQMServer {
                 let view_player_name = view_player.player_name.clone();
                 if let Some(player) = self.players.get_mut(player_index) {
                     if view_player_index != player.view_player_index {
-                        if player.skater.is_some() {
+                        if self.game.world.has_skater(player_index) {
                             self.add_directed_server_chat_message("You must be a spectator to change view", player_index);
                         } else {
                             player.view_player_index = view_player_index;
@@ -663,9 +663,7 @@ impl HQMServer {
                     player_index,
                     in_server: false,
                 };
-                if let Some(object_index) = player.skater {
-                    self.game.world.objects[object_index] = HQMGameObject::None;
-                }
+                self.game.world.remove_player(player_index);
 
                 if player.is_admin{
                     admin_check=true;
@@ -759,10 +757,7 @@ impl HQMServer {
 
     pub fn move_to_spectator(&mut self, player_index: usize) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
-            if let Some (i) = player.skater {
-                self.game.world.objects[i] = HQMGameObject::None;
-                player.skater = None;
-
+            if self.game.world.remove_player(player_index).is_some() {
                 let player_name = player.player_name.clone();
                 self.add_global_message(HQMMessage::PlayerUpdate {
                     player_name,
@@ -815,19 +810,20 @@ impl HQMServer {
 
     pub fn move_to_team(& mut self, player_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Rotation3<f32>) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
-            if let Some(skater) = player.skater {
-                self.game.world.objects[skater] = HQMGameObject::Player(HQMSkater::new(skater, team, pos, rot.matrix().clone_owned(), player.hand, player_index, player.mass));
+
+            if let Some(skater) = self.game.world.get_skater_object_mut(player_index) {
+                let object_index = skater.index;
+                *skater = HQMSkater::new(object_index, team, pos, rot.matrix().clone_owned(), player.hand, player_index, player.mass);
                 let player_name = player.player_name.clone();
                 self.add_global_message(HQMMessage::PlayerUpdate {
                     player_name,
-                    object: Some((skater, team)),
+                    object: Some((object_index, team)),
                     player_index,
                     in_server: true
                 }, true);
             } else {
                 if let Some(skater) = self.game.world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index,
                                                                            player.mass) {
-                    player.skater = Some(skater);
                     player.view_player_index = player_index;
                     let player_name = player.player_name.clone();
                     self.add_global_message(HQMMessage::PlayerUpdate {
@@ -888,12 +884,10 @@ impl HQMServer {
 
                 behaviour.before_tick(self);
 
-                for player in self.players.iter_mut() {
+                for (player_index, player) in self.players.iter_mut().enumerate() {
                     if let Some(player) = player {
-                        if let Some(skater) = player.skater {
-                            if let HQMGameObject::Player(skater) = & mut self.game.world.objects[skater] {
-                                skater.input = player.input.clone();
-                            }
+                        if let Some(skater) = self.game.world.get_skater_object_mut(player_index)  {
+                            skater.input = player.input.clone();
                         }
                     }
                 }
@@ -966,8 +960,6 @@ impl HQMServer {
         let mut messages = Vec::new();
         for (i, p) in self.players.iter_mut().enumerate() {
             if let Some(player) = p {
-                player.skater = None;
-
                 player.known_msgpos = 0;
                 player.known_packet = u32::MAX;
                 player.messages.clear();
@@ -1415,7 +1407,6 @@ pub struct HQMConnectedPlayer {
     pub(crate) player_name: String,
     pub(crate) addr: SocketAddr,
     client_version: u8,
-    pub(crate) skater: Option<usize>,
     game_id: u32,
     pub(crate) input: HQMPlayerInput,
     known_packet: u32,
@@ -1439,7 +1430,6 @@ impl HQMConnectedPlayer {
             player_name,
             addr,
             client_version: 0,
-            skater: None,
             game_id: u32::MAX,
             known_packet: u32::MAX,
             known_msgpos: 0,

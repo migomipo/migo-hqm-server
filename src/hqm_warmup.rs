@@ -26,13 +26,14 @@ impl HQMPermanentWarmup {
         let mut joining_blue = vec![];
         for (player_index, player) in server.players.iter_mut().enumerate() {
             if let Some(player) = player {
-                if player.skater.is_some() && player.input.spectate() {
+                let has_skater = server.game.world.has_skater(player_index);
+                if has_skater && player.input.spectate() {
                     player.team_switch_timer = 500;
                     spectating_players.push((player_index, player.player_name.clone()))
                 } else {
                     player.team_switch_timer = player.team_switch_timer.saturating_sub(1);
                 }
-                if player.skater.is_none() && player.team_switch_timer == 0 {
+                if !has_skater && player.team_switch_timer == 0 {
                     if player.input.join_red() {
                         joining_red.push((player_index, player.player_name.clone()));
                     } else if player.input.join_blue() {

@@ -101,8 +101,7 @@ impl HQMMatchBehaviour {
     fn do_faceoff(& mut self, server: & mut HQMServer){
         let positions = get_faceoff_positions(& server.players,
                                               & self.preferred_positions,
-                                              & server.game.world.objects,
-                                              & server.game.world.rink.allowed_positions);
+                                              & server.game.world);
 
         server.game.world.clear_pucks ();
 
@@ -364,13 +363,14 @@ impl HQMMatchBehaviour {
         let mut joining_blue = vec![];
         for (player_index, player) in server.players.iter_mut().enumerate() {
             if let Some(player) = player {
-                if player.skater.is_some() && player.input.spectate() {
+                let has_skater = server.game.world.has_skater(player_index);
+                if has_skater && player.input.spectate() {
                     player.team_switch_timer = 500;
                     spectating_players.push((player_index, player.player_name.clone()))
                 } else {
                     player.team_switch_timer = player.team_switch_timer.saturating_sub(1);
                 }
-                if player.skater.is_none() && player.team_switch_timer == 0 {
+                if !has_skater && player.team_switch_timer == 0 {
                     if player.input.join_red() {
                         joining_red.push((player_index, player.player_name.clone()));
                     } else if player.input.join_blue() {
@@ -473,21 +473,25 @@ impl HQMMatchBehaviour {
 
     fn cheat_mass (& mut self, server: & mut HQMServer, split: &[&str]) {
         if split.len() >= 3 {
-            let player = split[1].parse::<usize>().ok()
-                .and_then(|x| server.players.get_mut(x));
-            let mass = split[2].parse::<f32>();
-            if let Some(player) = player {
-                if let Ok(mass) = mass {
-                    player.mass = mass;
-                    if let Some(skater_obj_index) = player.skater {
-                        if let HQMGameObject::Player(skater) = & mut server.game.world.objects[skater_obj_index] {
+            let player_index = split[1].parse::<usize>().ok();
+            if let Some(player_index) = player_index {
+                let player = server.players.get_mut(player_index);
+                let mass = split[2].parse::<f32>();
+                if let Some(player) = player {
+                    if let Ok(mass) = mass {
+                        player.mass = mass;
+
+                        if let Some(skater) = server.game.world.get_skater_object_mut(player_index) {
                             for collision_ball in skater.collision_balls.iter_mut() {
                                 collision_ball.mass = mass;
                             }
                         }
+
                     }
                 }
             }
+
+
         }
     }
 
@@ -865,24 +869,20 @@ impl HQMMatchBehaviour {
 
 fn get_faceoff_positions (players: & HQMServerPlayerList,
                           preferred_positions: &HashMap<usize, String>,
-                          objects: & [HQMGameObject],
-                          allowed_positions: &[String]) -> HashMap<usize, (HQMTeam, String)> {
+                          world: & HQMGameWorld) -> HashMap<usize, (HQMTeam, String)> {
+    let allowed_positions = &world.rink.allowed_positions;
     let mut res = HashMap::new();
 
     let mut red_players= vec![];
     let mut blue_players = vec![];
     for (player_index, player) in players.iter().enumerate() {
-        if let Some(player) = player {
-            let team = player.skater.and_then(|i| match &objects[i] {
-                HQMGameObject::Player(skater) => { Some(skater.team)},
-                _ => None
-            });
+        if player.is_some() {
+            let team = world.get_skater_object(player_index).map(|x| x.team);
             if team == Some(HQMTeam::Red) {
                 red_players.push((player_index, preferred_positions.get(&player_index)));
             } else if team == Some(HQMTeam::Blue) {
                 blue_players.push((player_index, preferred_positions.get(&player_index)));
             }
-
         }
     }
 

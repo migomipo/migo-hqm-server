@@ -18,7 +18,52 @@ pub struct HQMGameWorld {
 }
 
 impl HQMGameWorld {
-    pub fn create_player_object (& mut self, team: HQMTeam, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand,
+    pub fn remove_player (& mut self, connected_player_index: usize) -> Option<usize> {
+        for (object_index, object) in self.objects.iter_mut().enumerate() {
+            if let HQMGameObject::Player(skater) = object {
+                if skater.connected_player_index == connected_player_index {
+                    *object = HQMGameObject::None;
+                    return Some(object_index);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_skater_object (& self, connected_player_index: usize) -> Option<& HQMSkater> {
+        for object in self.objects.iter() {
+            if let HQMGameObject::Player(skater) = object {
+                if skater.connected_player_index == connected_player_index {
+                    return Some(skater)
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_skater_object_mut (& mut self, connected_player_index: usize) -> Option<& mut HQMSkater> {
+        for object in self.objects.iter_mut() {
+            if let HQMGameObject::Player(skater) = object {
+                if skater.connected_player_index == connected_player_index {
+                    return Some(skater)
+                }
+            }
+        }
+        None
+    }
+
+    pub fn has_skater (& self, connected_player_index: usize) -> bool {
+        for object in self.objects.iter() {
+            if let HQMGameObject::Player(skater) = object {
+                if skater.connected_player_index == connected_player_index {
+                    return true
+                }
+            }
+        }
+        false
+    }
+
+    pub(crate) fn create_player_object (& mut self, team: HQMTeam, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand,
                                         connected_player_index: usize, mass: f32) -> Option<usize> {
         let object_slot = self.find_empty_player_slot();
         if let Some(i) = object_slot {
