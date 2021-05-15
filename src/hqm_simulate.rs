@@ -51,24 +51,24 @@ impl HQMGameWorld {
         let mut events = Vec::new();
         let mut players = Vec::new();
         let mut pucks = Vec::new();
-        for o in self.objects.iter_mut() {
+        for (i, o) in self.objects.iter_mut().enumerate() {
             match o {
-                HQMGameObject::Player(player) => players.push(player),
-                HQMGameObject::Puck(puck) => pucks.push(puck),
+                HQMGameObject::Player(player) => players.push((i, player)),
+                HQMGameObject::Puck(puck) => pucks.push((i, puck)),
                 _ => {}
             }
         }
 
         let mut collisions = vec![];
-        for (i, player) in players.iter_mut().enumerate() {
+        for (i, (_, player)) in players.iter_mut().enumerate() {
             update_player(i, player, self.physics_config.gravity, self.physics_config.limit_jump_speed, & self.rink, & mut collisions);
         }
 
         for i in 0..players.len() {
             for j in i+1..players.len() {
                 let (a,b) = players.split_at_mut(j);
-                let p1 = &mut a[i];
-                let p2 = &mut b[0];
+                let (_, p1) = &mut a[i];
+                let (_, p2) = &mut b[0];
                 for (ib, p1_collision_ball) in p1.collision_balls.iter().enumerate() {
                     for (jb, p2_collision_ball) in p2.collision_balls.iter().enumerate() {
                         let pos_diff = &p1_collision_ball.pos - &p2_collision_ball.pos;
@@ -96,15 +96,15 @@ impl HQMGameWorld {
             }
         }
 
-        let pucks_old_pos: Vec<Point3<f32>> = pucks.iter().map(|x| x.body.pos.clone()).collect();
+        let pucks_old_pos: Vec<Point3<f32>> = pucks.iter().map(|x| x.1.body.pos.clone()).collect();
 
-        for puck in pucks.iter_mut() {
+        for (_, puck) in pucks.iter_mut() {
             puck.body.linear_velocity[1] -= self.physics_config.gravity;
         }
 
         update_sticks_and_pucks (& mut players, & mut pucks, & self.rink, & mut events);
 
-        for (puck, old_puck_pos) in pucks.iter_mut().zip(pucks_old_pos.iter()) {
+        for ((puck_index, puck), old_puck_pos) in pucks.iter_mut().zip(pucks_old_pos.iter()) {
             if puck.body.linear_velocity.norm () > 1.0/65536.0 {
                 let scale = puck.body.linear_velocity.norm ().powi(2) * 0.125 * 0.125;
                 let scaled = puck.body.linear_velocity.normalize().scale(scale);
@@ -114,8 +114,8 @@ impl HQMGameWorld {
                 rotate_matrix_around_axis(& mut puck.body.rot, &puck.body.angular_velocity.normalize(), puck.body.angular_velocity.norm())
             }
 
-            puck_detection(puck, puck.index, &old_puck_pos, HQMTeam::Red, & self.rink.red_lines_and_net, & mut events);
-            puck_detection(puck, puck.index, &old_puck_pos, HQMTeam::Blue, & self.rink.blue_lines_and_net, & mut events);
+            puck_detection(puck, *puck_index, &old_puck_pos, HQMTeam::Red, & self.rink.red_lines_and_net, & mut events);
+            puck_detection(puck, *puck_index, &old_puck_pos, HQMTeam::Blue, & self.rink.blue_lines_and_net, & mut events);
         }
 
         apply_collisions (& mut players, & collisions);
@@ -123,15 +123,15 @@ impl HQMGameWorld {
     }
 }
 
-fn update_sticks_and_pucks (players: & mut Vec<& mut HQMSkater>,
-                           pucks: & mut Vec<& mut HQMPuck>,
+fn update_sticks_and_pucks (players: & mut [(usize, & mut HQMSkater)],
+                           pucks: & mut [(usize, & mut HQMPuck)],
                            rink: & HQMRink, events: & mut Vec<HQMSimulationEvent>) {
     for i in 0..10 {
 
-        for player in players.iter_mut() {
+        for (_, player) in players.iter_mut() {
             player.stick_pos += player.stick_velocity.scale(0.1);
         }
-        for puck in pucks.iter_mut() {
+        for (puck_index, puck) in pucks.iter_mut() {
             puck.body.pos += puck.body.linear_velocity.scale(0.1);
 
             let puck_linear_velocity_before = puck.body.linear_velocity.clone_owned();
@@ -140,14 +140,14 @@ fn update_sticks_and_pucks (players: & mut Vec<& mut HQMSkater>,
             if i == 0 {
                 do_puck_rink_forces(puck, & puck_vertices, rink, &puck_linear_velocity_before, &puck_angular_velocity_before);
             }
-            for player in players.iter_mut() {
+            for (player_index, player) in players.iter_mut() {
                 let old_stick_velocity = player.stick_velocity.clone_owned();
                 if (&puck.body.pos - &player.stick_pos).norm() < 1.0 {
                     let has_touched = do_puck_stick_forces(puck, player, & puck_vertices, &puck_linear_velocity_before, &puck_angular_velocity_before, &old_stick_velocity);
                     if has_touched {
                         events.push(HQMSimulationEvent::PuckTouch {
-                            puck: puck.index,
-                            player: player.index,
+                            puck: *puck_index,
+                            player: *player_index,
                         })
                     }
                 }
@@ -161,13 +161,13 @@ fn update_sticks_and_pucks (players: & mut Vec<& mut HQMSkater>,
             if red_net_collision {
                 events.push(HQMSimulationEvent::PuckTouchedNet {
                     team: HQMTeam::Red,
-                    puck: puck.index
+                    puck: *puck_index
                 })
             }
             if blue_net_collision {
                 events.push(HQMSimulationEvent::PuckTouchedNet {
                     team: HQMTeam::Blue,
-                    puck: puck.index
+                    puck: *puck_index
                 })
             }
         }
@@ -406,10 +406,10 @@ fn get_projection (a: & Vector3<f32>, b: & Vector3<f32>) -> Vector3<f32> {
 }
 
 
-fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: &[HQMCollision]) {
+fn apply_collisions (players: & mut [(usize, & mut HQMSkater)], collisions: &[HQMCollision]) {
     for _ in 0..16 {
         let original_ball_velocities = Vec::from_iter(players.iter().map(|y| {
-            let m = y.collision_balls.iter().map(|x| x.velocity.clone_owned());
+            let m = y.1.collision_balls.iter().map(|x| x.velocity.clone_owned());
             Vec::from_iter(m)
         }));
 
@@ -422,7 +422,7 @@ fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: &[HQMColli
                     let mut new = normal.scale(overlap * 0.03125) - original_velocity.scale(0.25);
                     if new.dot(&normal) > 0.0 {
                         limit_rejection(& mut new, &normal, 0.01);
-                        let ball = & mut players[i].collision_balls[ib];
+                        let ball = & mut players[i].1.collision_balls[ib];
                         ball.velocity += new;
                     }
                 }
@@ -435,12 +435,12 @@ fn apply_collisions (players: & mut Vec<& mut HQMSkater>, collisions: &[HQMColli
                     let mut new = normal.scale(overlap * 0.125) + (original_velocity2 - original_velocity1).scale(0.25);
                     if new.dot(&normal) > 0.0 {
                         limit_rejection(& mut new, &normal, 0.01);
-                        let mass1 = players[i].collision_balls[ib].mass;
-                        let mass2 = players[j].collision_balls[jb].mass;
+                        let mass1 = players[i].1.collision_balls[ib].mass;
+                        let mass2 = players[j].1.collision_balls[jb].mass;
                         let mass_sum = mass1 + mass2;
 
-                        players[i].collision_balls[ib].velocity += new.scale(mass2 / mass_sum);
-                        players[j].collision_balls[jb].velocity -= new.scale(mass1 / mass_sum);
+                        players[i].1.collision_balls[ib].velocity += new.scale(mass2 / mass_sum);
+                        players[j].1.collision_balls[jb].velocity -= new.scale(mass1 / mass_sum);
                     }
                 }
             }

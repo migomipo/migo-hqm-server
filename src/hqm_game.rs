@@ -41,11 +41,34 @@ impl HQMGameWorld {
         None
     }
 
+    #[allow(dead_code)]
+    pub fn get_skater_object_with_index (& self, connected_player_index: usize) -> Option<(usize, & HQMSkater)> {
+        for (object_index, object) in self.objects.iter().enumerate() {
+            if let HQMGameObject::Player(skater) = object {
+                if skater.connected_player_index == connected_player_index {
+                    return Some((object_index, skater))
+                }
+            }
+        }
+        None
+    }
+
     pub fn get_skater_object_mut (& mut self, connected_player_index: usize) -> Option<& mut HQMSkater> {
         for object in self.objects.iter_mut() {
             if let HQMGameObject::Player(skater) = object {
                 if skater.connected_player_index == connected_player_index {
                     return Some(skater)
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_skater_object_mut_with_index (& mut self, connected_player_index: usize) -> Option<(usize, & mut HQMSkater)> {
+        for (object_index, object) in self.objects.iter_mut().enumerate() {
+            if let HQMGameObject::Player(skater) = object {
+                if skater.connected_player_index == connected_player_index {
+                    return Some((object_index, skater))
                 }
             }
         }
@@ -67,7 +90,7 @@ impl HQMGameWorld {
                                         connected_player_index: usize, mass: f32) -> Option<usize> {
         let object_slot = self.find_empty_player_slot();
         if let Some(i) = object_slot {
-            self.objects[i] = HQMGameObject::Player(HQMSkater::new(i, team, start, rot, hand, connected_player_index, mass));
+            self.objects[i] = HQMGameObject::Player(HQMSkater::new(team, start, rot, hand, connected_player_index, mass));
         }
         return object_slot;
     }
@@ -75,7 +98,7 @@ impl HQMGameWorld {
     pub fn create_puck_object (& mut self, start: Point3<f32>, rot: Matrix3<f32>) -> Option<usize> {
         let object_slot = self.find_empty_puck_slot();
         if let Some(i) = object_slot {
-            self.objects[i] = HQMGameObject::Puck(HQMPuck::new(i, start, rot));
+            self.objects[i] = HQMGameObject::Puck(HQMPuck::new(start, rot));
         }
         return object_slot;
     }
@@ -581,7 +604,6 @@ pub struct HQMBody {
 
 #[derive(Debug, Clone)]
 pub struct HQMSkater {
-    pub(crate) index: usize,
     pub(crate) connected_player_index: usize,
     pub(crate) body: HQMBody,
     pub(crate) team: HQMTeam,
@@ -612,11 +634,10 @@ impl HQMSkater {
         collision_balls
     }
 
-    pub(crate) fn new(object_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize, mass: f32) -> Self {
+    pub(crate) fn new(team: HQMTeam, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize, mass: f32) -> Self {
         let linear_velocity = Vector3::new (0.0, 0.0, 0.0);
         let collision_balls = HQMSkater::get_collision_balls(&pos, &rot, &linear_velocity, mass);
         HQMSkater {
-            index:object_index,
             connected_player_index,
             body: HQMBody {
                 pos: pos.clone(),
@@ -735,7 +756,6 @@ pub struct HQMPuckTouch {
 
 #[derive(Debug, Clone)]
 pub struct HQMPuck {
-    pub(crate) index: usize,
     pub body: HQMBody,
     pub radius: f32,
     pub height: f32,
@@ -743,9 +763,8 @@ pub struct HQMPuck {
 }
 
 impl HQMPuck {
-    fn new(object_index:usize, pos: Point3<f32>, rot: Matrix3<f32>) -> Self {
+    fn new(pos: Point3<f32>, rot: Matrix3<f32>) -> Self {
         HQMPuck {
-            index:object_index,
             body: HQMBody {
                 pos,
                 linear_velocity: Vector3::new(0.0, 0.0, 0.0),

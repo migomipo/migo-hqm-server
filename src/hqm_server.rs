@@ -811,9 +811,8 @@ impl HQMServer {
     pub fn move_to_team(& mut self, player_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Rotation3<f32>) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
 
-            if let Some(skater) = self.game.world.get_skater_object_mut(player_index) {
-                let object_index = skater.index;
-                *skater = HQMSkater::new(object_index, team, pos, rot.matrix().clone_owned(), player.hand, player_index, player.mass);
+            if let Some((object_index, skater)) = self.game.world.get_skater_object_mut_with_index(player_index) {
+                *skater = HQMSkater::new(team, pos, rot.matrix().clone_owned(), player.hand, player_index, player.mass);
                 let player_name = player.player_name.clone();
                 self.add_global_message(HQMMessage::PlayerUpdate {
                     player_name,
