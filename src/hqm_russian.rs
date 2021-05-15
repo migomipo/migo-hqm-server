@@ -323,7 +323,7 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                             server.add_goal_message(*team, None, None);
                             self.check_ending(& mut server.game);
                         }
-                        HQMSimulationEvent::PuckTouch { puck, player } => {
+                        HQMSimulationEvent::PuckTouch { puck, player, .. } => {
                             if let HQMGameObject::Player(skater) = & server.game.world.objects[*player] {
                                 let this_connected_player_index = skater.connected_player_index;
                                 let touching_team = skater.team;

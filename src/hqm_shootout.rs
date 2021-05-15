@@ -279,7 +279,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                         }
                     }
                 }
-                HQMSimulationEvent::PuckTouch { player, puck } => {
+                HQMSimulationEvent::PuckTouch { player, puck, .. } => {
                     let (player, puck) = (*player, *puck);
                     if let HQMGameObject::Player(skater) = & server.game.world.objects[player] {
                         let this_connected_player_index = skater.connected_player_index;

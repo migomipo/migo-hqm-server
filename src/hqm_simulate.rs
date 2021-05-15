@@ -23,6 +23,7 @@ pub enum HQMSimulationEvent {
         puck: usize
     },
     PuckTouch {
+        team: HQMTeam,
         player: usize,
         puck: usize
     },
@@ -146,6 +147,7 @@ fn update_sticks_and_pucks (players: & mut [(usize, & mut HQMSkater)],
                     let has_touched = do_puck_stick_forces(puck, player, & puck_vertices, &puck_linear_velocity_before, &puck_angular_velocity_before, &old_stick_velocity);
                     if has_touched {
                         events.push(HQMSimulationEvent::PuckTouch {
+                            team: player.team,
                             puck: *puck_index,
                             player: *player_index,
                         })

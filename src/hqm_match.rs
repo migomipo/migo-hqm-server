@@ -212,7 +212,7 @@ impl HQMMatchBehaviour {
                     }
                 },
                 HQMSimulationEvent::PuckTouch {
-                    player, puck
+                    player, puck, ..
                 } => {
                     let (player, puck) = (*player, *puck);
                     // Get connected player index from skater
