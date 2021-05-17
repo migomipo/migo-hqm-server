@@ -26,10 +26,31 @@ pub struct HQMSavedTick {
     time: Instant,
 }
 
-enum HQMServerReceivedData {
-    GameClientPacket {
-        addr: SocketAddr,
-        data: Bytes,
+struct HQMServerReceivedData {
+    addr: SocketAddr,
+    data: Bytes,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum HQMClientVersion {
+    Vanilla, Ping, PingRules
+}
+
+impl HQMClientVersion {
+    fn has_ping(self) -> bool {
+        match self {
+            HQMClientVersion::Vanilla => false,
+            HQMClientVersion::Ping => true,
+            HQMClientVersion::PingRules => true
+        }
+    }
+
+    fn has_rules(self) -> bool {
+        match self {
+            HQMClientVersion::Vanilla => false,
+            HQMClientVersion::Ping => false,
+            HQMClientVersion::PingRules => true
+        }
     }
 }
 
@@ -102,9 +123,14 @@ impl HQMServer {
             2 => {
                 self.player_join(addr, &mut parser, behaviour);
             },
-            // if 8 or 0x10, client is modded, probly want to send it to the player_update function to store it in the client/player struct, to use when responding to clients
-            4 | 8 | 0x10 => {
-                self.player_update(addr, &mut parser, command, behaviour);
+            4 => {
+                self.player_update(addr, &mut parser, HQMClientVersion::Vanilla, behaviour);
+            },
+            8 => {
+                self.player_update(addr, &mut parser, HQMClientVersion::Ping, behaviour);
+            },
+            0x10 => {
+                self.player_update(addr, &mut parser, HQMClientVersion::PingRules, behaviour);
             },
             7 => {
                 self.player_exit(addr, behaviour);
@@ -151,7 +177,7 @@ impl HQMServer {
         player_count
     }
 
-    fn player_update<B: HQMServerBehaviour>(&mut self, addr: SocketAddr, parser: &mut HQMMessageReader, command: u8, behaviour: & mut B) {
+    fn player_update<B: HQMServerBehaviour>(&mut self, addr: SocketAddr, parser: &mut HQMMessageReader, client_version: HQMClientVersion, behaviour: & mut B) {
         let current_slot = self.find_player_slot(addr);
         let (player_index, player) = match current_slot {
             Some(x) => {
@@ -161,21 +187,6 @@ impl HQMServer {
                 return;
             }
         };
-
-        // Set client version based on the command used to trigger player_update
-        // Huge thank you to Baba for his help with this!
-        match command {
-            4 => {
-                player.client_version = 0; // Cryptic
-            },
-            8 => {
-                player.client_version = 1; // Baba - Ping
-            },
-            0x10 => {
-                player.client_version = 2; // Baba - Ping + Rules
-            },
-            _ => {}
-        }
 
         let current_game_id = parser.read_u32_aligned();
 
@@ -199,40 +210,59 @@ impl HQMServer {
             keys: input_keys,
         };
 
-        // if modded client get deltatime
-        if player.client_version > 0 {
-            let delta = parser.read_u32_aligned();
-            player.deltatime = delta;
-        }
 
-        let packet = parser.read_u32_aligned();
+        let deltatime = if client_version.has_ping() {
+            Some(parser.read_u32_aligned())
+        } else {
+            None
+        };
 
-        if player.game_id == current_game_id && player.known_packet < packet {
-            if let Some(diff) = self.game.packet.checked_sub(packet) {
-                let diff = diff as usize;
-                let t1 = Instant::now();
-                if let Some (t2) = self.game.saved_ticks.get(diff).map(|x| x.time) {
-                    if let Some(duration) = t1.checked_duration_since(t2) {
-                        player.last_ping.truncate(100 - 1);
-                        player.last_ping.push_front(duration.as_secs_f32());
-                    }
-                }
+        let new_known_packet = parser.read_u32_aligned();
+        let known_msgpos = parser.read_u16_aligned() as usize;
+
+        let time_received = Instant::now();
+
+        let chat = {
+            let has_chat_msg = parser.read_bits(1) == 1;
+            if has_chat_msg {
+                let rep = parser.read_bits(3) as u8;
+                let byte_num = parser.read_bits(8) as usize;
+                let message = parser.read_bytes_aligned(byte_num);
+                Some ((rep, message))
+            } else {
+                None
             }
+        };
+
+        let duration_since_packet = if player.game_id == current_game_id && player.known_packet < new_known_packet {
+            let ticks = &self.game.saved_ticks;
+            self.game.packet.checked_sub(new_known_packet)
+                .and_then(|diff| ticks.get(diff as usize))
+                .map(|x| x.time)
+                .and_then(|last_time_received| time_received.checked_duration_since(last_time_received))
+        } else {
+            None
+        };
+
+        if let Some(duration_since_packet) = duration_since_packet {
+            player.last_ping.truncate(100 - 1);
+            player.last_ping.push_front(duration_since_packet.as_secs_f32());
         }
 
         player.inactivity = 0;
-        player.known_packet = packet;
+        player.client_version = client_version;
+        player.known_packet = new_known_packet;
         player.input = input;
         player.game_id = current_game_id;
-        player.known_msgpos = parser.read_u16_aligned() as usize;
+        player.known_msgpos = known_msgpos;
 
-        let has_chat_msg = parser.read_bits(1) == 1;
-        if has_chat_msg {
-            let rep = parser.read_bits(3) as u8;
+        if let Some(deltatime) = deltatime {
+            player.deltatime = deltatime;
+        }
+
+        if let Some ((rep, message)) = chat {
             if player.chat_rep != Some(rep) {
                 player.chat_rep = Some(rep);
-                let byte_num = parser.read_bits(8) as usize;
-                let message = parser.read_bytes_aligned(byte_num);
                 self.process_message(message, player_index, behaviour);
             }
 
@@ -1045,7 +1075,7 @@ pub async fn run_server<B: HQMServerBehaviour>(port: u16, public: bool,
                 match socket.recv_from(&mut buf).await {
                     Ok((size, addr)) => {
                         buf.truncate(size);
-                        let _ = msg_sender.send(HQMServerReceivedData::GameClientPacket {
+                        let _ = msg_sender.send(HQMServerReceivedData {
                             addr,
                             data: buf.freeze()
                         }).await;
@@ -1063,7 +1093,7 @@ pub async fn run_server<B: HQMServerBehaviour>(port: u16, public: bool,
                     server.tick(& socket, & mut write_buf, & mut behaviour).await;
                 }
                 x = msg_receiver.recv() => {
-                    if let Some (HQMServerReceivedData::GameClientPacket {
+                    if let Some (HQMServerReceivedData {
                         addr,
                         data: msg
                     }) = x {
@@ -1302,12 +1332,12 @@ async fn send_updates(game_id: u32, game: &HQMGame, players: &[Option<HQMConnect
                 writer.write_bits(8, player.view_player_index as u32);
 
                 // if using a non-cryptic version, send ping
-                if player.client_version > 0 {
+                if player.client_version.has_ping() {
                     writer.write_u32_aligned(player.deltatime);
                 }
 
                 // if baba's second version or above, send rules
-                if player.client_version > 1 {
+                if player.client_version.has_rules() {
                     let num = match rules_state {
                         HQMRulesState::Regular { offside_warning, icing_warning } => {
                             let mut res = 0;
@@ -1405,7 +1435,7 @@ pub(crate) enum HQMMuteStatus {
 pub struct HQMConnectedPlayer {
     pub(crate) player_name: String,
     pub(crate) addr: SocketAddr,
-    client_version: u8,
+    client_version: HQMClientVersion,
     game_id: u32,
     pub(crate) input: HQMPlayerInput,
     known_packet: u32,
@@ -1428,7 +1458,7 @@ impl HQMConnectedPlayer {
         HQMConnectedPlayer {
             player_name,
             addr,
-            client_version: 0,
+            client_version: HQMClientVersion::Vanilla,
             game_id: u32::MAX,
             known_packet: u32::MAX,
             known_msgpos: 0,
