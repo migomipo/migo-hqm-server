@@ -451,7 +451,7 @@ impl HQMServer {
                     } else if matches.len() > 1 {
                         self.add_directed_server_chat_message("Multiple matches found, use /view X", player_index);
                         for (found_player_index, found_player_name) in matches.into_iter().take(5) {
-                            let str = format!("{}={}", found_player_index, found_player_name);
+                            let str = format!("{}: {}", found_player_index, found_player_name);
                             self.add_directed_server_chat_message(&str, player_index);
                         }
                     } else {
