@@ -1,6 +1,6 @@
-use crate::hqm_game::{HQMTeam, HQMGame, HQMGameObject, HQMPhysicsConfiguration};
-use crate::hqm_server::{HQMServerBehaviour, HQMServer, HQMSpawnPoint};
-use crate::hqm_simulate::HQMSimulationEvent;
+use migo_hqm_server::hqm_game::{HQMTeam, HQMGame, HQMGameObject, HQMPhysicsConfiguration};
+use migo_hqm_server::hqm_server::{HQMServerBehaviour, HQMServer, HQMSpawnPoint};
+use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Matrix3, Vector3, Rotation3, Point3};
 use std::f32::consts::{PI};
 

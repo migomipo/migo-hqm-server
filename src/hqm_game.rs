@@ -167,7 +167,7 @@ pub struct HQMPhysicsConfiguration {
 }
 
 impl HQMGame {
-    pub(crate) fn new (puck_slots: usize, config: HQMPhysicsConfiguration) -> Self {
+    pub fn new (puck_slots: usize, config: HQMPhysicsConfiguration) -> Self {
         let mut object_vec = Vec::with_capacity(32);
         for _ in 0..32 {
             object_vec.push(HQMGameObject::None);
@@ -207,10 +207,10 @@ impl HQMGame {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMRinkLine {
-    pub(crate) point: Point3<f32>,
-    pub(crate) width: f32,
-    pub(crate) normal: Vector3<f32>,
+pub struct HQMRinkLine {
+    pub point: Point3<f32>,
+    pub width: f32,
+    pub normal: Vector3<f32>,
 }
 
 impl HQMRinkLine {
@@ -227,7 +227,7 @@ impl HQMRinkLine {
         dot + radius < edge
     }
 
-    pub(crate) fn point_past_middle_of_line(&self, pos: &Point3<f32>) -> bool {
+    pub fn point_past_middle_of_line(&self, pos: &Point3<f32>) -> bool {
         let dot = (pos - &self.point).dot (&self.normal);
         dot < 0.0
     }
@@ -236,7 +236,7 @@ impl HQMRinkLine {
 
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMRinkNet {
+pub struct HQMRinkNet {
     pub(crate) posts: Vec<(Point3<f32>, Point3<f32>, f32)>,
     pub(crate) surfaces: Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)>,
     pub(crate) left_post: Point3<f32>,
@@ -308,11 +308,11 @@ impl HQMRinkNet {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LinesAndNet {
-    pub(crate) net: HQMRinkNet,
-    pub(crate) mid_line: HQMRinkLine,
-    pub(crate) offensive_line: HQMRinkLine,
-    pub(crate) defensive_line: HQMRinkLine
+pub struct LinesAndNet {
+    pub net: HQMRinkNet,
+    pub mid_line: HQMRinkLine,
+    pub offensive_line: HQMRinkLine,
+    pub defensive_line: HQMRinkLine
 }
 
 #[derive(Debug, Clone)]
@@ -336,18 +336,18 @@ pub enum HQMRinkFaceoffSpot {
 
 #[derive(Debug, Clone)]
 pub struct HQMRink {
-    pub(crate) planes: Vec<(Point3<f32>, Vector3<f32>)>,
-    pub(crate) corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
-    pub(crate) red_lines_and_net: LinesAndNet,
-    pub(crate) blue_lines_and_net: LinesAndNet,
-    pub(crate) width:f32,
-    pub(crate) length:f32,
-    pub(crate) allowed_positions: Vec<String>,
-    pub(crate) blue_zone_faceoff_spots: [HQMFaceoffSpot; 2],
-    pub(crate) blue_neutral_faceoff_spots: [HQMFaceoffSpot; 2],
-    pub(crate) center_faceoff_spot: HQMFaceoffSpot,
-    pub(crate) red_neutral_faceoff_spots: [HQMFaceoffSpot; 2],
-    pub(crate) red_zone_faceoff_spots: [HQMFaceoffSpot; 2],
+    pub planes: Vec<(Point3<f32>, Vector3<f32>)>,
+    pub corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
+    pub red_lines_and_net: LinesAndNet,
+    pub blue_lines_and_net: LinesAndNet,
+    pub width:f32,
+    pub length:f32,
+    pub allowed_positions: Vec<String>,
+    pub blue_zone_faceoff_spots: [HQMFaceoffSpot; 2],
+    pub blue_neutral_faceoff_spots: [HQMFaceoffSpot; 2],
+    pub center_faceoff_spot: HQMFaceoffSpot,
+    pub red_neutral_faceoff_spots: [HQMFaceoffSpot; 2],
+    pub red_zone_faceoff_spots: [HQMFaceoffSpot; 2],
 }
 
 impl HQMRink {
@@ -595,30 +595,30 @@ impl HQMRink {
 
 #[derive(Debug, Clone)]
 pub struct HQMBody {
-    pub(crate) pos: Point3<f32>,                // Measured in meters
-    pub(crate) linear_velocity: Vector3<f32>,   // Measured in meters per hundred of a second
-    pub(crate) rot: Matrix3<f32>,               // Rotation matrix
-    pub(crate) angular_velocity: Vector3<f32>,  // Measured in radians per hundred of a second
+    pub pos: Point3<f32>,                // Measured in meters
+    pub linear_velocity: Vector3<f32>,   // Measured in meters per hundred of a second
+    pub rot: Matrix3<f32>,               // Rotation matrix
+    pub angular_velocity: Vector3<f32>,  // Measured in radians per hundred of a second
     pub(crate) rot_mul: Vector3<f32>
 }
 
 #[derive(Debug, Clone)]
 pub struct HQMSkater {
-    pub(crate) connected_player_index: usize,
-    pub(crate) body: HQMBody,
-    pub(crate) team: HQMTeam,
-    pub(crate) stick_pos: Point3<f32>,        // Measured in meters
-    pub(crate) stick_velocity: Vector3<f32>,  // Measured in meters per hundred of a second
-    pub(crate) stick_rot: Matrix3<f32>,       // Rotation matrix
-    pub(crate) head_rot: f32,                 // Radians
-    pub(crate) body_rot: f32,                 // Radians
-    pub(crate) height: f32,
-    pub(crate) input: HQMPlayerInput,
-    pub(crate) jumped_last_frame: bool,
-    pub(crate) stick_placement: Vector2<f32>,      // Azimuth and inclination in radians
-    pub(crate) stick_placement_delta: Vector2<f32>, // Change in azimuth and inclination per hundred of a second
-    pub(crate) collision_balls: Vec<HQMSkaterCollisionBall>,
-    pub(crate) hand: HQMSkaterHand,
+    pub connected_player_index: usize,
+    pub body: HQMBody,
+    pub team: HQMTeam,
+    pub stick_pos: Point3<f32>,        // Measured in meters
+    pub stick_velocity: Vector3<f32>,  // Measured in meters per hundred of a second
+    pub stick_rot: Matrix3<f32>,       // Rotation matrix
+    pub head_rot: f32,                 // Radians
+    pub body_rot: f32,                 // Radians
+    pub height: f32,
+    pub input: HQMPlayerInput,
+    pub jumped_last_frame: bool,
+    pub stick_placement: Vector2<f32>,      // Azimuth and inclination in radians
+    pub stick_placement_delta: Vector2<f32>, // Change in azimuth and inclination per hundred of a second
+    pub collision_balls: Vec<HQMSkaterCollisionBall>,
+    pub hand: HQMSkaterHand,
 }
 
 impl HQMSkater {
@@ -683,12 +683,12 @@ impl HQMSkater {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMSkaterCollisionBall {
-    pub(crate) offset: Vector3<f32>,
-    pub(crate) pos: Point3<f32>,
-    pub(crate) velocity: Vector3<f32>,
-    pub(crate) radius: f32,
-    pub(crate) mass: f32
+pub struct HQMSkaterCollisionBall {
+    pub offset: Vector3<f32>,
+    pub pos: Point3<f32>,
+    pub velocity: Vector3<f32>,
+    pub radius: f32,
+    pub mass: f32
 
 }
 
@@ -706,15 +706,15 @@ impl HQMSkaterCollisionBall {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMPlayerInput {
-    pub(crate) stick_angle: f32,
-    pub(crate) turn: f32,
-    pub(crate) unknown: f32,
-    pub(crate) fwbw: f32,
-    pub(crate) stick: Vector2<f32>,
-    pub(crate) head_rot: f32,
-    pub(crate) body_rot: f32,
-    pub(crate) keys: u32,
+pub struct HQMPlayerInput {
+    pub stick_angle: f32,
+    pub turn: f32,
+    pub unknown: f32,
+    pub fwbw: f32,
+    pub stick: Vector2<f32>,
+    pub head_rot: f32,
+    pub body_rot: f32,
+    pub keys: u32,
 }
 
 impl Default for HQMPlayerInput {
@@ -747,9 +747,9 @@ pub enum HQMSkaterHand {
 }
 #[derive(Debug, Clone)]
 pub struct HQMPuckTouch {
-    pub(crate) player_index: usize,
-    pub(crate) team: HQMTeam,
-    pub(crate) puck_pos: Point3<f32>,
+    pub player_index: usize,
+    pub team: HQMTeam,
+    pub puck_pos: Point3<f32>,
     pub(crate) time: u32,
     pub(crate) is_first_touch: bool
 }
@@ -759,7 +759,7 @@ pub struct HQMPuck {
     pub body: HQMBody,
     pub radius: f32,
     pub height: f32,
-    pub(crate) touches: VecDeque<HQMPuckTouch>,
+    pub touches: VecDeque<HQMPuckTouch>,
 }
 
 impl HQMPuck {
@@ -802,7 +802,7 @@ impl HQMPuck {
         res
     }
 
-    pub(crate) fn add_touch(& mut self, player_index: usize, team: HQMTeam, time: u32) {
+    pub fn add_touch(& mut self, player_index: usize, team: HQMTeam, time: u32) {
         let puck_pos = self.body.pos.clone();
         let most_recent_touch = self.touches.front_mut();
 

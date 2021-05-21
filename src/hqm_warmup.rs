@@ -1,6 +1,6 @@
-use crate::hqm_server::{HQMServerBehaviour, HQMServer, HQMSpawnPoint};
-use crate::hqm_simulate::HQMSimulationEvent;
-use crate::hqm_game::{HQMPhysicsConfiguration, HQMTeam, HQMGame};
+use migo_hqm_server::hqm_server::{HQMServerBehaviour, HQMServer, HQMSpawnPoint};
+use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
+use migo_hqm_server::hqm_game::{HQMPhysicsConfiguration, HQMTeam, HQMGame};
 use nalgebra::{Point3, Matrix3};
 
 use tracing::info;

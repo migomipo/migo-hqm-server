@@ -310,7 +310,7 @@ impl HQMServer {
     }
 
 
-    pub(crate) fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
+    pub fn set_hand (& mut self, hand: HQMSkaterHand, player_index: usize) {
         if let Some(player) = self.players.get_mut(player_index) {
             player.hand = hand;
 
@@ -950,7 +950,7 @@ impl HQMServer {
 
     }
 
-    pub(crate) fn new_game(&mut self, new_game: HQMGame) {
+    pub fn new_game(&mut self, new_game: HQMGame) {
         let game_id = self.game_id;
         let old_game = std::mem::replace(& mut self.game, new_game);
         self.game_id += 1;
@@ -1433,21 +1433,21 @@ pub(crate) enum HQMMuteStatus {
 }
 
 pub struct HQMConnectedPlayer {
-    pub(crate) player_name: String,
+    pub player_name: String,
     pub(crate) addr: SocketAddr,
     client_version: HQMClientVersion,
     game_id: u32,
-    pub(crate) input: HQMPlayerInput,
+    pub input: HQMPlayerInput,
     known_packet: u32,
     known_msgpos: usize,
     chat_rep: Option<u8>,
     messages: Vec<Rc<HQMMessage>>,
     pub(crate) inactivity: u32,
-    pub(crate) is_admin: bool,
+    pub is_admin: bool,
     pub(crate) is_muted: HQMMuteStatus,
-    pub(crate) team_switch_timer: u32,
+    pub team_switch_timer: u32,
     pub(crate) hand: HQMSkaterHand,
-    pub(crate) mass: f32,
+    pub mass: f32,
     deltatime: u32,
     last_ping: VecDeque<f32>,
     pub(crate) view_player_index: usize

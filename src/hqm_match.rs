@@ -1,9 +1,9 @@
 use nalgebra::{Matrix3, Point3, Vector3};
 use tracing::info;
 
-use crate::hqm_game::{HQMGame, HQMGameObject, HQMGameWorld, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam, HQMRinkFaceoffSpot, HQMRuleIndication};
-use crate::hqm_server::{HQMServer, HQMServerBehaviour, HQMSpawnPoint, HQMServerPlayerList};
-use crate::hqm_simulate::HQMSimulationEvent;
+use migo_hqm_server::hqm_game::{HQMGame, HQMGameObject, HQMGameWorld, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam, HQMRinkFaceoffSpot, HQMRuleIndication};
+use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMSpawnPoint, HQMServerPlayerList};
+use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::HashMap;
 
 pub struct HQMMatchConfiguration {

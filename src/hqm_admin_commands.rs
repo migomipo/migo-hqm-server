@@ -4,7 +4,7 @@ use tracing::info;
 use std::net::SocketAddr;
 
 impl HQMServer {
-    pub(crate) fn admin_deny_message (& mut self, player_index: usize) {
+    pub fn admin_deny_message (& mut self, player_index: usize) {
         self.add_directed_server_chat_message("Please log in before using that command", player_index);
     }
 
@@ -341,7 +341,7 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn set_replay (& mut self, player_index: usize, rule:&str) {
+    pub fn set_replay (& mut self, player_index: usize, rule:&str) {
         if let Some(player) = self.players.get(player_index) {
             if player.is_admin{
                 match rule {

@@ -1,11 +1,11 @@
 use nalgebra::{Matrix3, Point3, Rotation3};
 use tracing::info;
 
-use crate::hqm_game::{HQMGame, HQMGameObject, HQMPhysicsConfiguration, HQMTeam};
-use crate::hqm_server::{HQMServer, HQMServerBehaviour};
-use crate::hqm_simulate::HQMSimulationEvent;
+use migo_hqm_server::hqm_game::{HQMGame, HQMGameObject, HQMPhysicsConfiguration, HQMTeam};
+use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour};
+use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::f32::consts::FRAC_PI_2;
-use crate::hqm_simulate;
+use migo_hqm_server::hqm_simulate;
 
 enum HQMRussianStatus {
     Pause,
