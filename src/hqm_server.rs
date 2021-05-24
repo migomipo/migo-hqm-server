@@ -15,7 +15,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
 use tracing::info;
 
-use crate::hqm_game::{HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam, HQMRuleIndication};
+use crate::hqm_game::{HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam, HQMRuleIndication, HQMSkaterObjectRefMut};
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
 use crate::hqm_simulate::HQMSimulationEvent;
 
@@ -314,7 +314,9 @@ impl HQMServer {
         if let Some(player) = self.players.get_mut(player_index) {
             player.hand = hand;
 
-            if let Some(skater) = self.game.world.get_skater_object_mut(player_index) {
+            if let Some(HQMSkaterObjectRefMut {
+                            skater, ..
+                        }) = self.game.world.objects.get_skater_object_for_player_mut(player_index) {
                 if self.game.period != 0 {
                     let msg = format!("Stick hand will change after next intermission");
                     self.add_directed_server_chat_message(&msg, player_index);
@@ -506,7 +508,7 @@ impl HQMServer {
                 let view_player_name = view_player.player_name.clone();
                 if let Some(player) = self.players.get_mut(player_index) {
                     if view_player_index != player.view_player_index {
-                        if self.game.world.has_skater(player_index) {
+                        if self.game.world.objects.has_skater(player_index) {
                             self.add_directed_server_chat_message("You must be a spectator to change view", player_index);
                         } else {
                             player.view_player_index = view_player_index;
@@ -841,8 +843,10 @@ impl HQMServer {
     pub fn move_to_team(& mut self, player_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Rotation3<f32>) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
 
-            if let Some((object_index, skater)) = self.game.world.get_skater_object_mut_with_index(player_index) {
-                *skater = HQMSkater::new(team, pos, rot.matrix().clone_owned(), player.hand, player_index, player.mass);
+            if let Some(HQMSkaterObjectRefMut {
+                            object_index, skater, ..
+                        }) = self.game.world.objects.get_skater_object_for_player_mut(player_index) {
+                *skater = HQMSkater::new(pos, rot.matrix().clone_owned(), player.hand, player.mass);
                 let player_name = player.player_name.clone();
                 self.add_global_message(HQMMessage::PlayerUpdate {
                     player_name,
@@ -913,18 +917,17 @@ impl HQMServer {
 
                 behaviour.before_tick(self);
 
-                for (player_index, player) in self.players.iter_mut().enumerate() {
-                    if let Some(player) = player {
-                        if let Some(skater) = self.game.world.get_skater_object_mut(player_index)  {
-                            skater.input = player.input.clone();
-                        }
+                for skater in self.game.world.objects.get_skater_iter_mut() {
+                    if let Some(player) = self.players.get(skater.connected_player_index) {
+                        skater.skater.input = player.input.clone();
                     }
                 }
+
                 let events = self.game.world.simulate_step();
 
                 behaviour.after_tick(self, &events);
 
-                let packets = get_packets(& self.game.world.objects);
+                let packets = get_packets(& self.game.world.objects.objects);
 
                 self.game.saved_ticks.truncate(self.game.saved_ticks.capacity() - 1);
                 self.game.saved_ticks.push_front(HQMSavedTick {
@@ -1385,7 +1388,7 @@ fn get_packets (objects: &[HQMGameObject]) -> Vec<HQMObjectPacket> {
     for i in 0usize..32 {
         let packet = match &objects[i] {
             HQMGameObject::Puck(puck) => HQMObjectPacket::Puck(puck.get_packet()),
-            HQMGameObject::Player(player) => HQMObjectPacket::Skater(player.get_packet()),
+            HQMGameObject::Player(_, _, player) => HQMObjectPacket::Skater(player.get_packet()),
             HQMGameObject::None => HQMObjectPacket::None
         };
         packets.push(packet);

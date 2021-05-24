@@ -1,7 +1,7 @@
 use nalgebra::{Matrix3, Point3, Vector3};
 use tracing::info;
 
-use migo_hqm_server::hqm_game::{HQMGame, HQMGameObject, HQMGameWorld, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam, HQMRinkFaceoffSpot, HQMRuleIndication};
+use migo_hqm_server::hqm_game::{HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam, HQMRinkFaceoffSpot, HQMRuleIndication, HQMSkaterObjectRefMut, HQMSkaterObjectRef};
 use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMSpawnPoint, HQMServerPlayerList};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::HashMap;
@@ -158,7 +158,7 @@ impl HQMMatchBehaviour {
         let mut goal_scorer_index = None;
         let mut assist_index = None;
 
-        if let HQMGameObject::Puck(this_puck) = & mut server.game.world.objects[puck] {
+        if let Some(this_puck) = & mut server.game.world.objects.get_puck_mut(puck) {
             for touch in this_puck.touches.iter() {
                 if touch.team == team {
                     let player_index = touch.player_index;
@@ -216,12 +216,13 @@ impl HQMMatchBehaviour {
                 } => {
                     let (player, puck) = (*player, *puck);
                     // Get connected player index from skater
-                    if let HQMGameObject::Player(skater) = & server.game.world.objects[player] {
-                        let this_connected_player_index = skater.connected_player_index;
-                        let touching_team = skater.team;
+                    if let Some(HQMSkaterObjectRef {
+                        connected_player_index: this_connected_player_index,
+                        team: touching_team,
+                        ..
+                    }) = server.game.world.objects.get_skater(player) {
 
-
-                        if let HQMGameObject::Puck(puck) = & mut server.game.world.objects[puck] {
+                        if let Some(puck) = server.game.world.objects.get_puck_mut(puck) {
                             puck.add_touch(this_connected_player_index, touching_team, server.game.time);
 
                             let other_team = touching_team.get_other_team();
@@ -261,7 +262,7 @@ impl HQMMatchBehaviour {
                     team, puck
                 } => {
                     let (team, puck) = (*team, *puck);
-                    if let HQMGameObject::Puck(puck) = & server.game.world.objects[puck] {
+                    if let Some(puck) = server.game.world.objects.get_puck(puck) {
                         if let Some(touch) = puck.touches.front() {
                             if team == touch.team && self.icing_status == HQMIcingStatus::No {
                                 self.icing_status = HQMIcingStatus::NotTouched(team, touch.puck_pos.clone());
@@ -294,7 +295,7 @@ impl HQMMatchBehaviour {
                 } => {
                     let (team, puck) = (*team, *puck);
                     if self.offside_status == HQMOffsideStatus::InNeutralZone {
-                        if let HQMGameObject::Puck(puck) = & server.game.world.objects[puck] {
+                        if let Some(puck) = server.game.world.objects.get_puck(puck) {
                             if let Some(touch) = puck.touches.front() {
                                 if team == touch.team &&
                                     has_players_in_offensive_zone(& server.game.world, team, Some(touch.player_index)) {
@@ -363,7 +364,7 @@ impl HQMMatchBehaviour {
         let mut joining_blue = vec![];
         for (player_index, player) in server.players.iter_mut().enumerate() {
             if let Some(player) = player {
-                let has_skater = server.game.world.has_skater(player_index);
+                let has_skater = server.game.world.objects.has_skater(player_index);
                 if has_skater && player.input.spectate() {
                     player.team_switch_timer = 500;
                     spectating_players.push((player_index, player.player_name.clone()))
@@ -386,13 +387,14 @@ impl HQMMatchBehaviour {
         let (red_player_count, blue_player_count) = {
             let mut red_player_count = 0usize;
             let mut blue_player_count = 0usize;
-            for p in server.game.world.objects.iter () {
-                if let HQMGameObject::Player(player) = p {
-                    if player.team == HQMTeam::Red {
-                        red_player_count += 1;
-                    } else if player.team == HQMTeam::Blue {
-                        blue_player_count += 1;
-                    }
+            for HQMSkaterObjectRef {
+                team,
+                ..
+            } in server.game.world.objects.get_skater_iter() {
+                if team == HQMTeam::Red {
+                    red_player_count += 1;
+                } else if team == HQMTeam::Blue {
+                    blue_player_count += 1;
                 }
             }
             (red_player_count, blue_player_count)
@@ -481,7 +483,7 @@ impl HQMMatchBehaviour {
                     if let Ok(mass) = mass {
                         player.mass = mass;
 
-                        if let Some(skater) = server.game.world.get_skater_object_mut(player_index) {
+                        if let Some(HQMSkaterObjectRefMut { skater, ..}) = server.game.world.objects.get_skater_object_for_player_mut(player_index) {
                             for collision_ball in skater.collision_balls.iter_mut() {
                                 collision_ball.mass = mass;
                             }
@@ -877,7 +879,7 @@ fn get_faceoff_positions (players: & HQMServerPlayerList,
     let mut blue_players = vec![];
     for (player_index, player) in players.iter().enumerate() {
         if player.is_some() {
-            let team = world.get_skater_object(player_index).map(|x| x.team);
+            let team = world.objects.get_skater_object_for_player(player_index).map(|x| x.team);
             if team == Some(HQMTeam::Red) {
                 red_players.push((player_index, preferred_positions.get(&player_index)));
             } else if team == Some(HQMTeam::Blue) {
@@ -942,19 +944,22 @@ fn has_players_in_offensive_zone (world: & HQMGameWorld, team: HQMTeam, ignore_p
         HQMTeam::Blue => & world.rink.blue_lines_and_net.offensive_line,
     };
 
-    for object in world.objects.iter() {
-        if let HQMGameObject::Player(skater) = object {
-            let player_index = skater.connected_player_index;
-            if skater.team == team && ignore_player != Some(player_index) {
-                let feet_pos = &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
-                let dot = (&feet_pos - &line.point).dot (&line.normal);
-                let leading_edge = -(line.width/2.0);
-                if dot < leading_edge {
-                    // Player is offside
-                    return true;
-                }
+    for HQMSkaterObjectRef{
+        connected_player_index: player_index,
+        team: skater_team,
+        skater,
+        ..
+    } in world.objects.get_skater_iter() {
+        if skater_team == team && ignore_player != Some(player_index) {
+            let feet_pos = &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
+            let dot = (&feet_pos - &line.point).dot (&line.normal);
+            let leading_edge = -(line.width/2.0);
+            if dot < leading_edge {
+                // Player is offside
+                return true;
             }
         }
+
     }
 
     false

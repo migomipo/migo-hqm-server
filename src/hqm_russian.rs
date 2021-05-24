@@ -1,7 +1,7 @@
 use nalgebra::{Matrix3, Point3, Rotation3};
 use tracing::info;
 
-use migo_hqm_server::hqm_game::{HQMGame, HQMGameObject, HQMPhysicsConfiguration, HQMTeam};
+use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam, HQMSkaterObjectRef, HQMSkaterObjectRefMut};
 use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::f32::consts::FRAC_PI_2;
@@ -40,7 +40,7 @@ impl HQMRussianBehaviour {
         let mut joining_blue = vec![];
         for (player_index, player) in server.players.iter_mut().enumerate() {
             if let Some(player) = player {
-                let has_skater = server.game.world.has_skater(player_index);
+                let has_skater = server.game.world.objects.has_skater(player_index);
                 if has_skater && player.input.spectate() {
                     player.team_switch_timer = 500;
                     spectating_players.push((player_index, player.player_name.clone()))
@@ -63,14 +63,13 @@ impl HQMRussianBehaviour {
         let (red_player_count, blue_player_count) = {
             let mut red_player_count = 0usize;
             let mut blue_player_count = 0usize;
-            for p in server.game.world.objects.iter() {
-                if let HQMGameObject::Player(player) = p {
-                    if player.team == HQMTeam::Red {
-                        red_player_count += 1;
-                    } else if player.team == HQMTeam::Blue {
-                        blue_player_count += 1;
-                    }
+            for HQMSkaterObjectRef { team, ..} in server.game.world.objects.get_skater_iter() {
+                if team == HQMTeam::Red {
+                    red_player_count += 1;
+                } else if team == HQMTeam::Blue {
+                    blue_player_count += 1;
                 }
+
             }
             (red_player_count, blue_player_count)
         };
@@ -162,11 +161,7 @@ impl HQMRussianBehaviour {
         server.game.period = 1;
         server.game.time = 2000;
 
-        for object in server.game.world.objects.iter_mut() {
-            if let HQMGameObject::Puck(_puck) = object {
-                *object = HQMGameObject::None;
-            }
-        }
+        server.game.world.clear_pucks();
 
         let s = format!("Each team will get {} attempts", self.attempts);
         server.add_server_chat_message(&s);
@@ -178,7 +173,7 @@ impl HQMRussianBehaviour {
 
         for (player_index, player) in server.players.iter().enumerate() {
             if player.is_some() {
-                let team = server.game.world.get_skater_object(player_index).map(|x| x.team);
+                let team = server.game.world.objects.get_skater_object_for_player(player_index).map(|x| x.team);
                 if team == Some(HQMTeam::Red) {
                     red_players.push(player_index);
                 } else if team == Some(HQMTeam::Blue) {
@@ -244,32 +239,33 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
         let (red_player_count, blue_player_count) = {
             let mut red_player_count = 0usize;
             let mut blue_player_count = 0usize;
-            for p in server.game.world.objects.iter_mut() {
-                if let HQMGameObject::Player(player) = p {
-                    let line = if player.team == HQMTeam::Red {
-                        red_player_count += 1;
-                        &server.game.world.rink.red_lines_and_net.defensive_line
-                    } else  {
-                        blue_player_count += 1;
-                        &server.game.world.rink.blue_lines_and_net.defensive_line
-                    };
 
-                    let p = &line.point;
-                    let normal = &line.normal;
-                    for collision_ball in player.collision_balls.iter_mut() {
-                        let pos = &collision_ball.pos;
-                        let radius = collision_ball.radius;
-                        let overlap = (p - pos).dot (normal) + radius;
-                        if overlap > 0.0 {
-                            let mut new = normal.scale(overlap * 0.03125) - collision_ball.velocity.scale(0.25);
-                            if new.dot(&normal) > 0.0 {
-                                hqm_simulate::limit_rejection(& mut new, &normal, 0.01);
+            for HQMSkaterObjectRefMut { team, skater: player, .. } in server.game.world.objects.get_skater_iter_mut() {
 
-                                collision_ball.velocity += new;
-                            }
+                let line = if team == HQMTeam::Red {
+                    red_player_count += 1;
+                    &server.game.world.rink.red_lines_and_net.defensive_line
+                } else  {
+                    blue_player_count += 1;
+                    &server.game.world.rink.blue_lines_and_net.defensive_line
+                };
+
+                let p = &line.point;
+                let normal = &line.normal;
+                for collision_ball in player.collision_balls.iter_mut() {
+                    let pos = &collision_ball.pos;
+                    let radius = collision_ball.radius;
+                    let overlap = (p - pos).dot (normal) + radius;
+                    if overlap > 0.0 {
+                        let mut new = normal.scale(overlap * 0.03125) - collision_ball.velocity.scale(0.25);
+                        if new.dot(&normal) > 0.0 {
+                            hqm_simulate::limit_rejection(& mut new, &normal, 0.01);
+
+                            collision_ball.velocity += new;
                         }
                     }
                 }
+
             }
             (red_player_count, blue_player_count)
         };
@@ -324,10 +320,12 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                             self.check_ending(& mut server.game);
                         }
                         HQMSimulationEvent::PuckTouch { puck, player, .. } => {
-                            if let HQMGameObject::Player(skater) = & server.game.world.objects[*player] {
-                                let this_connected_player_index = skater.connected_player_index;
-                                let touching_team = skater.team;
-                                if let HQMGameObject::Puck(puck) = & mut server.game.world.objects[*puck] {
+                            if let Some(HQMSkaterObjectRef {
+                                connected_player_index: this_connected_player_index,
+                                team: touching_team,
+                                ..
+                            }) = server.game.world.objects.get_skater(*player) {
+                                if let Some(puck) = server.game.world.objects.get_puck_mut(*puck) {
                                     puck.add_touch(this_connected_player_index, touching_team, server.game.time);
                                 }
                                 self.fix_status(server, touching_team);

@@ -10,18 +10,154 @@ use std::f32::consts::PI;
 use std::rc::Rc;
 use chrono::{DateTime, Utc};
 
+
+pub struct HQMSkaterObjectRef<'a> {
+    pub connected_player_index: usize,
+    pub object_index: usize,
+    pub team: HQMTeam,
+    pub skater: &'a HQMSkater
+}
+
+pub struct HQMSkaterObjectRefMut<'a> {
+    pub connected_player_index: usize,
+    pub object_index: usize,
+    pub team: HQMTeam,
+    pub skater: &'a mut HQMSkater
+}
+
 pub struct HQMGameWorld {
-    pub objects: Vec<HQMGameObject>,
+    pub objects: HQMGameWorldObjectList,
     puck_slots: usize,
     pub rink: HQMRink,
     pub physics_config: HQMPhysicsConfiguration
 }
 
-impl HQMGameWorld {
-    pub fn remove_player (& mut self, connected_player_index: usize) -> Option<usize> {
+pub struct HQMGameWorldObjectList {
+    pub(crate) objects: Vec<HQMGameObject>,
+}
+
+impl HQMGameWorldObjectList {
+    pub fn get_skater_object_for_player(& self, connected_player_index: usize) -> Option<HQMSkaterObjectRef> {
+        for (object_index, object) in self.objects.iter().enumerate() {
+            if let HQMGameObject::Player(player_index, team, skater) = object {
+                if *player_index == connected_player_index {
+                    return Some(HQMSkaterObjectRef {
+                        connected_player_index,
+                        object_index,
+                        team: *team,
+                        skater
+                    })
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_skater_object_for_player_mut(& mut self, connected_player_index: usize) -> Option<HQMSkaterObjectRefMut> {
         for (object_index, object) in self.objects.iter_mut().enumerate() {
-            if let HQMGameObject::Player(skater) = object {
-                if skater.connected_player_index == connected_player_index {
+            if let HQMGameObject::Player(player_index, team, skater) = object {
+                if *player_index == connected_player_index {
+                    return Some(HQMSkaterObjectRefMut {
+                        connected_player_index,
+                        object_index,
+                        team: *team,
+                        skater
+                    })
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_skater_iter (& self) -> impl Iterator<Item=HQMSkaterObjectRef> {
+        self.objects.iter().enumerate().filter_map(|(object_index, obj)| {
+            if let HQMGameObject::Player(connected_player_index, team, skater) = obj {
+                Some(HQMSkaterObjectRef {
+                    connected_player_index: *connected_player_index,
+                    object_index,
+                    team: *team,
+                    skater
+                })
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn get_skater_iter_mut (& mut self) -> impl Iterator<Item=HQMSkaterObjectRefMut> {
+        self.objects.iter_mut().enumerate().filter_map(|(object_index, obj)| {
+            if let HQMGameObject::Player(connected_player_index, team, skater) = obj {
+                Some(HQMSkaterObjectRefMut {
+                    connected_player_index: *connected_player_index,
+                    object_index,
+                    team: *team,
+                    skater
+                })
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn has_skater (& self, connected_player_index: usize) -> bool {
+        for object in self.objects.iter() {
+            if let HQMGameObject::Player(player_index, _, _) = object {
+                if *player_index == connected_player_index {
+                    return true
+                }
+            }
+        }
+        false
+    }
+
+    pub fn get_puck (& self, object_index: usize) -> Option<& HQMPuck> {
+        if let HQMGameObject::Puck(puck) = & self.objects[object_index] {
+            Some(puck)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_puck_mut (& mut self, object_index: usize) -> Option<& mut HQMPuck> {
+        if let HQMGameObject::Puck(puck) = & mut self.objects[object_index] {
+            Some(puck)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_skater (& self, object_index: usize) -> Option<HQMSkaterObjectRef> {
+        if let HQMGameObject::Player(connected_player_index, team, skater) = & self.objects[object_index] {
+            Some(HQMSkaterObjectRef {
+                connected_player_index: *connected_player_index,
+                object_index,
+                team: *team,
+                skater
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn get_skater_mut (& mut self, object_index: usize) -> Option<HQMSkaterObjectRefMut> {
+        if let HQMGameObject::Player(connected_player_index, team, skater) = & mut self.objects[object_index] {
+            Some(HQMSkaterObjectRefMut {
+                connected_player_index: *connected_player_index,
+                object_index,
+                team: *team,
+                skater
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl HQMGameWorld {
+    pub(crate) fn remove_player (& mut self, connected_player_index: usize) -> Option<usize> {
+        for (object_index, object) in self.objects.objects.iter_mut().enumerate() {
+            if let HQMGameObject::Player(player_index, _, _) = object {
+                if *player_index == connected_player_index {
                     *object = HQMGameObject::None;
                     return Some(object_index);
                 }
@@ -30,67 +166,11 @@ impl HQMGameWorld {
         None
     }
 
-    pub fn get_skater_object (& self, connected_player_index: usize) -> Option<& HQMSkater> {
-        for object in self.objects.iter() {
-            if let HQMGameObject::Player(skater) = object {
-                if skater.connected_player_index == connected_player_index {
-                    return Some(skater)
-                }
-            }
-        }
-        None
-    }
-
-    #[allow(dead_code)]
-    pub fn get_skater_object_with_index (& self, connected_player_index: usize) -> Option<(usize, & HQMSkater)> {
-        for (object_index, object) in self.objects.iter().enumerate() {
-            if let HQMGameObject::Player(skater) = object {
-                if skater.connected_player_index == connected_player_index {
-                    return Some((object_index, skater))
-                }
-            }
-        }
-        None
-    }
-
-    pub fn get_skater_object_mut (& mut self, connected_player_index: usize) -> Option<& mut HQMSkater> {
-        for object in self.objects.iter_mut() {
-            if let HQMGameObject::Player(skater) = object {
-                if skater.connected_player_index == connected_player_index {
-                    return Some(skater)
-                }
-            }
-        }
-        None
-    }
-
-    pub fn get_skater_object_mut_with_index (& mut self, connected_player_index: usize) -> Option<(usize, & mut HQMSkater)> {
-        for (object_index, object) in self.objects.iter_mut().enumerate() {
-            if let HQMGameObject::Player(skater) = object {
-                if skater.connected_player_index == connected_player_index {
-                    return Some((object_index, skater))
-                }
-            }
-        }
-        None
-    }
-
-    pub fn has_skater (& self, connected_player_index: usize) -> bool {
-        for object in self.objects.iter() {
-            if let HQMGameObject::Player(skater) = object {
-                if skater.connected_player_index == connected_player_index {
-                    return true
-                }
-            }
-        }
-        false
-    }
-
     pub(crate) fn create_player_object (& mut self, team: HQMTeam, start: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand,
                                         connected_player_index: usize, mass: f32) -> Option<usize> {
         let object_slot = self.find_empty_player_slot();
         if let Some(i) = object_slot {
-            self.objects[i] = HQMGameObject::Player(HQMSkater::new(team, start, rot, hand, connected_player_index, mass));
+            self.objects.objects[i] = HQMGameObject::Player(connected_player_index, team, HQMSkater::new( start, rot, hand, mass));
         }
         return object_slot;
     }
@@ -98,14 +178,14 @@ impl HQMGameWorld {
     pub fn create_puck_object (& mut self, start: Point3<f32>, rot: Matrix3<f32>) -> Option<usize> {
         let object_slot = self.find_empty_puck_slot();
         if let Some(i) = object_slot {
-            self.objects[i] = HQMGameObject::Puck(HQMPuck::new(start, rot));
+            self.objects.objects[i] = HQMGameObject::Puck(HQMPuck::new(start, rot));
         }
         return object_slot;
     }
 
     fn find_empty_puck_slot(& self) -> Option<usize> {
         for i in 0..self.puck_slots {
-            if let HQMGameObject::None = self.objects[i] {
+            if let HQMGameObject::None = self.objects.objects[i] {
                 return Some(i);
             }
         }
@@ -113,8 +193,8 @@ impl HQMGameWorld {
     }
 
     fn find_empty_player_slot(& self) -> Option<usize> {
-        for i in self.puck_slots..self.objects.len() {
-            if let HQMGameObject::None = self.objects[i] {
+        for i in self.puck_slots..self.objects.objects.len() {
+            if let HQMGameObject::None = self.objects.objects[i] {
                 return Some(i);
             }
         }
@@ -122,7 +202,7 @@ impl HQMGameWorld {
     }
 
     pub fn clear_pucks (& mut self) {
-        for x in self.objects[0..self.puck_slots].iter_mut() {
+        for x in self.objects.objects[0..self.puck_slots].iter_mut() {
             *x = HQMGameObject::None;
         }
 
@@ -186,7 +266,9 @@ impl HQMGame {
             icing_indication: HQMRuleIndication::No,
             offside_indication: HQMRuleIndication::No,
             world: HQMGameWorld {
-                objects: object_vec,
+                objects: HQMGameWorldObjectList {
+                    objects: object_vec
+                },
                 puck_slots,
                 rink,
                 physics_config: config
@@ -604,9 +686,7 @@ pub struct HQMBody {
 
 #[derive(Debug, Clone)]
 pub struct HQMSkater {
-    pub connected_player_index: usize,
     pub body: HQMBody,
-    pub team: HQMTeam,
     pub stick_pos: Point3<f32>,        // Measured in meters
     pub stick_velocity: Vector3<f32>,  // Measured in meters per hundred of a second
     pub stick_rot: Matrix3<f32>,       // Rotation matrix
@@ -634,11 +714,10 @@ impl HQMSkater {
         collision_balls
     }
 
-    pub(crate) fn new(team: HQMTeam, pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, connected_player_index: usize, mass: f32) -> Self {
+    pub(crate) fn new(pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, mass: f32) -> Self {
         let linear_velocity = Vector3::new (0.0, 0.0, 0.0);
         let collision_balls = HQMSkater::get_collision_balls(&pos, &rot, &linear_velocity, mass);
         HQMSkater {
-            connected_player_index,
             body: HQMBody {
                 pos: pos.clone(),
                 linear_velocity,
@@ -646,7 +725,6 @@ impl HQMSkater {
                 angular_velocity: Vector3::new (0.0, 0.0, 0.0),
                 rot_mul: Vector3::new (2.75, 6.16, 2.35)
             },
-            team,
             stick_pos: pos.clone(),
             stick_velocity: Vector3::new (0.0, 0.0, 0.0),
             stick_rot: Matrix3::identity(),
@@ -839,9 +917,9 @@ impl HQMPuck {
 }
 
 #[derive(Debug, Clone)]
-pub enum HQMGameObject {
+pub(crate) enum HQMGameObject {
     None,
-    Player(HQMSkater),
+    Player(usize, HQMTeam, HQMSkater),
     Puck(HQMPuck),
 }
 
