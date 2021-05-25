@@ -842,21 +842,20 @@ impl HQMServer {
 
     pub fn move_to_team(& mut self, player_index: usize, team: HQMTeam, pos: Point3<f32>, rot: Rotation3<f32>) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
-
-            if let Some(HQMSkaterObjectRefMut {
-                            object_index, skater, ..
-                        }) = self.game.world.objects.get_skater_object_for_player_mut(player_index) {
-                *skater = HQMSkater::new(pos, rot.matrix().clone_owned(), player.hand, player.mass);
-                let player_name = player.player_name.clone();
-                self.add_global_message(HQMMessage::PlayerUpdate {
-                    player_name,
-                    object: Some((object_index, team)),
-                    player_index,
-                    in_server: true
-                }, true);
+            if let Some((object_index, object)) = self.game.world.get_internal_ref(player_index) {
+                if let HQMGameObject::Player(_, current_team, skater) = object {
+                    *skater = HQMSkater::new(pos, rot.matrix().clone_owned(), player.hand, player.mass);
+                    *current_team = team;
+                    let player_name = player.player_name.clone();
+                    self.add_global_message(HQMMessage::PlayerUpdate {
+                        player_name,
+                        object: Some((object_index, team)),
+                        player_index,
+                        in_server: true
+                    }, true);
+                }
             } else {
-                if let Some(skater) = self.game.world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index,
-                                                                           player.mass) {
+                if let Some(skater) = self.game.world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index, player.mass) {
                     player.view_player_index = player_index;
                     let player_name = player.player_name.clone();
                     self.add_global_message(HQMMessage::PlayerUpdate {
@@ -867,6 +866,26 @@ impl HQMServer {
                     }, true);
                     return true;
                 }
+            }
+        }
+        false
+    }
+
+    pub fn swap_team(& mut self, player_index: usize, team: HQMTeam) -> bool {
+        if let Some(player) = self.players.get_mut(player_index) {
+            if let Some((object_index, object)) = self.game.world.get_internal_ref(player_index) {
+                if let HQMGameObject::Player(_, current_team, _) = object {
+                    *current_team = team;
+                    let player_name = player.player_name.clone();
+                    self.add_global_message(HQMMessage::PlayerUpdate {
+                        player_name,
+                        object: Some((object_index, team)),
+                        player_index,
+                        in_server: true
+                    }, true);
+                    return true;
+                }
+
             }
         }
         false

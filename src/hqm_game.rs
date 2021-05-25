@@ -154,14 +154,22 @@ impl HQMGameWorldObjectList {
 }
 
 impl HQMGameWorld {
-    pub(crate) fn remove_player (& mut self, connected_player_index: usize) -> Option<usize> {
+    pub(crate) fn get_internal_ref(& mut self, connected_player_index: usize) -> Option<(usize, & mut HQMGameObject)> {
         for (object_index, object) in self.objects.objects.iter_mut().enumerate() {
             if let HQMGameObject::Player(player_index, _, _) = object {
                 if *player_index == connected_player_index {
-                    *object = HQMGameObject::None;
-                    return Some(object_index);
+                    return Some((object_index, object));
                 }
             }
+        }
+        None
+    }
+
+    pub(crate) fn remove_player (& mut self, connected_player_index: usize) -> Option<usize> {
+        let r = self.get_internal_ref(connected_player_index);
+        if let Some((object_index, object)) = r {
+            *object = HQMGameObject::None;
+            return Some(object_index);
         }
         None
     }
