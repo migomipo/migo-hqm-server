@@ -107,13 +107,13 @@ impl HQMGameWorld {
         update_sticks_and_pucks (& mut players, & mut pucks, & self.rink, & mut events);
 
         for ((puck_index, puck), old_puck_pos) in pucks.iter_mut().zip(pucks_old_pos.iter()) {
-            if puck.body.linear_velocity.norm () > 1.0/65536.0 {
+            if let Some(norm) = puck.body.linear_velocity.try_normalize(f32::EPSILON) {
                 let scale = puck.body.linear_velocity.norm ().powi(2) * 0.125 * 0.125;
-                let scaled = puck.body.linear_velocity.normalize().scale(scale);
+                let scaled = norm.scale(scale);
                 puck.body.linear_velocity -= scaled;
             }
-            if puck.body.angular_velocity.norm() > 1.0/65536.0 {
-                rotate_matrix_around_axis(& mut puck.body.rot, &puck.body.angular_velocity.normalize(), puck.body.angular_velocity.norm())
+            if let Some(norm) = puck.body.angular_velocity.try_normalize(f32::EPSILON) {
+                rotate_matrix_around_axis(& mut puck.body.rot, &norm, puck.body.angular_velocity.norm())
             }
 
             puck_detection(puck, *puck_index, &old_puck_pos, HQMTeam::Red, & self.rink.red_lines_and_net, & mut events);
@@ -355,8 +355,8 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
         new_player_angular_velocity += turn_change;
     }
 
-    if player.body.angular_velocity.norm() > 1.0/65536.0 {
-        rotate_matrix_around_axis(& mut player.body.rot, &player.body.angular_velocity.normalize(), player.body.angular_velocity.norm());
+    if let Some(norm) = player.body.angular_velocity.try_normalize(f32::EPSILON) {
+        rotate_matrix_around_axis(& mut player.body.rot, &norm, player.body.angular_velocity.norm());
     }
     adjust_head_body_rot(& mut player.head_rot, player.input.head_rot.clamp(-7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8));
     adjust_head_body_rot(& mut player.body_rot, player.input.body_rot.clamp( -FRAC_PI_2, FRAC_PI_2));
@@ -862,13 +862,12 @@ pub fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     let projection_length = v.dot(&normal);
     let projection = normal.scale(projection_length);
     let rejection = &*v - &projection;
-    let rejection_length = rejection.norm();
+
     *v = projection.clone_owned();
 
-    if rejection_length > 1.0/65536.0 {
-        let rejection_norm = rejection.normalize();
+    if let Some(rejection_norm) = rejection.try_normalize(f32::EPSILON) {
 
-        let rejection_length2 = rejection_length.min(projection.norm() * d);
+        let rejection_length2 = rejection.norm().min(projection.norm() * d);
         *v += rejection_norm.scale(rejection_length2);
     }
 }
