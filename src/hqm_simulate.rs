@@ -212,8 +212,8 @@ fn update_sticks_and_pucks (players: & mut [(usize, usize, HQMTeam, & mut HQMSka
 
 fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vector3<f32>, Vector3<f32>) {
     let stick_input = Vector2::new (
-        clamp(player.input.stick[0], -FRAC_PI_2, FRAC_PI_2),
-        clamp(player.input.stick[1], -5.0*PI / 16.0, FRAC_PI_8)
+        player.input.stick[0].clamp(-FRAC_PI_2, FRAC_PI_2),
+        player.input.stick[1].clamp(-5.0*PI / 16.0, FRAC_PI_8)
     );
 
     let placement_diff = stick_input - &player.stick_placement;
@@ -248,7 +248,7 @@ fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vect
 
         // Rotate around the stick axis
         let handle_axis = (&new_stick_rotation * Vector3::new(0.0, 0.75, 1.0)).normalize();
-        rotate_matrix_around_axis(& mut new_stick_rotation, &handle_axis, clamp (-player.input.stick_angle, -1.0, 1.0) * FRAC_PI_4);
+        rotate_matrix_around_axis(& mut new_stick_rotation, &handle_axis, (-player.input.stick_angle).clamp(-1.0, 1.0) * FRAC_PI_4);
 
         new_stick_rotation
     };
@@ -302,7 +302,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
     }
     let feet_pos = &player.body.pos - (&player.body.rot * Vector3::y().scale(player.height));
     if feet_pos[1] < 0.0 {
-        let fwbw_from_client = clamp(player.input.fwbw, -1.0, 1.0);
+        let fwbw_from_client = player.input.fwbw.clamp(-1.0, 1.0);
         if fwbw_from_client != 0.0 {
             let mut skate_direction = if fwbw_from_client > 0.0 {
                 &player.body.rot * -Vector3::z()
@@ -323,7 +323,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
         }
         if player.input.jump() && !player.jumped_last_frame {
             let diff = if limit_jump_speed {
-                clamp (0.025 - player.body.linear_velocity[1], 0.0, 0.025)
+                (0.025 - player.body.linear_velocity[1]).clamp(0.0, 0.025)
             } else {
                 0.025
             };
@@ -338,7 +338,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
     player.jumped_last_frame = player.input.jump();
 
     // Turn player
-    let turn = clamp(player.input.turn, -1.0, 1.0);
+    let turn = player.input.turn.clamp(-1.0, 1.0);
     let mut turn_change = &player.body.rot * Vector3::y();
     if player.input.shift() {
         let mut velocity_adjustment = &player.body.rot * Vector3::x();
@@ -358,8 +358,8 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
     if player.body.angular_velocity.norm() > 1.0/65536.0 {
         rotate_matrix_around_axis(& mut player.body.rot, &player.body.angular_velocity.normalize(), player.body.angular_velocity.norm());
     }
-    adjust_head_body_rot(& mut player.head_rot, clamp (player.input.head_rot, -7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8));
-    adjust_head_body_rot(& mut player.body_rot, clamp (player.input.body_rot, -FRAC_PI_2, FRAC_PI_2));
+    adjust_head_body_rot(& mut player.head_rot, player.input.head_rot.clamp(-7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8));
+    adjust_head_body_rot(& mut player.body_rot, player.input.body_rot.clamp( -FRAC_PI_2, FRAC_PI_2));
     for (collision_ball_index, collision_ball) in player.collision_balls.iter_mut().enumerate() {
         let mut new_rot = player.body.rot.clone_owned();
         if collision_ball_index == 1 || collision_ball_index == 2 || collision_ball_index == 5 {
@@ -717,7 +717,8 @@ fn collision_between_sphere_and_post(pos: &Point3<f32>, radius: f32, post: &(Poi
 
     let diff = pos - p1;
     let t0 = diff.dot(&direction_vector) / direction_vector.norm_squared();
-    let dot = clamp(t0, 0.0, 1.0);
+
+    let dot = t0.clamp (0.0, 1.0);
 
     let projection = dot * &direction_vector;
     let rejection = diff - projection;
@@ -838,15 +839,6 @@ fn adjust_head_body_rot (rot: & mut f32, input_rot: f32)     {
     }
 }
 
-fn clamp (v: f32, min: f32, max: f32) -> f32 {
-    if v < min {
-        min
-    } else if v > max {
-        max
-    } else {
-        v
-    }
-}
 
 fn limit_vector_length (v: &Vector3<f32>, max_len: f32) -> Vector3<f32> {
     let norm = v.norm();
