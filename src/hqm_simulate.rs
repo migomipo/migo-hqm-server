@@ -274,7 +274,7 @@ fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vect
         (stick_force, intended_stick_position)
     };
 
-    let (lin, ang) = calculate_acceleration_on_object(& mut player.body, & stick_force.scale(-0.004), &intended_stick_position);
+    let (lin, ang) = calculate_acceleration_on_object(& player.body, & stick_force.scale(-0.004), &intended_stick_position);
 
     let mut stick_velocity = stick_force.scale(0.996);
     if let Some((overlap, normal)) = collision_between_sphere_and_rink(&player.stick_pos, 0.09375, rink) {
@@ -374,7 +374,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
         let speed = speed_of_point_including_rotation(& intended_collision_ball_pos, & player.body);
         let force = collision_pos_diff.scale(0.125) + (speed - &collision_ball.velocity).scale(0.25);
         collision_ball.velocity += force.scale(0.9375);
-        let (lin, ang) = calculate_acceleration_on_object(& mut player.body, &force.scale(0.9375 - 1.0), &intended_collision_ball_pos);
+        let (lin, ang) = calculate_acceleration_on_object(& player.body, &force.scale(0.9375 - 1.0), &intended_collision_ball_pos);
         new_player_linear_velocity += lin;
         new_player_angular_velocity += ang;
     }
