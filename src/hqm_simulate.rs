@@ -1,10 +1,8 @@
 
 
 use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld, HQMRinkNet, LinesAndNet};
-use nalgebra::{Vector3, Matrix3, U3, U1, Matrix, Point3, Vector2};
-use std::ops::{AddAssign};
+use nalgebra::{Vector3, Point3, Vector2, Rotation3};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
-use nalgebra::base::storage::{Storage, StorageMut};
 use std::iter::FromIterator;
 
 enum HQMCollision {
@@ -238,7 +236,7 @@ fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vect
         let current_azimuth = stick_pos_converted[0].atan2(-stick_pos_converted[2]);
         let current_inclination = -stick_pos_converted[1].atan2((stick_pos_converted[0].powi(2) + stick_pos_converted[2].powi(2)).sqrt());
 
-        let mut new_stick_rotation = player.body.rot.clone_owned();
+        let mut new_stick_rotation = player.body.rot.clone();
         rotate_matrix_spherical(& mut new_stick_rotation, current_azimuth, current_inclination);
 
         if player.stick_placement[1] > 0.0 {
@@ -254,7 +252,7 @@ fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vect
     };
 
     let (stick_force, intended_stick_position) = {
-        let mut stick_rotation2 = player.body.rot.clone_owned();
+        let mut stick_rotation2 = player.body.rot.clone();
         rotate_matrix_spherical(& mut stick_rotation2, player.stick_placement[0], player.stick_placement[1]);
 
         let temp = stick_rotation2 * Vector3::x();
@@ -328,7 +326,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
                 0.025
             };
             if diff != 0.0 {
-                player.body.linear_velocity[1] += diff;
+                new_player_linear_velocity[1] += diff;
                 for collision_ball in player.collision_balls.iter_mut() {
                     collision_ball.velocity[1] += diff;
                 }
@@ -361,7 +359,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
     adjust_head_body_rot(& mut player.head_rot, player.input.head_rot.clamp(-7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8));
     adjust_head_body_rot(& mut player.body_rot, player.input.body_rot.clamp( -FRAC_PI_2, FRAC_PI_2));
     for (collision_ball_index, collision_ball) in player.collision_balls.iter_mut().enumerate() {
-        let mut new_rot = player.body.rot.clone_owned();
+        let mut new_rot = player.body.rot.clone();
         if collision_ball_index == 1 || collision_ball_index == 2 || collision_ball_index == 5 {
             let rot_axis = &new_rot * Vector3::y();
             rotate_matrix_around_axis(& mut new_rot, & rot_axis, player.head_rot * 0.5);
@@ -819,7 +817,7 @@ fn speed_of_point_including_rotation(p: & Point3<f32>, body: & HQMBody) -> Vecto
     body.linear_velocity + (p - body.pos).cross(&body.angular_velocity)
 }
 
-fn rotate_matrix_spherical(matrix: & mut Matrix3<f32>, azimuth: f32, inclination: f32) {
+fn rotate_matrix_spherical(matrix: & mut Rotation3<f32>, azimuth: f32, inclination: f32) {
     let col1 = &*matrix * Vector3::y();
     rotate_matrix_around_axis(matrix, &col1, azimuth);
     let col0 = &*matrix * Vector3::x();
@@ -872,24 +870,17 @@ pub fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     }
 }
 
-fn rotate_vector_around_axis<S: StorageMut<f32, U3, U1>, T: Storage<f32, U3, U1>>(v: & mut Matrix<f32, U3, U1, S>, axis: & Matrix<f32, U3, U1, T>, angle: f32) {
-    let (sin_v, cos_v) = angle.sin_cos();
-    let cross1 = v.cross(axis);
-    let cross2 = axis.cross(&cross1);
-    let dot = v.dot(axis);
-
-    v.copy_from(axis);
-    v.scale_mut(dot);
-    v.add_assign(&cross2.scale(cos_v));
-    v.add_assign(&cross1.scale(sin_v));
-    v.normalize_mut();
+fn rotate_vector_around_axis(v: & mut Vector3<f32>, axis: & Vector3<f32>, angle: f32) {
+    let axis_angle = -angle * axis;
+    let rot = Rotation3::new (axis_angle);
+    *v = &rot * *v;
 }
 
 
-fn rotate_matrix_around_axis<T: Storage<f32, U3, U1>>(v: & mut Matrix3<f32>, axis: & Matrix<f32, U3, U1, T>, angle: f32) {
-    rotate_vector_around_axis(& mut v.column_mut(0), axis, angle);
-    rotate_vector_around_axis(& mut v.column_mut(1), axis, angle);
-    rotate_vector_around_axis(& mut v.column_mut(2), axis, angle);
+fn rotate_matrix_around_axis(v: & mut Rotation3<f32>, axis: & Vector3<f32>, angle: f32) {
+    let axis_angle = -angle * axis;
+    let rot = Rotation3::new (axis_angle);
+    *v = rot * *v;
 }
 
 fn normal_or_zero(v: & Vector3<f32>) -> Vector3<f32> {

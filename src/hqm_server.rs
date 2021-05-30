@@ -844,7 +844,7 @@ impl HQMServer {
         if let Some(player) = self.players.get_mut(player_index) {
             if let Some((object_index, object)) = self.game.world.get_internal_ref(player_index) {
                 if let HQMGameObject::Player(_, current_team, skater) = object {
-                    *skater = HQMSkater::new(pos, rot.matrix().clone_owned(), player.hand, player.mass);
+                    *skater = HQMSkater::new(pos, rot, player.hand, player.mass);
                     *current_team = team;
                     let player_name = player.player_name.clone();
                     self.add_global_message(HQMMessage::PlayerUpdate {
@@ -855,7 +855,7 @@ impl HQMServer {
                     }, true);
                 }
             } else {
-                if let Some(skater) = self.game.world.create_player_object(team, pos, rot.matrix().clone_owned(), player.hand, player_index, player.mass) {
+                if let Some(skater) = self.game.world.create_player_object(team, pos, rot, player.hand, player_index, player.mass) {
                     player.view_player_index = player_index;
                     let player_name = player.player_name.clone();
                     self.add_global_message(HQMMessage::PlayerUpdate {

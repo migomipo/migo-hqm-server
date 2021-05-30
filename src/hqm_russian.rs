@@ -1,4 +1,4 @@
-use nalgebra::{Matrix3, Point3, Rotation3};
+use nalgebra::{Point3, Rotation3};
 use tracing::info;
 
 use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam, HQMSkaterObjectRef, HQMSkaterObjectRefMut};
@@ -102,7 +102,7 @@ impl HQMRussianBehaviour {
         };
         let puck_pos = Point3::new(server.game.world.rink.width / 2.0,0.5, z);
 
-        server.game.world.create_puck_object(puck_pos, Matrix3::identity());
+        server.game.world.create_puck_object(puck_pos, Rotation3::identity());
 
         self.fix_status(server, team);
     }

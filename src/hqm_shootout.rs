@@ -1,7 +1,7 @@
 use migo_hqm_server::hqm_game::{HQMTeam, HQMGame, HQMPhysicsConfiguration, HQMSkaterObjectRef};
 use migo_hqm_server::hqm_server::{HQMServerBehaviour, HQMServer, HQMSpawnPoint};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
-use nalgebra::{Matrix3, Vector3, Rotation3, Point3};
+use nalgebra::{Vector3, Rotation3, Point3};
 use std::f32::consts::{PI};
 
 use tracing::info;
@@ -93,7 +93,7 @@ impl HQMShootoutBehaviour {
         let width = server.game.world.rink.width;
 
         let puck_pos = Point3::new (width / 2.0, 1.0, length / 2.0);
-        server.game.world.create_puck_object(puck_pos, Matrix3::identity());
+        server.game.world.create_puck_object(puck_pos, Rotation3::identity());
 
         let red_rot = Rotation3::identity();
         let blue_rot = Rotation3::from_euler_angles(0.0, PI, 0.0);

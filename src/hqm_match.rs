@@ -1,4 +1,4 @@
-use nalgebra::{Matrix3, Point3, Vector3};
+use nalgebra::{Point3, Vector3, Rotation3};
 use tracing::info;
 
 use migo_hqm_server::hqm_game::{HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam, HQMRinkFaceoffSpot, HQMRuleIndication, HQMSkaterObjectRefMut, HQMSkaterObjectRef};
@@ -109,7 +109,7 @@ impl HQMMatchBehaviour {
 
         let puck_pos = next_faceoff_spot.center_position + &(1.5f32*Vector3::y());
 
-        server.game.world.create_puck_object(puck_pos, Matrix3::identity());
+        server.game.world.create_puck_object(puck_pos, Rotation3::identity());
 
         self.started_as_goalie.clear();
         for (player_index, (team, faceoff_position)) in positions {
@@ -1132,7 +1132,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
 
         for i in 0..warmup_pucks {
             let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, game.world.rink.length / 2.0);
-            let rot = Matrix3::identity();
+            let rot = Rotation3::identity();
             game.world.create_puck_object(pos, rot);
         }
         game.time = self.config.time_warmup * 100;

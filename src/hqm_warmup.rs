@@ -1,7 +1,7 @@
 use migo_hqm_server::hqm_server::{HQMServerBehaviour, HQMServer, HQMSpawnPoint};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use migo_hqm_server::hqm_game::{HQMPhysicsConfiguration, HQMTeam, HQMGame};
-use nalgebra::{Point3, Matrix3};
+use nalgebra::{Point3, Rotation3};
 
 use tracing::info;
 
@@ -80,7 +80,7 @@ impl HQMServerBehaviour for HQMPermanentWarmup {
 
         for i in 0..warmup_pucks {
             let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, game.world.rink.length / 2.0);
-            let rot = Matrix3::identity();
+            let rot = Rotation3::identity();
             game.world.create_puck_object(pos, rot);
         }
         game.time = 30000; // Permanently locked to 5 minutes
