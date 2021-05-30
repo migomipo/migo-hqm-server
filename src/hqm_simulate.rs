@@ -110,9 +110,8 @@ impl HQMGameWorld {
                 let scaled = norm.scale(scale);
                 puck.body.linear_velocity -= scaled;
             }
-            if let Some(norm) = puck.body.angular_velocity.try_normalize(f32::EPSILON) {
-                rotate_matrix_around_axis(& mut puck.body.rot, &norm, puck.body.angular_velocity.norm())
-            }
+
+            rotate_matrix_around_axis(& mut puck.body.rot, -puck.body.angular_velocity);
 
             puck_detection(puck, *puck_index, &old_puck_pos, HQMTeam::Red, & self.rink.red_lines_and_net, & mut events);
             puck_detection(puck, *puck_index, &old_puck_pos, HQMTeam::Blue, & self.rink.blue_lines_and_net, & mut events);
@@ -241,12 +240,12 @@ fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vect
 
         if player.stick_placement[1] > 0.0 {
             let axis = &new_stick_rotation * Vector3::y();
-            rotate_matrix_around_axis(& mut new_stick_rotation, & axis, player.stick_placement[1] * mul * FRAC_PI_2)
+            rotate_matrix_around_axis(& mut new_stick_rotation, -player.stick_placement[1] * mul * FRAC_PI_2 * axis)
         }
 
         // Rotate around the stick axis
         let handle_axis = (&new_stick_rotation * Vector3::new(0.0, 0.75, 1.0)).normalize();
-        rotate_matrix_around_axis(& mut new_stick_rotation, &handle_axis, (-player.input.stick_angle).clamp(-1.0, 1.0) * FRAC_PI_4);
+        rotate_matrix_around_axis(& mut new_stick_rotation, player.input.stick_angle.clamp(-1.0, 1.0) * FRAC_PI_4 * handle_axis);
 
         new_stick_rotation
     };
@@ -256,7 +255,7 @@ fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vect
         rotate_matrix_spherical(& mut stick_rotation2, player.stick_placement[0], player.stick_placement[1]);
 
         let temp = stick_rotation2 * Vector3::x();
-        rotate_matrix_around_axis(& mut stick_rotation2, & temp, FRAC_PI_4);
+        rotate_matrix_around_axis(& mut stick_rotation2, -FRAC_PI_4 * temp);
 
         let stick_length = 1.75;
 
@@ -353,18 +352,18 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
         new_player_angular_velocity += turn_change;
     }
 
-    if let Some(norm) = player.body.angular_velocity.try_normalize(f32::EPSILON) {
-        rotate_matrix_around_axis(& mut player.body.rot, &norm, player.body.angular_velocity.norm());
-    }
+
+    rotate_matrix_around_axis(& mut player.body.rot, -player.body.angular_velocity);
+
     adjust_head_body_rot(& mut player.head_rot, player.input.head_rot.clamp(-7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8));
     adjust_head_body_rot(& mut player.body_rot, player.input.body_rot.clamp( -FRAC_PI_2, FRAC_PI_2));
     for (collision_ball_index, collision_ball) in player.collision_balls.iter_mut().enumerate() {
         let mut new_rot = player.body.rot.clone();
         if collision_ball_index == 1 || collision_ball_index == 2 || collision_ball_index == 5 {
             let rot_axis = &new_rot * Vector3::y();
-            rotate_matrix_around_axis(& mut new_rot, & rot_axis, player.head_rot * 0.5);
+            rotate_matrix_around_axis(& mut new_rot, -player.head_rot * 0.5 * rot_axis);
             let rot_axis = &new_rot * Vector3::x();
-            rotate_matrix_around_axis(& mut new_rot, & rot_axis, player.body_rot);
+            rotate_matrix_around_axis(& mut new_rot, -player.body_rot * rot_axis);
         }
         let intended_collision_ball_pos = &player.body.pos + (new_rot * &collision_ball.offset);
         let collision_pos_diff = intended_collision_ball_pos - &collision_ball.pos;
@@ -427,7 +426,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
         if !player.input.shift() {
             let axis = &player.body.rot * Vector3::z();
             let temp = -new_player_linear_velocity.dot(&axis) / 0.05;
-            rotate_vector_around_axis(& mut unit, &axis, 0.225 * turn * temp);
+            rotate_vector_around_axis(& mut unit, -0.225 * turn * temp * axis);
         }
 
         let temp2 = unit.cross(&(&player.body.rot * Vector3::y()));
@@ -819,9 +818,9 @@ fn speed_of_point_including_rotation(p: & Point3<f32>, body: & HQMBody) -> Vecto
 
 fn rotate_matrix_spherical(matrix: & mut Rotation3<f32>, azimuth: f32, inclination: f32) {
     let col1 = &*matrix * Vector3::y();
-    rotate_matrix_around_axis(matrix, &col1, azimuth);
+    rotate_matrix_around_axis(matrix, -azimuth * col1);
     let col0 = &*matrix * Vector3::x();
-    rotate_matrix_around_axis(matrix, &col0, inclination);
+    rotate_matrix_around_axis(matrix, -inclination * col0);
 }
 
 fn adjust_head_body_rot (rot: & mut f32, input_rot: f32)     {
@@ -870,16 +869,14 @@ pub fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     }
 }
 
-fn rotate_vector_around_axis(v: & mut Vector3<f32>, axis: & Vector3<f32>, angle: f32) {
-    let axis_angle = -angle * axis;
-    let rot = Rotation3::new (axis_angle);
+fn rotate_vector_around_axis(v: & mut Vector3<f32>, scaled_axis: Vector3<f32>) {
+    let rot = Rotation3::new (scaled_axis);
     *v = &rot * *v;
 }
 
 
-fn rotate_matrix_around_axis(v: & mut Rotation3<f32>, axis: & Vector3<f32>, angle: f32) {
-    let axis_angle = -angle * axis;
-    let rot = Rotation3::new (axis_angle);
+fn rotate_matrix_around_axis(v: & mut Rotation3<f32>, scaled_axis: Vector3<f32>) {
+    let rot = Rotation3::new (scaled_axis);
     *v = rot * *v;
 }
 
