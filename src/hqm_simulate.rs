@@ -307,7 +307,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
             } else {
                 &player.body.rot * Vector3::z()
             };
-            let max_acceleration = if player.body.linear_velocity.dot(&skate_direction) < 0.0 {
+            let max_acceleration = if new_player_linear_velocity.dot(&skate_direction) < 0.0 {
                 0.000555555f32 // If we're accelerating against the current direction of movement
                 // we're decelerating and can do so faster
             } else {
@@ -315,13 +315,13 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
             };
             skate_direction[1] = 0.0;
             skate_direction.normalize_mut();
-            let new_acceleration = skate_direction.scale(0.05) - &player.body.linear_velocity;
+            let new_acceleration = skate_direction.scale(0.05) - &new_player_linear_velocity;
 
             new_player_linear_velocity += limit_vector_length(&new_acceleration, max_acceleration);
         }
         if player.input.jump() && !player.jumped_last_frame {
             let diff = if limit_jump_speed {
-                (0.025 - player.body.linear_velocity[1]).clamp(0.0, 0.025)
+                (0.025 - new_player_linear_velocity[1]).clamp(0.0, 0.025)
             } else {
                 0.025
             };
@@ -343,7 +343,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
         velocity_adjustment[1] = 0.0;
         velocity_adjustment.normalize_mut();
         velocity_adjustment.scale_mut(0.0333333 * turn);
-        velocity_adjustment -= &player.body.linear_velocity;
+        velocity_adjustment -= &new_player_linear_velocity;
         new_player_linear_velocity += limit_vector_length(&velocity_adjustment, 0.00027777);
         turn_change.scale_mut(-turn * 5.6 / 14400.0);
         new_player_angular_velocity += turn_change;
