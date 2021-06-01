@@ -1383,12 +1383,16 @@ async fn send_updates(game_id: u32, game: &HQMGame, players: &[Option<HQMConnect
 
                 write_objects(& mut writer, game, packets, player.known_packet);
 
-                let remaining_messages = min(player.messages.len() - player.known_msgpos, 15);
+                let (start, remaining_messages) = if player.known_msgpos > player.messages.len() {
+                    (player.messages.len(), 0)
+                } else {
+                    (player.known_msgpos, min(player.messages.len() - player.known_msgpos, 15))
+                };
 
                 writer.write_bits(4, remaining_messages as u32);
-                writer.write_bits(16, player.known_msgpos as u32);
+                writer.write_bits(16, start as u32);
 
-                for message in &player.messages[player.known_msgpos..player.known_msgpos + remaining_messages] {
+                for message in &player.messages[start..start + remaining_messages] {
                     write_message(& mut writer, Rc::as_ref(message));
                 }
             }
