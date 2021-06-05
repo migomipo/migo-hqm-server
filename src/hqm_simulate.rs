@@ -353,7 +353,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
     }
 
 
-    rotate_matrix_around_axis(& mut player.body.rot, -player.body.angular_velocity);
+    rotate_matrix_around_axis(& mut player.body.rot, -new_player_angular_velocity);
 
     adjust_head_body_rot(& mut player.head_rot, player.input.head_rot.clamp(-7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8));
     adjust_head_body_rot(& mut player.body_rot, player.input.body_rot.clamp( -FRAC_PI_2, FRAC_PI_2));
