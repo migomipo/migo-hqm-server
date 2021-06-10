@@ -111,7 +111,7 @@ impl HQMGameWorld {
                 puck.body.linear_velocity -= scaled;
             }
 
-            rotate_matrix_around_axis(& mut puck.body.rot, -puck.body.angular_velocity);
+            rotate_matrix_around_axis(& mut puck.body.rot, puck.body.angular_velocity);
 
             puck_detection(puck, *puck_index, &old_puck_pos, HQMTeam::Red, & self.rink.red_lines_and_net, & mut events);
             puck_detection(puck, *puck_index, &old_puck_pos, HQMTeam::Blue, & self.rink.blue_lines_and_net, & mut events);
@@ -344,16 +344,16 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
         velocity_adjustment.scale_mut(0.0333333 * turn);
         velocity_adjustment -= &new_player_linear_velocity;
         new_player_linear_velocity += limit_vector_length(&velocity_adjustment, 0.00027777);
-        turn_change.scale_mut(-turn * 5.6 / 14400.0);
+        turn_change.scale_mut(turn * 5.6 / 14400.0);
         new_player_angular_velocity += turn_change;
 
     } else {
-        turn_change.scale_mut(turn * 6.0 / 14400.0);
+        turn_change.scale_mut(-turn * 6.0 / 14400.0);
         new_player_angular_velocity += turn_change;
     }
 
 
-    rotate_matrix_around_axis(& mut player.body.rot, -new_player_angular_velocity);
+    rotate_matrix_around_axis(& mut player.body.rot, new_player_angular_velocity);
 
     adjust_head_body_rot(& mut player.head_rot, player.input.head_rot.clamp(-7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8));
     adjust_head_body_rot(& mut player.body_rot, player.input.body_rot.clamp( -FRAC_PI_2, FRAC_PI_2));
@@ -421,19 +421,21 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
     if touches_ice {
         // This is where the leaning happens
         new_player_angular_velocity.scale_mut(0.975);
-        let mut unit: Vector3<f32> = Vector3::y();
+        let intended_y_axis: Vector3<f32> = {
+            let mut intended_y_axis = Vector3::y();
+            if !player.input.shift() {
+                let axis = &player.body.rot * Vector3::z();
+                let temp = -new_player_linear_velocity.dot(&axis) / 0.05;
+                rotate_vector_around_axis(& mut intended_y_axis, -0.225 * turn * temp * axis);
+            }
+            intended_y_axis
+        };
 
-        if !player.input.shift() {
-            let axis = &player.body.rot * Vector3::z();
-            let temp = -new_player_linear_velocity.dot(&axis) / 0.05;
-            rotate_vector_around_axis(& mut unit, -0.225 * turn * temp * axis);
-        }
+        let y_axis_cross = (&player.body.rot * Vector3::y()).cross(&intended_y_axis);
 
-        let temp2 = unit.cross(&(&player.body.rot * Vector3::y()));
-
-        let temp2 = temp2.scale(0.008333333) - get_projection(&new_player_angular_velocity, &temp2).scale(0.25);
-        let temp2 = limit_vector_length(&temp2, 0.000347222222);
-        new_player_angular_velocity += temp2;
+        let temp2 = y_axis_cross.scale(0.008333333) - get_projection(&new_player_angular_velocity, &y_axis_cross).scale(0.25);
+        let lean_correction = limit_vector_length(&temp2, 0.000347222222);
+        new_player_angular_velocity += lean_correction;
     }
     let (l, a, s) = update_stick(player, rink);
     new_player_linear_velocity += l;
@@ -807,13 +809,12 @@ fn collision_between_vertex_and_rink(vertex: &Point3<f32>, rink: & HQMRink) -> O
 }
 
 fn calculate_acceleration_on_object(body: & HQMBody, change: & Vector3<f32>, point: & Point3<f32>) -> (Vector3<f32>, Vector3<f32>) {
-    let diff1 = point - &body.pos;
-    let cross = change.cross(& diff1);
+    let cross = (point - &body.pos).cross(&change);
     (change.clone(), &body.rot * (body.rot.transpose() * cross).component_mul(& body.rot_mul))
 }
 
 fn speed_of_point_including_rotation(p: & Point3<f32>, body: & HQMBody) -> Vector3<f32> {
-    body.linear_velocity + (p - body.pos).cross(&body.angular_velocity)
+    body.linear_velocity + body.angular_velocity.cross(&(p - body.pos))
 }
 
 fn rotate_matrix_spherical(matrix: & mut Rotation3<f32>, azimuth: f32, inclination: f32) {
