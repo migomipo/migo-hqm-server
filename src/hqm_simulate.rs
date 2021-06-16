@@ -21,10 +21,8 @@ pub enum HQMSimulationEvent {
         puck: usize
     },
     PuckTouch {
-        team: HQMTeam,
         player: usize,
         puck: usize,
-        connected_player_index: usize
     },
     PuckEnteredOffensiveZone {
         team: HQMTeam,
@@ -53,22 +51,22 @@ impl HQMGameWorld {
         let mut pucks = Vec::new();
         for (i, o) in self.objects.objects.iter_mut().enumerate() {
             match o {
-                HQMGameObject::Player(connected_player_index, team, player) => players.push((i, *connected_player_index, *team, player)),
+                HQMGameObject::Player(_, _, player) => players.push((i, player)),
                 HQMGameObject::Puck(puck) => pucks.push((i, puck)),
                 _ => {}
             }
         }
 
         let mut collisions = vec![];
-        for (i, (_, _, _, player)) in players.iter_mut().enumerate() {
+        for (i, (_, player)) in players.iter_mut().enumerate() {
             update_player(i, player, self.physics_config.gravity, self.physics_config.limit_jump_speed, & self.rink, & mut collisions);
         }
 
         for i in 0..players.len() {
             for j in i+1..players.len() {
                 let (a,b) = players.split_at_mut(j);
-                let (_, _, _, p1) = &mut a[i];
-                let (_, _, _, p2) = &mut b[0];
+                let (_, p1) = &mut a[i];
+                let (_, p2) = &mut b[0];
                 for (ib, p1_collision_ball) in p1.collision_balls.iter().enumerate() {
                     for (jb, p2_collision_ball) in p2.collision_balls.iter().enumerate() {
                         let pos_diff = &p1_collision_ball.pos - &p2_collision_ball.pos;
@@ -122,12 +120,12 @@ impl HQMGameWorld {
     }
 }
 
-fn update_sticks_and_pucks (players: & mut [(usize, usize, HQMTeam, & mut HQMSkater)],
+fn update_sticks_and_pucks (players: & mut [(usize, & mut HQMSkater)],
                            pucks: & mut [(usize, & mut HQMPuck)],
                            rink: & HQMRink, events: & mut Vec<HQMSimulationEvent>) {
     for i in 0..10 {
 
-        for (_, _, _, player) in players.iter_mut() {
+        for (_, player) in players.iter_mut() {
             player.stick_pos += player.stick_velocity.scale(0.1);
         }
         for (puck_index, puck) in pucks.iter_mut() {
@@ -143,14 +141,12 @@ fn update_sticks_and_pucks (players: & mut [(usize, usize, HQMTeam, & mut HQMSka
                 }
             }
 
-            for (player_index, connected_player_index, team, player) in players.iter_mut() {
+            for (player_index, player) in players.iter_mut() {
                 if (&puck.body.pos - &player.stick_pos).norm() < 1.0 {
                     if let Some((lin, ang, stick)) = do_puck_stick_forces(puck, player, & puck_vertices) {
                         events.push(HQMSimulationEvent::PuckTouch {
-                            team: *team,
                             puck: *puck_index,
                             player: *player_index,
-                            connected_player_index: *connected_player_index
                         });
                         new_puck_linear_velocity += lin;
                         new_puck_angular_velocity += ang;
@@ -454,10 +450,10 @@ fn get_projection (a: & Vector3<f32>, b: & Vector3<f32>) -> Vector3<f32> {
 }
 
 
-fn apply_collisions (players: & mut [(usize, usize, HQMTeam, & mut HQMSkater)], collisions: &[HQMCollision]) {
+fn apply_collisions (players: & mut [(usize, & mut HQMSkater)], collisions: &[HQMCollision]) {
     for _ in 0..16 {
-        let original_ball_velocities = Vec::from_iter(players.iter().map(|y| {
-            let m = y.3.collision_balls.iter().map(|x| x.velocity.clone_owned());
+        let original_ball_velocities = Vec::from_iter(players.iter().map(|(_, skater)| {
+            let m = skater.collision_balls.iter().map(|x| x.velocity.clone_owned());
             Vec::from_iter(m)
         }));
 
@@ -470,7 +466,8 @@ fn apply_collisions (players: & mut [(usize, usize, HQMTeam, & mut HQMSkater)], 
                     let mut new = normal.scale(overlap * 0.03125) - original_velocity.scale(0.25);
                     if new.dot(&normal) > 0.0 {
                         limit_rejection(& mut new, &normal, 0.01);
-                        let ball = & mut players[i].3.collision_balls[ib];
+                        let (_, skater) = & mut players[i];
+                        let ball = & mut skater.collision_balls[ib];
                         ball.velocity += new;
                     }
                 }
@@ -483,12 +480,17 @@ fn apply_collisions (players: & mut [(usize, usize, HQMTeam, & mut HQMSkater)], 
                     let mut new = normal.scale(overlap * 0.125) + (original_velocity2 - original_velocity1).scale(0.25);
                     if new.dot(&normal) > 0.0 {
                         limit_rejection(& mut new, &normal, 0.01);
-                        let mass1 = players[i].3.collision_balls[ib].mass;
-                        let mass2 = players[j].3.collision_balls[jb].mass;
+                        let (_, skater1) = &players[i];
+                        let (_, skater2) = &players[j];
+                        let mass1 = skater1.collision_balls[ib].mass;
+                        let mass2 = skater2.collision_balls[jb].mass;
                         let mass_sum = mass1 + mass2;
 
-                        players[i].3.collision_balls[ib].velocity += new.scale(mass2 / mass_sum);
-                        players[j].3.collision_balls[jb].velocity -= new.scale(mass1 / mass_sum);
+                        let (_, skater1) = & mut players[i];
+                        skater1.collision_balls[ib].velocity += new.scale(mass2 / mass_sum);
+
+                        let (_, skater2) = & mut players[j];
+                        skater2.collision_balls[jb].velocity -= new.scale(mass1 / mass_sum);
                     }
                 }
             }
