@@ -378,11 +378,11 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                     } else {
                         0.0
                     };
+                    println!("{}", speed);
                     if let HQMShootoutAttemptState::Attack = *state {
-                        if speed < 0.0 {
+                        if speed < -0.005 {
                             *state = HQMShootoutAttemptState::NoMoreAttack;
                         }
-
                     }
 
                     server.game.time = server.game.time.saturating_sub(1);
