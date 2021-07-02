@@ -378,7 +378,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                     } else {
                         0.0
                     };
-                    println!("{}", speed);
+
                     if let HQMShootoutAttemptState::Attack = *state {
                         if speed < -0.005 {
                             *state = HQMShootoutAttemptState::NoMoreAttack;
