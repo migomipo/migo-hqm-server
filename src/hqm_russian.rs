@@ -228,6 +228,21 @@ impl HQMRussianBehaviour {
 
     }
 
+    fn reset_game (& mut self, server: & mut HQMServer, player_index: usize) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin{
+                info!("{} ({}) reset game",player.player_name, player_index);
+                let msg = format!("Game reset by {}",player.player_name);
+
+                server.new_game(self.create_game());
+
+                server.add_server_chat_message(&msg);
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
 }
 
 impl HQMServerBehaviour for HQMRussianBehaviour {
@@ -363,8 +378,13 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
 
     }
 
-    fn handle_command(&mut self, _server: &mut HQMServer, _cmd: &str, _arg: &str, _player_index: usize) {
-
+    fn handle_command(&mut self, server: &mut HQMServer, cmd: &str, _arg: &str, player_index: usize) {
+        match cmd {
+            "reset" | "resetgame" => {
+                self.reset_game(server, player_index);
+            },
+            _ => {}
+        }
     }
 
     fn create_game(&mut self) -> HQMGame {
