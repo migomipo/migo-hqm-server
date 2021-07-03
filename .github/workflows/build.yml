@@ -9,30 +9,8 @@ env:
   BIN: migo-hqm-server
 
 jobs:
-  install-cross:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v1
-        with:
-          fetch-depth: 50
-      - uses: XAMPPRocky/get-github-release@v1
-        id: cross
-        with:
-          owner: rust-embedded
-          repo: cross
-          matches: ${{ matrix.platform }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/upload-artifact@v1
-        with:
-          name: cross-${{ matrix.platform }}
-          path: ${{ steps.cross.outputs.install_path }}
-    strategy:
-      matrix:
-        platform: [linux-musl, apple-darwin]
-
   windows:
     runs-on: windows-latest
-    needs: install-cross
     strategy:
       fail-fast: false
       matrix:
@@ -41,8 +19,16 @@ jobs:
           - x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v2
-      - run: bash ci/set_rust_version.bash stable ${{ matrix.target }}
-      - run: bash ci/build.bash cargo ${{ matrix.target }} RELEASE
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{matrix.target}}
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: build
+          args: --release --target ${{matrix.target}}
       - run: |
           7z a "${{ env.BIN }}.zip" config.ini README.md ".\target\${{ matrix.target }}\release\${{ env.BIN }}.exe"
           mv "${{ env.BIN }}.zip" $GITHUB_WORKSPACE
@@ -70,7 +56,6 @@ jobs:
 
   macos:
     runs-on: macos-11.0
-    needs: install-cross
     strategy:
       fail-fast: false
       matrix:
@@ -79,14 +64,16 @@ jobs:
           - aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v2
-      - uses: actions/download-artifact@v1
+      - uses: actions-rs/toolchain@v1
         with:
-          name: cross-apple-darwin
-          path: /usr/local/bin/
-      - run: chmod +x /usr/local/bin/cross
-
-      - run: ci/set_rust_version.bash stable ${{ matrix.target }}
-      - run: ci/build.bash cross ${{ matrix.target }} RELEASE
+          toolchain: stable
+          target: ${{matrix.target}}
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: build
+          args: --release --target ${{matrix.target}}
       - run: tar -czvf ${{ env.BIN }}.tar.gz config.ini README.md -C target/${{ matrix.target }}/release ${{ env.BIN }}
       - uses: XAMPPRocky/create-release@v1.0.2
         id: create_release
@@ -121,14 +108,16 @@ jobs:
           - x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v2
-      - uses: actions/download-artifact@v1
+      - uses: actions-rs/toolchain@v1
         with:
-          name: cross-linux-musl
-          path: /tmp/
-      - run: chmod +x /tmp/cross
-
-      - run: ci/set_rust_version.bash stable ${{ matrix.target }}
-      - run: ci/build.bash /tmp/cross ${{ matrix.target }} RELEASE
+          toolchain: stable
+          target: ${{matrix.target}}
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: build
+          args: --release --target ${{matrix.target}}
       - run: tar -czvf ${{ env.BIN }}.tar.gz config.ini README.md -C target/${{ matrix.target }}/release ${{ env.BIN }}
       - uses: XAMPPRocky/create-release@v1.0.2
         id: create_release
