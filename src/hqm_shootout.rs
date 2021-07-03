@@ -7,9 +7,12 @@ use std::f32::consts::{PI};
 use tracing::info;
 
 enum HQMShootoutAttemptState {
-    Start, // Puck has not been touched yet
-    Attack, // Puck has been touched by attacker, but not touched by goalie, hit post or moved backwards
-    NoMoreAttack, // Puck has moved backwards, hit the post or the goalie, but may still enter the net
+    Attack {
+        progress: f32,
+    }, // Puck has been touched by attacker, but not touched by goalie, hit post or moved backwards
+    NoMoreAttack {
+        final_progress: f32
+    }, // Puck has moved backwards, hit the post or the goalie, but may still enter the net
     Over, // Attempt is over
 }
 
@@ -148,7 +151,9 @@ impl HQMShootoutBehaviour {
         }
 
         self.status = HQMShootoutStatus::Game {
-            state: HQMShootoutAttemptState::Start,
+            state: HQMShootoutAttemptState::Attack {
+                progress: 0.0
+            },
             round: next_round,
             team: next_team
         }
@@ -279,16 +284,19 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
             match event {
                 HQMSimulationEvent::PuckEnteredNet { team: scoring_team, .. } => {
                     if let HQMShootoutStatus::Game { state, team: attacking_team, .. } = & mut self.status {
-                        if let HQMShootoutAttemptState::Start | HQMShootoutAttemptState::Attack | HQMShootoutAttemptState::NoMoreAttack = *state {
+                        if let HQMShootoutAttemptState::Over = *state {
+                            // Ignore
+                        } else {
                             let is_goal = *scoring_team == *attacking_team;
                             self.end_attempt(server, is_goal);
                         }
                     }
-
                 }
                 HQMSimulationEvent::PuckPassedGoalLine { .. } => {
                     if let HQMShootoutStatus::Game { state, .. } = & mut self.status {
-                        if let HQMShootoutAttemptState::Start | HQMShootoutAttemptState::Attack | HQMShootoutAttemptState::NoMoreAttack = *state {
+                        if let HQMShootoutAttemptState::Over = *state {
+                            // Ignore
+                        } else {
                             self.end_attempt(server, false);
                         }
                     }
@@ -306,16 +314,14 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
 
                             if let HQMShootoutStatus::Game { state, team: attacking_team, .. } = & mut self.status {
                                 if touching_team == *attacking_team {
-                                    if let HQMShootoutAttemptState::Start = *state {
-                                        *state = HQMShootoutAttemptState::Attack;
-                                    } else if let HQMShootoutAttemptState::NoMoreAttack = *state {
+                                    if let HQMShootoutAttemptState::NoMoreAttack { .. } = *state {
                                         self.end_attempt(server, false);
                                     }
                                 } else {
-                                    if let HQMShootoutAttemptState::Attack = *state {
-                                        *state = HQMShootoutAttemptState::NoMoreAttack
-                                    } else if let HQMShootoutAttemptState::Start = *state {
-                                        self.end_attempt(server, false);
+                                    if let HQMShootoutAttemptState::Attack { progress } = *state {
+                                        *state = HQMShootoutAttemptState::NoMoreAttack {
+                                            final_progress: progress
+                                        }
                                     }
                                 }
                             }
@@ -325,8 +331,10 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                 HQMSimulationEvent::PuckTouchedNet { team, .. } => {
                     if let HQMShootoutStatus::Game { state, team: attacking_team, .. } = & mut self.status {
                         if *team == *attacking_team {
-                            if let HQMShootoutAttemptState::Start | HQMShootoutAttemptState::Attack = *state {
-                                *state = HQMShootoutAttemptState::NoMoreAttack;
+                            if let HQMShootoutAttemptState::Attack { progress} = *state {
+                                *state = HQMShootoutAttemptState::NoMoreAttack {
+                                    final_progress: progress
+                                };
                             }
                         }
                     }
@@ -361,34 +369,43 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
 
             }
             HQMShootoutStatus::Game { state, team, .. } => {
-                if let HQMShootoutAttemptState::Over = *state {
+                if let HQMShootoutAttemptState::Over = state {
                     server.game.time_break = server.game.time_break.saturating_sub(1);
                     if server.game.time_break == 0 {
                         self.start_next_attempt(server);
                     }
                 } else {
-
-                    let speed = if let Some(puck) = & server.game.world.objects.get_puck(0) {
-                        let puck_speed = &puck.body.linear_velocity;
-                        let normal = match *team {
-                            HQMTeam::Red => -Vector3::z(),
-                            HQMTeam::Blue => Vector3::z()
-                        };
-                        puck_speed.dot(&normal)
-                    } else {
-                        0.0
-                    };
-
-                    if let HQMShootoutAttemptState::Attack = *state {
-                        if speed < -0.005 {
-                            *state = HQMShootoutAttemptState::NoMoreAttack;
-                        }
-                    }
-
                     server.game.time = server.game.time.saturating_sub(1);
                     if server.game.time == 0 {
                         server.game.time = 1; // A hack to avoid "Intermission" or "Game starting"
                         self.end_attempt(server, false);
+                    } else {
+                        if let Some(puck) = server.game.world.objects.get_puck(0) {
+                            let puck_pos = &puck.body.pos;
+                            let center_pos = &server.game.world.rink.center_faceoff_spot.center_position;
+                            let pos_diff = puck_pos - center_pos;
+                            let normal = match *team {
+                                HQMTeam::Red => -Vector3::z(),
+                                HQMTeam::Blue => Vector3::z()
+                            };
+                            let progress = pos_diff.dot(&normal);
+                            if let HQMShootoutAttemptState::Attack {
+                                progress: current_progress
+                            } = state {
+                                if progress > *current_progress {
+                                    *current_progress = progress;
+                                } else if progress - *current_progress < -0.5 {
+                                    // Too far back
+                                    self.end_attempt(server, false);
+                                }
+                            } else if let HQMShootoutAttemptState::NoMoreAttack {
+                                final_progress
+                            } = *state {
+                                if progress - final_progress < -5.0 {
+                                    self.end_attempt(server, false);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -400,8 +417,6 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                 }
             }
         }
-
-
     }
 
     fn handle_command(&mut self, server: &mut HQMServer, cmd: &str, _arg: &str, player_index: usize) {
