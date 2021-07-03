@@ -7,13 +7,13 @@ edition = "2018"
 [dependencies]
 
 nalgebra = "0.27.1"
-tokio = { version = "1.5", features = ["net", "time", "macros", "rt-multi-thread", "sync", "fs"] }
+tokio = { version = "1.8", features = ["net", "time", "macros", "rt-multi-thread", "sync", "fs"] }
 rust-ini = "0.15" # INI For configuration
 bytes = "1.0"
-reqwest = { version = "0.11.3", default-features = false }
-tracing = "0.1.25"
-tracing-subscriber = "0.2.15"
-tracing-appender = "0.1"
+reqwest = { version = "0.11.4", default-features = false }
+tracing = "0.1.26"
+tracing-subscriber = "0.2.19"
+tracing-appender = "0.1.2"
 chrono = "0.4"
 num-integer = "0.1.43"
 
