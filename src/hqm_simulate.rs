@@ -626,7 +626,8 @@ fn do_puck_rink_forces(puck: & HQMPuck, puck_vertices: &[Point3<f32>], rink: & H
         let c = collision_between_vertex_and_rink(vertex, rink);
         if let Some((overlap, normal)) = c {
             let vertex_velocity = speed_of_point_including_rotation(&vertex, &puck.body);
-            let mut puck_force = (normal.scale(overlap * 0.5) - vertex_velocity).scale(0.125 * 0.125);
+            let mut puck_force = normal.scale(overlap * 0.5 * 0.125 * 0.125)
+                - vertex_velocity.scale(0.125 * 0.125);
 
             if normal.dot (&puck_force) > 0.0 {
                 limit_rejection(& mut puck_force, & normal, 0.05);
