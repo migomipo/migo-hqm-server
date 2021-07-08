@@ -103,11 +103,19 @@ async fn main() -> std::io::Result<()> {
 
         // Physics
         let physics_section = conf.section(Some("Physics"));
-        let gravity = get_optional (physics_section, "gravity", 6.80555, |x| x.parse::<f32>().unwrap()) / 10000.0;
+        let gravity = get_optional (physics_section, "gravity", 0.000680555, |x| x.parse::<f32>().unwrap() / 10000.0) ;
+        let player_acceleration = get_optional (physics_section, "player_acceleration", 0.000208333, |x| x.parse::<f32>().unwrap() / 10000.0);
+        let player_deceleration = get_optional (physics_section, "player_deceleration", 0.000555555, |x| x.parse::<f32>().unwrap() / 10000.0);
+        let max_player_speed = get_optional (physics_section, "max_player_speed", 0.05, |x| x.parse::<f32>().unwrap() / 100.0);
+        let puck_rink_friction = get_optional (physics_section, "puck_rink_friction", 0.05, |x| x.parse::<f32>().unwrap());
 
         let physics_config = HQMPhysicsConfiguration {
             gravity,
-            limit_jump_speed
+            limit_jump_speed,
+            player_acceleration,
+            player_deceleration,
+            max_player_speed,
+            puck_rink_friction
         };
 
         let file_appender = tracing_appender::rolling::daily("log", log_name);

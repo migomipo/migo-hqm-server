@@ -1,6 +1,6 @@
 
 
-use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld, HQMRinkNet, LinesAndNet};
+use crate::hqm_game::{HQMGameObject, HQMSkater, HQMBody, HQMPuck, HQMRink, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, HQMGameWorld, HQMRinkNet, LinesAndNet, HQMPhysicsConfiguration};
 use nalgebra::{Vector3, Point3, Vector2, Rotation3};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
 use std::iter::FromIterator;
@@ -59,7 +59,7 @@ impl HQMGameWorld {
 
         let mut collisions = vec![];
         for (i, (_, player)) in players.iter_mut().enumerate() {
-            update_player(i, player, self.physics_config.gravity, self.physics_config.limit_jump_speed, & self.rink, & mut collisions);
+            update_player(i, player, &self.physics_config, & self.rink, & mut collisions);
         }
 
         for i in 0..players.len() {
@@ -86,7 +86,7 @@ impl HQMGameWorld {
                     let normal = stick_v.normalize();
                     let mut force = normal.scale(0.125 * stick_overlap) + (&p2.stick_velocity - &p1.stick_velocity).scale(0.25);
                     if force.dot(&normal) > 0.0 {
-                        limit_rejection(& mut force, & normal, 0.01);
+                        limit_friction(& mut force, & normal, 0.01);
                         p1.stick_velocity += force.scale(0.5);
                         p2.stick_velocity -= force.scale(0.5);
                     }
@@ -100,7 +100,7 @@ impl HQMGameWorld {
             puck.body.linear_velocity[1] -= self.physics_config.gravity;
         }
 
-        update_sticks_and_pucks (& mut players, & mut pucks, & self.rink, & mut events);
+        update_sticks_and_pucks (& mut players, & mut pucks, & self.rink, & mut events, &self.physics_config);
 
         for ((puck_index, puck), old_puck_pos) in pucks.iter_mut().zip(pucks_old_pos.iter()) {
             if let Some(norm) = puck.body.linear_velocity.try_normalize(f32::EPSILON) {
@@ -122,7 +122,8 @@ impl HQMGameWorld {
 
 fn update_sticks_and_pucks (players: & mut [(usize, & mut HQMSkater)],
                            pucks: & mut [(usize, & mut HQMPuck)],
-                           rink: & HQMRink, events: & mut Vec<HQMSimulationEvent>) {
+                           rink: & HQMRink, events: & mut Vec<HQMSimulationEvent>,
+                           physics_config: &HQMPhysicsConfiguration) {
     for i in 0..10 {
 
         for (_, player) in players.iter_mut() {
@@ -135,7 +136,7 @@ fn update_sticks_and_pucks (players: & mut [(usize, & mut HQMSkater)],
 
             let puck_vertices = puck.get_puck_vertices();
             if i == 0 {
-                if let Some((lin, ang)) = do_puck_rink_forces(puck, & puck_vertices, rink) {
+                if let Some((lin, ang)) = do_puck_rink_forces(puck, & puck_vertices, rink, physics_config.puck_rink_friction) {
                     new_puck_linear_velocity += lin;
                     new_puck_angular_velocity += ang;
                 }
@@ -273,7 +274,7 @@ fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vect
     if let Some((overlap, normal)) = collision_between_sphere_and_rink(&player.stick_pos, 0.09375, rink) {
         let mut n = normal.scale(overlap * 0.25) - player.stick_velocity.scale(0.5);
         if n.dot(&normal) > 0.0 {
-            limit_rejection(& mut n, & normal, 0.1);
+            limit_friction(& mut n, & normal, 0.1);
             stick_velocity += n;
         }
     }
@@ -282,16 +283,16 @@ fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vect
 
 }
 
-fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_speed: bool, rink: & HQMRink, collisions: & mut Vec<HQMCollision>) {
+fn update_player(i: usize, player: & mut HQMSkater, physics_config: &HQMPhysicsConfiguration, rink: & HQMRink, collisions: & mut Vec<HQMCollision>) {
     let mut new_player_linear_velocity = player.body.linear_velocity.clone_owned();
     let mut new_player_angular_velocity = player.body.angular_velocity.clone_owned();
 
     player.body.pos += &player.body.linear_velocity;
-    new_player_linear_velocity[1] -= gravity;
+    new_player_linear_velocity[1] -= physics_config.gravity;
     for collision_ball in player.collision_balls.iter_mut() {
         collision_ball.velocity *= 0.999;
         collision_ball.pos += &collision_ball.velocity;
-        collision_ball.velocity[1] -= gravity;
+        collision_ball.velocity[1] -= physics_config.gravity;
     }
     let feet_pos = &player.body.pos - (&player.body.rot * Vector3::y().scale(player.height));
     if feet_pos[1] < 0.0 {
@@ -303,19 +304,19 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
                 &player.body.rot * Vector3::z()
             };
             let max_acceleration = if new_player_linear_velocity.dot(&skate_direction) < 0.0 {
-                0.000555555f32 // If we're accelerating against the current direction of movement
+                physics_config.player_deceleration // If we're accelerating against the current direction of movement
                 // we're decelerating and can do so faster
             } else {
-                0.000208333f32
+                physics_config.player_acceleration
             };
             skate_direction[1] = 0.0;
             skate_direction.normalize_mut();
-            let new_acceleration = skate_direction.scale(0.05) - &new_player_linear_velocity;
+            let new_acceleration = skate_direction.scale(physics_config.max_player_speed) - &new_player_linear_velocity;
 
             new_player_linear_velocity += limit_vector_length(&new_acceleration, max_acceleration);
         }
         if player.input.jump() && !player.jumped_last_frame {
-            let diff = if limit_jump_speed {
+            let diff = if physics_config.limit_jump_speed {
                 (0.025 - new_player_linear_velocity[1]).clamp(0.0, 0.025)
             } else {
                 0.025
@@ -405,7 +406,7 @@ fn update_player(i: usize, player: & mut HQMSkater, gravity: f32, limit_jump_spe
 
             temp2 -= get_projection(&temp2,&direction);
 
-            limit_rejection(& mut temp2, & unit_y, rejection_limit);
+            limit_friction(& mut temp2, & unit_y, rejection_limit);
             new_player_linear_velocity += temp2;
             touches_ice = true;
         }
@@ -465,7 +466,7 @@ fn apply_collisions (players: & mut [(usize, & mut HQMSkater)], collisions: &[HQ
                     let original_velocity = &original_ball_velocities[i][ib];
                     let mut new = normal.scale(overlap * 0.03125) - original_velocity.scale(0.25);
                     if new.dot(&normal) > 0.0 {
-                        limit_rejection(& mut new, &normal, 0.01);
+                        limit_friction(& mut new, &normal, 0.01);
                         let (_, skater) = & mut players[i];
                         let ball = & mut skater.collision_balls[ib];
                         ball.velocity += new;
@@ -479,7 +480,7 @@ fn apply_collisions (players: & mut [(usize, & mut HQMSkater)], collisions: &[HQ
 
                     let mut new = normal.scale(overlap * 0.125) + (original_velocity2 - original_velocity1).scale(0.25);
                     if new.dot(&normal) > 0.0 {
-                        limit_rejection(& mut new, &normal, 0.01);
+                        limit_friction(& mut new, &normal, 0.01);
                         let (_, skater1) = &players[i];
                         let (_, skater2) = &players[j];
                         let mass1 = skater1.collision_balls[ib].mass;
@@ -552,7 +553,7 @@ fn do_puck_net_forces(puck: & HQMPuck, net: &HQMRinkNet) -> Option<(Vector3<f32>
         let mut puck_force = normal.scale(overlap * 0.5) - vertex_velocity.scale(0.5);
 
         if normal.dot (&puck_force) > 0.0 {
-            limit_rejection(& mut puck_force, & normal, 0.5);
+            limit_friction(& mut puck_force, & normal, 0.5);
             let (lin, ang) = calculate_acceleration_on_object(& puck.body, &puck_force, &overlap_pos);
             res = Some((lin, ang))
         }
@@ -571,7 +572,7 @@ fn do_puck_post_forces(puck: & HQMPuck, net: &HQMRinkNet) -> Option<(Vector3<f32
             let mut puck_force = normal.scale(overlap * 0.125) - vertex_velocity.scale (0.25);
 
             if normal.dot (&puck_force) > 0.0 {
-                limit_rejection(&mut puck_force, &normal, 0.2);
+                limit_friction(&mut puck_force, &normal, 0.2);
                 let (lin, ang) = calculate_acceleration_on_object(& puck.body, &puck_force, &p);
                 match res.as_mut() {
                     None => {
@@ -599,7 +600,7 @@ fn do_puck_stick_forces(puck: & HQMPuck, player: & HQMSkater, puck_vertices: &[P
 
             let mut puck_force = normal.scale(dot * 0.125 * 0.5) + (&player.stick_velocity - puck_vertex_speed).scale(0.125);
             if puck_force.dot(&normal) > 0.0 {
-                limit_rejection(& mut puck_force, &normal, 0.5);
+                limit_friction(& mut puck_force, &normal, 0.5);
                 let stick_velocity_change = puck_force.scale(-0.25);
 
                 puck_force.scale_mut(0.75);
@@ -620,7 +621,7 @@ fn do_puck_stick_forces(puck: & HQMPuck, player: & HQMSkater, puck_vertices: &[P
     res
 }
 
-fn do_puck_rink_forces(puck: & HQMPuck, puck_vertices: &[Point3<f32>], rink: & HQMRink) -> Option<(Vector3<f32>, Vector3<f32>)> {
+fn do_puck_rink_forces(puck: & HQMPuck, puck_vertices: &[Point3<f32>], rink: & HQMRink, friction: f32) -> Option<(Vector3<f32>, Vector3<f32>)> {
     let mut res = None;
     for vertex in puck_vertices.iter() {
         let c = collision_between_vertex_and_rink(vertex, rink);
@@ -630,7 +631,7 @@ fn do_puck_rink_forces(puck: & HQMPuck, puck_vertices: &[Point3<f32>], rink: & H
                 - vertex_velocity.scale(0.125 * 0.125);
 
             if normal.dot (&puck_force) > 0.0 {
-                limit_rejection(& mut puck_force, & normal, 0.05);
+                limit_friction(& mut puck_force, & normal, friction);
                 let (lin, ang) = calculate_acceleration_on_object(& puck.body, &puck_force, &vertex);
                 match res.as_mut() {
                     None => {
@@ -859,7 +860,7 @@ fn limit_vector_length2 (v: &Vector2<f32>, max_len: f32) -> Vector2<f32> {
     res
 }
 
-pub fn limit_rejection(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
+pub fn limit_friction(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     let projection_length = v.dot(&normal);
     let projection = normal.scale(projection_length);
     let rejection = &*v - &projection;

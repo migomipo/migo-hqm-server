@@ -274,7 +274,7 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                     if overlap > 0.0 {
                         let mut new = normal.scale(overlap * 0.03125) - collision_ball.velocity.scale(0.25);
                         if new.dot(&normal) > 0.0 {
-                            hqm_simulate::limit_rejection(& mut new, &normal, 0.01);
+                            hqm_simulate::limit_friction(& mut new, &normal, 0.01);
 
                             collision_ball.velocity += new;
                         }

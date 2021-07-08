@@ -252,6 +252,10 @@ pub struct HQMGame {
 pub struct HQMPhysicsConfiguration {
     pub gravity: f32,
     pub limit_jump_speed: bool,
+    pub player_acceleration: f32,
+    pub player_deceleration: f32,
+    pub max_player_speed: f32,
+    pub puck_rink_friction: f32,
 }
 
 impl HQMGame {
