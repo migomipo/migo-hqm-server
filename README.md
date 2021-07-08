@@ -10,7 +10,7 @@ Run `migo-hqm-server` to start the server with config.ini in the current working
 
 ## How to configure
 
-config.ini is a good starting point, and contains the important available settings. It is divided into two sections.
+config.ini is a good starting point, and contains the important available settings. It is divided into three sections.
 
 ### Server
 
@@ -43,6 +43,19 @@ warmup_pucks           | Number of pucks in warmup. Only 32 objects (pucks+playe
 mercy                  | (Match mode only) Mercy rule setting. If 0, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least X goals.
 first                  | (Match mode only) First-to-goals rule setting. If 0, first-to-goals rule will be disabled. Otherwise, games will automatically end if a team scores and and reaches at least X goals scored.
 attempts               | (Russian 1v1 or shootout mode only) How many attempts each team will get. Default is 5 for shootout mode and 10 for Russian 1v1 mode.
+
+### Physics
+Property                  | Explanation
+--------------------------|----------------
+gravity                   | Gravitational acceleration in meters per second squared. Default is 6.80555.
+player_acceleration       | Player acceleration in meters per second squared. Default is 2.08333.
+player_deceleration       | Player deceleration in meters per second squared. Default is 5.55555.
+max_player_speed          | Maximum player speed in meters per second. Default is 5.
+max_player_shift_speed    | Some shift-turning related maximum speed in meters per second. Default is 3.33333.
+puck_rink_friction        | Friction rotation between puck and rink (both ice and boards). Default is 0.05.
+player_turning            | Player turning acceleration in meters per second squared. Default is 4.1666666.
+player_shift_turning      | Player shift-turning acceleration in meters per second squared. Default is 3.88888. 
+player_shift_acceleration | Some shift-turning related acceleration in meters per second squared. Default is 2.7777.
 
 ## Commands
 
