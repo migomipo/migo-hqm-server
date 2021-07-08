@@ -107,15 +107,26 @@ async fn main() -> std::io::Result<()> {
         let player_acceleration = get_optional (physics_section, "player_acceleration", 0.000208333, |x| x.parse::<f32>().unwrap() / 10000.0);
         let player_deceleration = get_optional (physics_section, "player_deceleration", 0.000555555, |x| x.parse::<f32>().unwrap() / 10000.0);
         let max_player_speed = get_optional (physics_section, "max_player_speed", 0.05, |x| x.parse::<f32>().unwrap() / 100.0);
+        let max_player_shift_speed = get_optional (physics_section, "max_player_shift_speed", 0.0333333, |x| x.parse::<f32>().unwrap() / 100.0);
+
         let puck_rink_friction = get_optional (physics_section, "puck_rink_friction", 0.05, |x| x.parse::<f32>().unwrap());
+        let player_turning = get_optional (physics_section, "player_turning", 0.00041666666, |x| x.parse::<f32>().unwrap() / 10000.0);
+        let player_shift_turning = get_optional (physics_section, "player_shift_turning", 0.00038888888, |x| x.parse::<f32>().unwrap() / 10000.0);
+
+        let player_shift_acceleration = get_optional (physics_section, "player_shift_acceleration", 0.00027777, |x| x.parse::<f32>().unwrap() / 10000.0);
+
 
         let physics_config = HQMPhysicsConfiguration {
             gravity,
             limit_jump_speed,
             player_acceleration,
             player_deceleration,
+            player_shift_acceleration,
             max_player_speed,
-            puck_rink_friction
+            max_player_shift_speed,
+            puck_rink_friction,
+            player_turning,
+            player_shift_turning
         };
 
         let file_appender = tracing_appender::rolling::daily("log", log_name);

@@ -256,6 +256,10 @@ pub struct HQMPhysicsConfiguration {
     pub player_deceleration: f32,
     pub max_player_speed: f32,
     pub puck_rink_friction: f32,
+    pub player_turning: f32,
+    pub player_shift_acceleration: f32,
+    pub max_player_shift_speed: f32,
+    pub player_shift_turning: f32,
 }
 
 impl HQMGame {

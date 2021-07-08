@@ -333,19 +333,19 @@ fn update_player(i: usize, player: & mut HQMSkater, physics_config: &HQMPhysicsC
 
     // Turn player
     let turn = player.input.turn.clamp(-1.0, 1.0);
-    let mut turn_change = &player.body.rot * Vector3::y();
+
     if player.input.shift() {
         let mut velocity_adjustment = &player.body.rot * Vector3::x();
         velocity_adjustment[1] = 0.0;
         velocity_adjustment.normalize_mut();
-        velocity_adjustment.scale_mut(0.0333333 * turn);
+        velocity_adjustment.scale_mut(physics_config.max_player_shift_speed * turn);
         velocity_adjustment -= &new_player_linear_velocity;
-        new_player_linear_velocity += limit_vector_length(&velocity_adjustment, 0.00027777);
-        turn_change.scale_mut(turn * 5.6 / 14400.0);
+        new_player_linear_velocity += limit_vector_length(&velocity_adjustment, physics_config.player_shift_acceleration);
+        let turn_change = turn * physics_config.player_shift_turning * (&player.body.rot * Vector3::y());
         new_player_angular_velocity += turn_change;
 
     } else {
-        turn_change.scale_mut(-turn * 6.0 / 14400.0);
+        let turn_change = -turn * physics_config.player_turning * (&player.body.rot * Vector3::y());
         new_player_angular_velocity += turn_change;
     }
 
