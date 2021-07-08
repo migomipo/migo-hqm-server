@@ -422,8 +422,9 @@ fn update_player(i: usize, player: & mut HQMSkater, physics_config: &HQMPhysicsC
             let mut intended_y_axis = Vector3::y();
             if !player.input.shift() {
                 let axis = &player.body.rot * Vector3::z();
-                let temp = -new_player_linear_velocity.dot(&axis) / 0.05;
-                rotate_vector_around_axis(& mut intended_y_axis, -0.225 * turn * temp * axis);
+                let forward_speed = -new_player_linear_velocity.dot(&axis);
+                let rotation_angle = -0.225 * turn * forward_speed / physics_config.max_player_speed;
+                rotate_vector_around_axis(& mut intended_y_axis, rotation_angle * axis);
             }
             intended_y_axis
         };
