@@ -27,7 +27,6 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
-          use-cross: true
           command: build
           args: --release --target ${{matrix.target}}
       - run: |
@@ -72,7 +71,6 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
-          use-cross: true
           command: build
           args: --release --target ${{matrix.target}}
       - run: tar -czvf ${{ env.BIN }}.tar.gz config.ini README.md -C target/${{ matrix.target }}/release ${{ env.BIN }}
