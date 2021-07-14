@@ -43,6 +43,14 @@ pub enum HQMSimulationEvent {
 
 }
 
+fn replace_nan (v: f32, d: f32) -> f32 {
+    if v.is_nan() {
+        d
+    } else {
+        v
+    }
+}
+
 impl HQMGameWorld {
 
     pub(crate) fn simulate_step (&mut self) -> Vec<HQMSimulationEvent> {
@@ -206,8 +214,8 @@ fn update_sticks_and_pucks (players: & mut [(usize, & mut HQMSkater)],
 
 fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vector3<f32>, Vector3<f32>) {
     let stick_input = Vector2::new (
-        player.input.stick[0].clamp(-FRAC_PI_2, FRAC_PI_2),
-        player.input.stick[1].clamp(-5.0*PI / 16.0, FRAC_PI_8)
+        replace_nan(player.input.stick[0], 0.0).clamp(-FRAC_PI_2, FRAC_PI_2),
+        replace_nan(player.input.stick[1], 0.0).clamp(-5.0*PI / 16.0, FRAC_PI_8)
     );
 
     let placement_diff = stick_input - &player.stick_placement;
@@ -242,7 +250,7 @@ fn update_stick(player: & mut HQMSkater, rink: & HQMRink) -> (Vector3<f32>, Vect
 
         // Rotate around the stick axis
         let handle_axis = (&new_stick_rotation * Vector3::new(0.0, 0.75, 1.0)).normalize();
-        rotate_matrix_around_axis(& mut new_stick_rotation, player.input.stick_angle.clamp(-1.0, 1.0) * FRAC_PI_4 * handle_axis);
+        rotate_matrix_around_axis(& mut new_stick_rotation, replace_nan(player.input.stick_angle, 0.0).clamp(-1.0, 1.0) * FRAC_PI_4 * handle_axis);
 
         new_stick_rotation
     };
@@ -296,7 +304,7 @@ fn update_player(i: usize, player: & mut HQMSkater, physics_config: &HQMPhysicsC
     }
     let feet_pos = &player.body.pos - (&player.body.rot * Vector3::y().scale(player.height));
     if feet_pos[1] < 0.0 {
-        let fwbw_from_client = player.input.fwbw.clamp(-1.0, 1.0);
+        let fwbw_from_client = replace_nan(player.input.fwbw, 0.0).clamp(-1.0, 1.0);
         if fwbw_from_client != 0.0 {
             let mut skate_direction = if fwbw_from_client > 0.0 {
                 &player.body.rot * -Vector3::z()
@@ -332,7 +340,7 @@ fn update_player(i: usize, player: & mut HQMSkater, physics_config: &HQMPhysicsC
     player.jumped_last_frame = player.input.jump();
 
     // Turn player
-    let turn = player.input.turn.clamp(-1.0, 1.0);
+    let turn = replace_nan(player.input.turn, 0.0).clamp(-1.0, 1.0);
 
     if player.input.shift() {
         let mut velocity_adjustment = &player.body.rot * Vector3::x();
@@ -352,8 +360,8 @@ fn update_player(i: usize, player: & mut HQMSkater, physics_config: &HQMPhysicsC
 
     rotate_matrix_around_axis(& mut player.body.rot, new_player_angular_velocity);
 
-    adjust_head_body_rot(& mut player.head_rot, player.input.head_rot.clamp(-7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8));
-    adjust_head_body_rot(& mut player.body_rot, player.input.body_rot.clamp( -FRAC_PI_2, FRAC_PI_2));
+    adjust_head_body_rot(& mut player.head_rot, replace_nan(player.input.head_rot, 0.0).clamp(-7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8));
+    adjust_head_body_rot(& mut player.body_rot, replace_nan(player.input.body_rot, 0.0).clamp( -FRAC_PI_2, FRAC_PI_2));
     for (collision_ball_index, collision_ball) in player.collision_balls.iter_mut().enumerate() {
         let mut new_rot = player.body.rot.clone();
         if collision_ball_index == 1 || collision_ball_index == 2 || collision_ball_index == 5 {
