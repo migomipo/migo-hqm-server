@@ -63,6 +63,7 @@ player_shift_acceleration | Some shift-turning related acceleration in meters pe
 
 Commands               | Explanation
 -----------------------|--------------
+/t                     | Write a message that will only be seen by your team mates.
 /list                  | Lists up to 5 player IDs. These IDs are used for a few other commands to uniquely determine a player.
 /list *ID*             | Lists up to 5 player IDs, starting from *ID*, which must be a number.
 /search *S*            | Lists up to 5 player IDs of players who have the substring S in their player name.

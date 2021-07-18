@@ -469,6 +469,9 @@ impl HQMServer {
                     }
                 }
             },
+            "t" => {
+                self.add_user_team_message(arg, player_index);
+            }
             _ => behaviour.handle_command(self, command, arg, player_index),
         }
 
@@ -725,6 +728,29 @@ impl HQMServer {
                 self.allow_join=true;
             }
         }
+    }
+
+    fn add_user_team_message(&mut self, message: &str, sender_index: usize) {
+        if let Some(player) = self.players.get(sender_index) {
+            if let Some(skater) = self.game.world.objects.get_skater_object_for_player(sender_index) {
+                let team = skater.team;
+                info!("{} ({}) to team {}: {}", &player.player_name, sender_index, team, message);
+                let chat = HQMMessage::Chat {
+                    player_index: Some(sender_index),
+                    message: message.to_owned(),
+                };
+                let chat = Rc::new(chat);
+                for skater in self.game.world.objects.get_skater_iter() {
+                    if skater.team == team {
+                        if let Some(player) = self.players.get_mut(skater.connected_player_index) {
+                            player.messages.push(chat.clone());
+                        }
+                    }
+                }
+            }
+
+        }
+
     }
 
     fn add_user_chat_message(&mut self, message: &str, sender_index: usize) {
