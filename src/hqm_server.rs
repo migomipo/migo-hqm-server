@@ -735,15 +735,29 @@ impl HQMServer {
             if let Some(skater) = self.game.world.objects.get_skater_object_for_player(sender_index) {
                 let team = skater.team;
                 info!("{} ({}) to team {}: {}", &player.player_name, sender_index, team, message);
-                let chat = HQMMessage::Chat {
+
+                let change1 = Rc::new(HQMMessage::PlayerUpdate {
+                    player_name: format!("[{}] {}", team, player.player_name),
+                    object: Some((skater.object_index, team)),
+                    player_index: sender_index,
+                    in_server: true
+                });
+                let change2 = Rc::new(HQMMessage::PlayerUpdate {
+                    player_name: player.player_name.clone(),
+                    object: Some((skater.object_index, team)),
+                    player_index: sender_index,
+                    in_server: true
+                });
+                let chat = Rc::new(HQMMessage::Chat {
                     player_index: Some(sender_index),
                     message: message.to_owned(),
-                };
-                let chat = Rc::new(chat);
+                });
                 for skater in self.game.world.objects.get_skater_iter() {
                     if skater.team == team {
                         if let Some(player) = self.players.get_mut(skater.connected_player_index) {
+                            player.messages.push(change1.clone());
                             player.messages.push(chat.clone());
+                            player.messages.push(change2.clone());
                         }
                     }
                 }
