@@ -1,6 +1,6 @@
-use std::cmp::min;
-use nalgebra::{Vector3, U1, U3, Matrix3};
 use nalgebra::storage::Storage;
+use nalgebra::{Matrix3, Vector3, U1, U3};
+use std::cmp::min;
 
 const UXP: Vector3<f32> = Vector3::new(1.0, 0.0, 0.0);
 const UXN: Vector3<f32> = Vector3::new(-1.0, 0.0, 0.0);
@@ -10,14 +10,14 @@ const UZP: Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
 const UZN: Vector3<f32> = Vector3::new(0.0, 0.0, -1.0);
 
 const TABLE: [[&'static Vector3<f32>; 3]; 8] = [
-[&UYP, &UXP, &UZP],
-[&UYP, &UZP, &UXN],
-[&UYP, &UZN, &UXP],
-[&UYP, &UXN, &UZN],
-[&UZP, &UXP, &UYN],
-[&UXN, &UZP, &UYN],
-[&UXP, &UZN, &UYN],
-[&UZN, &UXN, &UYN]
+    [&UYP, &UXP, &UZP],
+    [&UYP, &UZP, &UXN],
+    [&UYP, &UZN, &UXP],
+    [&UYP, &UXN, &UZN],
+    [&UZP, &UXP, &UYN],
+    [&UXN, &UZP, &UYN],
+    [&UXP, &UZN, &UYN],
+    [&UZN, &UXN, &UYN],
 ];
 
 pub fn convert_matrix_to_network(b: u8, v: &Matrix3<f32>) -> (u32, u32) {
@@ -27,7 +27,7 @@ pub fn convert_matrix_to_network(b: u8, v: &Matrix3<f32>) -> (u32, u32) {
 }
 
 #[allow(dead_code)]
-pub fn convert_matrix_from_network(b: u8, v1: u32, v2: u32) -> Matrix3<f32>{
+pub fn convert_matrix_from_network(b: u8, v1: u32, v2: u32) -> Matrix3<f32> {
     let r1 = convert_rot_column_from_network(b, v1);
     let r2 = convert_rot_column_from_network(b, v2);
     let r0 = r1.cross(&r2);
@@ -36,7 +36,6 @@ pub fn convert_matrix_from_network(b: u8, v1: u32, v2: u32) -> Matrix3<f32>{
 
 #[allow(dead_code)]
 fn convert_rot_column_from_network(b: u8, v: u32) -> Vector3<f32> {
-
     let start = v & 7;
 
     let mut temp1 = TABLE[start as usize][0].clone();
@@ -66,17 +65,18 @@ fn convert_rot_column_from_network(b: u8, v: u32) -> Vector3<f32> {
                 temp2 = c2;
                 temp3 = c3;
             }
-            _ => panic!()
+            _ => panic!(),
         }
 
         pos += 2;
     }
     (temp1 + temp2 + temp3).normalize()
-
 }
 
-fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(b: u8, v: &nalgebra::Matrix<f32, U3, U1, S>) -> u32 {
-
+fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(
+    b: u8,
+    v: &nalgebra::Matrix<f32, U3, U1, S>,
+) -> u32 {
     let mut res = 0;
 
     if v[0] < 0.0 {
@@ -92,16 +92,16 @@ fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(b: u8, v: &nalgebra::M
     let mut temp2 = TABLE[res as usize][1].clone();
     let mut temp3 = TABLE[res as usize][2].clone();
     for i in (3..b).step_by(2) {
-        let temp4 = (temp1 + temp2).normalize ();
-        let temp5 = (temp2 + temp3).normalize ();
-        let temp6 = (temp1 + temp3).normalize ();
+        let temp4 = (temp1 + temp2).normalize();
+        let temp5 = (temp2 + temp3).normalize();
+        let temp6 = (temp1 + temp3).normalize();
 
-        let a1 = (temp4-temp6).cross(&(v-temp6));
+        let a1 = (temp4 - temp6).cross(&(v - temp6));
         if a1.dot(&v) < 0.0 {
-            let a2 = (temp5-temp4).cross(&(v-temp4));
+            let a2 = (temp5 - temp4).cross(&(v - temp4));
             if a2.dot(&v) < 0.0 {
-                let a3 = (temp6-temp5).cross(&(v-temp5));
-                if a3.dot (&v) < 0.0 {
+                let a3 = (temp6 - temp5).cross(&(v - temp5));
+                if a3.dot(&v) < 0.0 {
                     res |= 3 << i;
                     temp1 = temp4;
                     temp2 = temp5;
@@ -120,7 +120,6 @@ fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(b: u8, v: &nalgebra::M
             temp2 = temp4;
             temp3 = temp6;
         }
-
     }
     res
 }
@@ -129,7 +128,7 @@ fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(b: u8, v: &nalgebra::M
 pub enum HQMObjectPacket {
     None,
     Puck(HQMPuckPacket),
-    Skater(HQMSkaterPacket)
+    Skater(HQMSkaterPacket),
 }
 
 #[derive(Debug)]
@@ -155,9 +154,12 @@ pub struct HQMMessageWriter<'a> {
 }
 
 impl<'a> HQMMessageWriter<'a> {
-
     pub fn get_bytes_written(&self) -> usize {
-        return if self.bit_pos > 0 { self.pos + 1 } else { self.pos };
+        return if self.bit_pos > 0 {
+            self.pos + 1
+        } else {
+            self.pos
+        };
     }
 
     pub fn get_pos(&self) -> usize {
@@ -207,22 +209,21 @@ impl<'a> HQMMessageWriter<'a> {
     pub fn write_pos(&mut self, n: u8, v: u32, old_v: Option<u32>) {
         let diff = match old_v {
             Some(old_v) => (v as i32) - (old_v as i32),
-            None => i32::MAX
+            None => i32::MAX,
         };
-        if diff >= -(2^2) && diff <= 2^2 - 1 {
+        if diff >= -(2 ^ 2) && diff <= 2 ^ 2 - 1 {
             self.write_bits(2, 0);
             self.write_bits(3, diff as u32);
-        } else if diff >= -(2^5) && diff <= 2^5 - 1 {
+        } else if diff >= -(2 ^ 5) && diff <= 2 ^ 5 - 1 {
             self.write_bits(2, 1);
             self.write_bits(6, diff as u32);
-        } else if diff >= -(2^11) && diff <= 2^11 - 1 {
+        } else if diff >= -(2 ^ 11) && diff <= 2 ^ 11 - 1 {
             self.write_bits(2, 2);
             self.write_bits(12, diff as u32);
         } else {
             self.write_bits(2, 3);
             self.write_bits(n, v);
         }
-
     }
 
     pub fn write_bits(&mut self, n: u8, v: u32) {
@@ -261,7 +262,11 @@ impl<'a> HQMMessageWriter<'a> {
     }
 
     pub fn new(buf: &'a mut [u8]) -> Self {
-        HQMMessageWriter { buf, pos: 0, bit_pos: 0 }
+        HQMMessageWriter {
+            buf,
+            pos: 0,
+            bit_pos: 0,
+        }
     }
 }
 
@@ -272,14 +277,13 @@ pub struct HQMMessageReader<'a> {
 }
 
 impl<'a> HQMMessageReader<'a> {
-
     #[allow(dead_code)]
     pub fn get_pos(&self) -> usize {
         self.pos
     }
 
-    fn safe_get_byte (&self, pos: usize) -> u8 {
-        if pos < self.buf.len () {
+    fn safe_get_byte(&self, pos: usize) -> u8 {
+        if pos < self.buf.len() {
             self.buf[pos]
         } else {
             0
@@ -291,7 +295,6 @@ impl<'a> HQMMessageReader<'a> {
         let res = self.safe_get_byte(self.pos);
         self.pos = self.pos + 1;
         return res;
-
     }
 
     pub fn read_bytes_aligned(&mut self, n: usize) -> Vec<u8> {
@@ -341,15 +344,13 @@ impl<'a> HQMMessageReader<'a> {
                 let diff = self.read_bits_signed(6);
                 let old_value = old_value.unwrap() as i32;
                 (old_value + diff).max(0) as u32
-            },
+            }
             2 => {
                 let diff = self.read_bits_signed(12);
                 let old_value = old_value.unwrap() as i32;
                 (old_value + diff).max(0) as u32
-            },
-            3 => {
-                self.read_bits(b)
-            },
+            }
+            3 => self.read_bits(b),
             _ => panic!(),
         }
     }
@@ -358,12 +359,11 @@ impl<'a> HQMMessageReader<'a> {
     pub fn read_bits_signed(&mut self, b: u8) -> i32 {
         let a = self.read_bits(b);
 
-        if a >= 1 << (b-1) {
+        if a >= 1 << (b - 1) {
             (-1 << b) | (a as i32)
         } else {
             a as i32
         }
-
     }
 
     pub fn read_bits(&mut self, b: u8) -> u32 {
@@ -405,6 +405,10 @@ impl<'a> HQMMessageReader<'a> {
     }
 
     pub fn new(buf: &'a [u8]) -> Self {
-        HQMMessageReader { buf, pos: 0, bit_pos: 0 }
+        HQMMessageReader {
+            buf,
+            pos: 0,
+            bit_pos: 0,
+        }
     }
 }

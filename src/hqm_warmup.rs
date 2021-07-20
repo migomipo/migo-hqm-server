@@ -1,6 +1,6 @@
-use migo_hqm_server::hqm_server::{HQMServerBehaviour, HQMServer, HQMSpawnPoint};
+use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
+use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMSpawnPoint};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
-use migo_hqm_server::hqm_game::{HQMPhysicsConfiguration, HQMTeam, HQMGame};
 use nalgebra::{Point3, Rotation3};
 
 use tracing::info;
@@ -8,19 +8,22 @@ use tracing::info;
 pub struct HQMPermanentWarmup {
     physics_config: HQMPhysicsConfiguration,
     pucks: usize,
-    spawn_point: HQMSpawnPoint
+    spawn_point: HQMSpawnPoint,
 }
 
 impl HQMPermanentWarmup {
-
-    pub fn new (physics_config: HQMPhysicsConfiguration, pucks: usize, spawn_point: HQMSpawnPoint) -> Self {
+    pub fn new(
+        physics_config: HQMPhysicsConfiguration,
+        pucks: usize,
+        spawn_point: HQMSpawnPoint,
+    ) -> Self {
         HQMPermanentWarmup {
             physics_config,
             pucks,
-            spawn_point
+            spawn_point,
         }
     }
-    fn update_players (& mut self, server: & mut HQMServer) {
+    fn update_players(&mut self, server: &mut HQMServer) {
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
@@ -47,39 +50,59 @@ impl HQMPermanentWarmup {
             server.move_to_spectator(player_index);
         }
 
-
         for (player_index, player_name) in joining_red {
-            info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Red);
+            info!(
+                "{} ({}) has joined team {:?}",
+                player_name,
+                player_index,
+                HQMTeam::Red
+            );
             server.move_to_team_spawnpoint(player_index, HQMTeam::Red, self.spawn_point);
         }
         for (player_index, player_name) in joining_blue {
-            info!("{} ({}) has joined team {:?}", player_name, player_index, HQMTeam::Blue);
+            info!(
+                "{} ({}) has joined team {:?}",
+                player_name,
+                player_index,
+                HQMTeam::Blue
+            );
             server.move_to_team_spawnpoint(player_index, HQMTeam::Blue, self.spawn_point);
         }
-
     }
 }
 
 impl HQMServerBehaviour for HQMPermanentWarmup {
-    fn before_tick(& mut self, server: &mut HQMServer) {
+    fn before_tick(&mut self, server: &mut HQMServer) {
         self.update_players(server);
     }
 
-    fn after_tick(& mut self, _server: &mut HQMServer, _events: &[HQMSimulationEvent])  {
+    fn after_tick(&mut self, _server: &mut HQMServer, _events: &[HQMSimulationEvent]) {
         // Nothing
     }
 
-    fn handle_command(& mut self, _server: &mut HQMServer, _cmd: &str, _arg: &str, _player_index: usize) {
-
+    fn handle_command(
+        &mut self,
+        _server: &mut HQMServer,
+        _cmd: &str,
+        _arg: &str,
+        _player_index: usize,
+    ) {
     }
 
-    fn create_game(&mut self) -> HQMGame where Self: Sized {
+    fn create_game(&mut self) -> HQMGame
+    where
+        Self: Sized,
+    {
         let warmup_pucks = self.pucks;
         let mut game = HQMGame::new(warmup_pucks, self.physics_config.clone());
-        let puck_line_start= game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
+        let puck_line_start = game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {
-            let pos = Point3::new(puck_line_start + 0.8*(i as f32), 1.5, game.world.rink.length / 2.0);
+            let pos = Point3::new(
+                puck_line_start + 0.8 * (i as f32),
+                1.5,
+                game.world.rink.length / 2.0,
+            );
             let rot = Rotation3::identity();
             game.world.create_puck_object(pos, rot);
         }

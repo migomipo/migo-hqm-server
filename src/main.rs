@@ -6,23 +6,28 @@ use ini::Ini;
 use std::env;
 
 mod hqm_match;
-mod hqm_warmup;
 mod hqm_russian;
 mod hqm_shootout;
+mod hqm_warmup;
 
-use tracing_subscriber;
-use tracing_appender;
-use ini::ini::Properties;
-use migo_hqm_server::hqm_server::{HQMServerConfiguration, HQMSpawnPoint};
-use migo_hqm_server::hqm_game::HQMPhysicsConfiguration;
-use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration, HQMIcingConfiguration, HQMOffsideConfiguration};
-use crate::hqm_warmup::HQMPermanentWarmup;
+use crate::hqm_match::{
+    HQMIcingConfiguration, HQMMatchBehaviour, HQMMatchConfiguration, HQMOffsideConfiguration,
+};
 use crate::hqm_russian::HQMRussianBehaviour;
 use crate::hqm_shootout::HQMShootoutBehaviour;
+use crate::hqm_warmup::HQMPermanentWarmup;
+use ini::ini::Properties;
+use migo_hqm_server::hqm_game::HQMPhysicsConfiguration;
 use migo_hqm_server::hqm_server;
+use migo_hqm_server::hqm_server::{HQMServerConfiguration, HQMSpawnPoint};
+use tracing_appender;
+use tracing_subscriber;
 
 enum HQMServerMode {
-    Match, PermanentWarmup, Russian, Shootout
+    Match,
+    PermanentWarmup,
+    Russian,
+    Shootout,
 }
 
 #[tokio::main]
@@ -35,63 +40,89 @@ async fn main() -> std::io::Result<()> {
         "config.ini"
     };
 
-
     // Load configuration (if exists)
     if Path::new(config_path).exists() {
-
         // Load configuration file
         let conf = Ini::load_from_file(config_path).unwrap();
 
         // Server information
         let server_section = conf.section(Some("Server")).unwrap();
-        let server_name = server_section.get("name").unwrap().parse::<String>().unwrap();
+        let server_name = server_section
+            .get("name")
+            .unwrap()
+            .parse::<String>()
+            .unwrap();
         let server_port = server_section.get("port").unwrap().parse::<u16>().unwrap();
-        let server_public = server_section.get("public").unwrap().parse::<bool>().unwrap();
-        let server_player_max = server_section.get("player_max").unwrap().parse::<usize>().unwrap();
-        let server_team_max = server_section.get("team_max").unwrap().parse::<usize>().unwrap();
+        let server_public = server_section
+            .get("public")
+            .unwrap()
+            .parse::<bool>()
+            .unwrap();
+        let server_player_max = server_section
+            .get("player_max")
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+        let server_team_max = server_section
+            .get("team_max")
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
         let force_team_size_parity = match server_section.get("force_team_size_parity") {
             Some(s) => s.eq_ignore_ascii_case("true"),
-            None => false
+            None => false,
         };
-        let server_password = server_section.get("password").unwrap().parse::<String>().unwrap();
-        let mode = server_section.get("mode").map_or(HQMServerMode::Match, |x| {
-            match x {
+        let server_password = server_section
+            .get("password")
+            .unwrap()
+            .parse::<String>()
+            .unwrap();
+        let mode = server_section
+            .get("mode")
+            .map_or(HQMServerMode::Match, |x| match x {
                 "warmup" => HQMServerMode::PermanentWarmup,
                 "match" => HQMServerMode::Match,
                 "russian" => HQMServerMode::Russian,
                 "shootout" => HQMServerMode::Shootout,
-                _ => HQMServerMode::Match
-            }
-        });
+                _ => HQMServerMode::Match,
+            });
 
         let replays_enabled = match server_section.get("replays") {
             Some(s) => s.eq_ignore_ascii_case("true"),
-            None => false
+            None => false,
         };
 
         let cheats_enabled = match server_section.get("cheats_enabled") {
             Some(s) => s.eq_ignore_ascii_case("true"),
-            None => false
+            None => false,
         };
-        let log_name = server_section.get("log_name").map_or(format!("{}.log", server_name) , |x| String::from(x));
+        let log_name = server_section
+            .get("log_name")
+            .map_or(format!("{}.log", server_name), |x| String::from(x));
 
         let welcome = server_section.get("welcome").unwrap_or("");
 
-        let welcome_str = welcome.lines()
+        let welcome_str = welcome
+            .lines()
             .map(String::from)
-            .filter(|x| !x.is_empty()).collect();
+            .filter(|x| !x.is_empty())
+            .collect();
 
-        fn get_optional <U, F: FnOnce(&str) -> U>(section: Option<&Properties>, property: &str, default: U, f: F) -> U {
-            section.and_then( |x| x.get(property)).map_or(default, f)
+        fn get_optional<U, F: FnOnce(&str) -> U>(
+            section: Option<&Properties>,
+            property: &str,
+            default: U,
+            f: F,
+        ) -> U {
+            section.and_then(|x| x.get(property)).map_or(default, f)
         }
 
         // Game
         let game_section = conf.section(Some("Game"));
 
-
-        let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, |x| x.eq_ignore_ascii_case("true"));
-
-
+        let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, |x| {
+            x.eq_ignore_ascii_case("true")
+        });
 
         let config = HQMServerConfiguration {
             welcome: welcome_str,
@@ -103,18 +134,44 @@ async fn main() -> std::io::Result<()> {
 
         // Physics
         let physics_section = conf.section(Some("Physics"));
-        let gravity = get_optional (physics_section, "gravity", 0.000680555, |x| x.parse::<f32>().unwrap() / 10000.0) ;
-        let player_acceleration = get_optional (physics_section, "player_acceleration", 0.000208333, |x| x.parse::<f32>().unwrap() / 10000.0);
-        let player_deceleration = get_optional (physics_section, "player_deceleration", 0.000555555, |x| x.parse::<f32>().unwrap() / 10000.0);
-        let max_player_speed = get_optional (physics_section, "max_player_speed", 0.05, |x| x.parse::<f32>().unwrap() / 100.0);
-        let max_player_shift_speed = get_optional (physics_section, "max_player_shift_speed", 0.0333333, |x| x.parse::<f32>().unwrap() / 100.0);
+        let gravity = get_optional(physics_section, "gravity", 0.000680555, |x| {
+            x.parse::<f32>().unwrap() / 10000.0
+        });
+        let player_acceleration =
+            get_optional(physics_section, "player_acceleration", 0.000208333, |x| {
+                x.parse::<f32>().unwrap() / 10000.0
+            });
+        let player_deceleration =
+            get_optional(physics_section, "player_deceleration", 0.000555555, |x| {
+                x.parse::<f32>().unwrap() / 10000.0
+            });
+        let max_player_speed = get_optional(physics_section, "max_player_speed", 0.05, |x| {
+            x.parse::<f32>().unwrap() / 100.0
+        });
+        let max_player_shift_speed =
+            get_optional(physics_section, "max_player_shift_speed", 0.0333333, |x| {
+                x.parse::<f32>().unwrap() / 100.0
+            });
 
-        let puck_rink_friction = get_optional (physics_section, "puck_rink_friction", 0.05, |x| x.parse::<f32>().unwrap());
-        let player_turning = get_optional (physics_section, "player_turning", 0.00041666666, |x| x.parse::<f32>().unwrap() / 10000.0);
-        let player_shift_turning = get_optional (physics_section, "player_shift_turning", 0.00038888888, |x| x.parse::<f32>().unwrap() / 10000.0);
+        let puck_rink_friction = get_optional(physics_section, "puck_rink_friction", 0.05, |x| {
+            x.parse::<f32>().unwrap()
+        });
+        let player_turning = get_optional(physics_section, "player_turning", 0.00041666666, |x| {
+            x.parse::<f32>().unwrap() / 10000.0
+        });
+        let player_shift_turning = get_optional(
+            physics_section,
+            "player_shift_turning",
+            0.00038888888,
+            |x| x.parse::<f32>().unwrap() / 10000.0,
+        );
 
-        let player_shift_acceleration = get_optional (physics_section, "player_shift_acceleration", 0.00027777, |x| x.parse::<f32>().unwrap() / 10000.0);
-
+        let player_shift_acceleration = get_optional(
+            physics_section,
+            "player_shift_acceleration",
+            0.00027777,
+            |x| x.parse::<f32>().unwrap() / 10000.0,
+        );
 
         let physics_config = HQMPhysicsConfiguration {
             gravity,
@@ -126,46 +183,66 @@ async fn main() -> std::io::Result<()> {
             max_player_shift_speed,
             puck_rink_friction,
             player_turning,
-            player_shift_turning
+            player_shift_turning,
         };
 
         let file_appender = tracing_appender::rolling::daily("log", log_name);
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-        tracing_subscriber::fmt()
-            .with_writer(non_blocking)
-            .init();
+        tracing_subscriber::fmt().with_writer(non_blocking).init();
 
         return match mode {
             HQMServerMode::Match => {
-                let rules_time_period = get_optional(game_section, "time_period", 300, |x| x.parse::<u32>().unwrap());
-                let rules_time_warmup = get_optional(game_section, "time_warmup", 300, |x| x.parse::<u32>().unwrap());
-                let rule_time_break = get_optional(game_section, "time_break", 10, |x| x.parse::<u32>().unwrap());
-                let rule_time_intermission = get_optional(game_section, "time_intermission", 20, |x| x.parse::<u32>().unwrap());
-                let warmup_pucks = get_optional(game_section, "warmup_pucks", 1, |x| x.parse::<usize>().unwrap());
-
+                let rules_time_period = get_optional(game_section, "time_period", 300, |x| {
+                    x.parse::<u32>().unwrap()
+                });
+                let rules_time_warmup = get_optional(game_section, "time_warmup", 300, |x| {
+                    x.parse::<u32>().unwrap()
+                });
+                let rule_time_break = get_optional(game_section, "time_break", 10, |x| {
+                    x.parse::<u32>().unwrap()
+                });
+                let rule_time_intermission =
+                    get_optional(game_section, "time_intermission", 20, |x| {
+                        x.parse::<u32>().unwrap()
+                    });
+                let warmup_pucks = get_optional(game_section, "warmup_pucks", 1, |x| {
+                    x.parse::<usize>().unwrap()
+                });
 
                 let mercy = get_optional(game_section, "mercy", 0, |x| x.parse::<u32>().unwrap());
-                let first_to = get_optional(game_section, "first", 0, |x| x.parse::<u32>().unwrap());
+                let first_to =
+                    get_optional(game_section, "first", 0, |x| x.parse::<u32>().unwrap());
 
-                let icing = get_optional(game_section, "icing", HQMIcingConfiguration::Off, |x| match x {
-                    "on" | "touch" => HQMIcingConfiguration::Touch,
-                    "notouch" => HQMIcingConfiguration::NoTouch,
-                    _ => HQMIcingConfiguration::Off
-                });
+                let icing =
+                    get_optional(
+                        game_section,
+                        "icing",
+                        HQMIcingConfiguration::Off,
+                        |x| match x {
+                            "on" | "touch" => HQMIcingConfiguration::Touch,
+                            "notouch" => HQMIcingConfiguration::NoTouch,
+                            _ => HQMIcingConfiguration::Off,
+                        },
+                    );
 
-                let offside = get_optional(game_section, "offside", HQMOffsideConfiguration::Off, |x| match x {
-                    "on" | "delayed" => HQMOffsideConfiguration::Delayed,
-                    "immediate" | "imm" => HQMOffsideConfiguration::Immediate,
-                    _ => HQMOffsideConfiguration::Off
-                });
+                let offside = get_optional(
+                    game_section,
+                    "offside",
+                    HQMOffsideConfiguration::Off,
+                    |x| match x {
+                        "on" | "delayed" => HQMOffsideConfiguration::Delayed,
+                        "immediate" | "imm" => HQMOffsideConfiguration::Immediate,
+                        _ => HQMOffsideConfiguration::Off,
+                    },
+                );
 
-                let spawn_point = get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
-                    "bench" => HQMSpawnPoint::Bench,
-                    _ => HQMSpawnPoint::Center
-                });
+                let spawn_point =
+                    get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
+                        "bench" => HQMSpawnPoint::Bench,
+                        _ => HQMSpawnPoint::Center,
+                    });
 
                 let match_config = HQMMatchConfiguration {
-
                     time_period: rules_time_period,
                     time_warmup: rules_time_warmup,
                     time_break: rule_time_break,
@@ -180,38 +257,63 @@ async fn main() -> std::io::Result<()> {
                     cheats_enabled,
                     spawn_point,
                     physics_config,
-                    team_max: server_team_max
+                    team_max: server_team_max,
                 };
 
-                hqm_server::run_server(server_port, server_public, config, HQMMatchBehaviour::new (match_config)).await
+                hqm_server::run_server(
+                    server_port,
+                    server_public,
+                    config,
+                    HQMMatchBehaviour::new(match_config),
+                )
+                .await
             }
             HQMServerMode::PermanentWarmup => {
-                let warmup_pucks = get_optional(game_section, "warmup_pucks", 1, |x| x.parse::<usize>().unwrap());
-
-                let spawn_point = get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
-                    "bench" => HQMSpawnPoint::Bench,
-                    _ => HQMSpawnPoint::Center
+                let warmup_pucks = get_optional(game_section, "warmup_pucks", 1, |x| {
+                    x.parse::<usize>().unwrap()
                 });
 
-                hqm_server::run_server(server_port, server_public, config,
-                                       HQMPermanentWarmup::new(physics_config, warmup_pucks, spawn_point)).await
+                let spawn_point =
+                    get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
+                        "bench" => HQMSpawnPoint::Bench,
+                        _ => HQMSpawnPoint::Center,
+                    });
+
+                hqm_server::run_server(
+                    server_port,
+                    server_public,
+                    config,
+                    HQMPermanentWarmup::new(physics_config, warmup_pucks, spawn_point),
+                )
+                .await
             }
             HQMServerMode::Russian => {
-                let attempts = get_optional(game_section, "attempts", 10, |x| x.parse::<u32>().unwrap());
+                let attempts =
+                    get_optional(game_section, "attempts", 10, |x| x.parse::<u32>().unwrap());
 
-                hqm_server::run_server(server_port, server_public, config, HQMRussianBehaviour::new (attempts, server_team_max, physics_config)).await
-            },
-            HQMServerMode::Shootout => {
-                let attempts = get_optional(game_section, "attempts", 5, |x| x.parse::<u32>().unwrap());
-
-                hqm_server::run_server(server_port, server_public, config, HQMShootoutBehaviour::new (attempts, physics_config)).await
+                hqm_server::run_server(
+                    server_port,
+                    server_public,
+                    config,
+                    HQMRussianBehaviour::new(attempts, server_team_max, physics_config),
+                )
+                .await
             }
-        }
+            HQMServerMode::Shootout => {
+                let attempts =
+                    get_optional(game_section, "attempts", 5, |x| x.parse::<u32>().unwrap());
 
+                hqm_server::run_server(
+                    server_port,
+                    server_public,
+                    config,
+                    HQMShootoutBehaviour::new(attempts, physics_config),
+                )
+                .await
+            }
+        };
     } else {
-        println! ("Could not open configuration file {}!", config_path);
-        return Ok(())
+        println!("Could not open configuration file {}!", config_path);
+        return Ok(());
     };
-
 }
-
