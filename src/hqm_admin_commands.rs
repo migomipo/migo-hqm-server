@@ -1,4 +1,4 @@
-use crate::hqm_server::{HQMMuteStatus, HQMServer, HQMServerBehaviour};
+use crate::hqm_server::{HQMMuteStatus, HQMServer, HQMServerBehaviour, HQMServerPlayerData};
 
 use std::net::SocketAddr;
 use tracing::info;
@@ -228,88 +228,51 @@ impl HQMServer {
                 let admin_player_name = player.player_name.clone();
 
                 // 0 full string | 1 begins with | 2 ends with | 3 contains
-                let match_mode = if kick_player_name.starts_with("%") {
-                    if kick_player_name.ends_with("%") {
-                        3 // %contains%
+                let (match_mode, match_f): (i32, Box<dyn Fn(&str) -> bool>) =
+                    if kick_player_name.starts_with("%") {
+                        if kick_player_name.ends_with("%") {
+                            let match_string: String = kick_player_name
+                                .chars()
+                                .skip(1)
+                                .take(kick_player_name.len() - 2)
+                                .collect();
+                            let f = move |player_name: &str| player_name.contains(&match_string);
+                            (3, Box::new(f)) // %contains%
+                        } else {
+                            let match_string: String = kick_player_name
+                                .chars()
+                                .skip(1)
+                                .take(kick_player_name.len() - 1)
+                                .collect();
+                            let f = move |player_name: &str| player_name.starts_with(&match_string);
+                            (2, Box::new(f)) // %ends with
+                        }
+                    } else if kick_player_name.ends_with("%") {
+                        let match_string: String = kick_player_name
+                            .chars()
+                            .take(kick_player_name.len() - 1)
+                            .collect();
+                        let f = move |player_name: &str| player_name.starts_with(&match_string);
+                        (1, Box::new(f)) // begins with%
                     } else {
-                        2 // %ends with
-                    }
-                } else if kick_player_name.ends_with("%") {
-                    1 // begins with%
-                } else {
-                    0
-                };
+                        let match_string = kick_player_name.to_owned();
+                        let f = move |player_name: &str| player_name == match_string;
+                        (0, Box::new(f))
+                    };
 
                 // Because we allow matching using wildcards, we use vectors for multiple instances found
                 let mut kick_player_list: Vec<(usize, String, SocketAddr)> = Vec::new();
 
                 for (player_index, p) in self.players.iter_mut().enumerate() {
                     if let Some(player) = p {
-                        match match_mode {
-                            0 => {
-                                // full string
-                                if player.player_name == kick_player_name {
-                                    kick_player_list.push((
-                                        player_index,
-                                        player.player_name.clone(),
-                                        player.addr,
-                                    ));
-                                }
+                        if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
+                            if match_f(&player.player_name) {
+                                kick_player_list.push((
+                                    player_index,
+                                    player.player_name.clone(),
+                                    data.addr,
+                                ));
                             }
-                            1 => {
-                                // begins with%
-                                let match_string: String = kick_player_name
-                                    .chars()
-                                    .take(kick_player_name.len() - 1)
-                                    .collect();
-
-                                if player.player_name.starts_with(&match_string)
-                                    || player.player_name == kick_player_name
-                                {
-                                    kick_player_list.push((
-                                        player_index,
-                                        player.player_name.clone(),
-                                        player.addr,
-                                    ));
-                                }
-                            }
-                            2 => {
-                                // %ends with
-                                let match_string: String = kick_player_name
-                                    .chars()
-                                    .skip(1)
-                                    .take(kick_player_name.len() - 1)
-                                    .collect();
-
-                                if player.player_name.ends_with(&match_string)
-                                    || player.player_name == kick_player_name
-                                {
-                                    kick_player_list.push((
-                                        player_index,
-                                        player.player_name.clone(),
-                                        player.addr,
-                                    ));
-                                }
-                            }
-                            3 => {
-                                // %contains%
-                                let match_string: String = kick_player_name
-                                    .chars()
-                                    .skip(1)
-                                    .take(kick_player_name.len() - 2)
-                                    .collect();
-
-                                if player.player_name.contains(&match_string)
-                                    || player.player_name == kick_player_name
-                                {
-                                    kick_player_list.push((
-                                        player_index,
-                                        player.player_name.clone(),
-                                        player.addr,
-                                    ));
-                                }
-                            }
-                            _ => {}
                         }
                     }
                 }
@@ -404,35 +367,41 @@ impl HQMServer {
                 if kick_player_index != admin_player_index {
                     if kick_player_index < self.players.len() {
                         if let Some(kick_player) = self.players.get(kick_player_index) {
-                            let kick_player_name = kick_player.player_name.clone();
-                            let kick_ip = kick_player.addr.ip().clone();
-                            behaviour.before_player_exit(self, kick_player_index);
-                            self.remove_player(kick_player_index);
+                            if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
+                                let kick_player_name = kick_player.player_name.clone();
+                                let kick_ip = data.addr.ip().clone();
+                                behaviour.before_player_exit(self, kick_player_index);
+                                self.remove_player(kick_player_index);
 
-                            if ban_player {
-                                self.ban_list.insert(kick_ip);
+                                if ban_player {
+                                    self.ban_list.insert(kick_ip);
 
-                                info!(
-                                    "{} ({}) banned {} ({})",
-                                    admin_player_name,
-                                    admin_player_index,
-                                    kick_player_name,
-                                    kick_player_name
-                                );
-                                let msg =
-                                    format!("{} banned by {}", kick_player_name, admin_player_name);
-                                self.add_server_chat_message(&msg);
-                            } else {
-                                info!(
-                                    "{} ({}) kicked {} ({})",
-                                    admin_player_name,
-                                    admin_player_index,
-                                    kick_player_name,
-                                    kick_player_name
-                                );
-                                let msg =
-                                    format!("{} kicked by {}", kick_player_name, admin_player_name);
-                                self.add_server_chat_message(&msg);
+                                    info!(
+                                        "{} ({}) banned {} ({})",
+                                        admin_player_name,
+                                        admin_player_index,
+                                        kick_player_name,
+                                        kick_player_name
+                                    );
+                                    let msg = format!(
+                                        "{} banned by {}",
+                                        kick_player_name, admin_player_name
+                                    );
+                                    self.add_server_chat_message(&msg);
+                                } else {
+                                    info!(
+                                        "{} ({}) kicked {} ({})",
+                                        admin_player_name,
+                                        admin_player_index,
+                                        kick_player_name,
+                                        kick_player_name
+                                    );
+                                    let msg = format!(
+                                        "{} kicked by {}",
+                                        kick_player_name, admin_player_name
+                                    );
+                                    self.add_server_chat_message(&msg);
+                                }
                             }
                         }
                     }

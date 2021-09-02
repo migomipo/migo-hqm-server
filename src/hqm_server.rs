@@ -60,7 +60,7 @@ impl HQMClientVersion {
 }
 
 pub struct HQMServerPlayerList {
-    players: Vec<Option<HQMConnectedPlayer>>,
+    players: Vec<Option<HQMServerPlayer>>,
 }
 
 impl HQMServerPlayerList {
@@ -68,15 +68,15 @@ impl HQMServerPlayerList {
         self.players.len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = Option<&HQMConnectedPlayer>> {
+    pub fn iter(&self) -> impl Iterator<Item = Option<&HQMServerPlayer>> {
         self.players.iter().map(|x| x.as_ref())
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = Option<&mut HQMConnectedPlayer>> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = Option<&mut HQMServerPlayer>> {
         self.players.iter_mut().map(|x| x.as_mut())
     }
 
-    pub fn get(&self, player_index: usize) -> Option<&HQMConnectedPlayer> {
+    pub fn get(&self, player_index: usize) -> Option<&HQMServerPlayer> {
         if let Some(x) = self.players.get(player_index) {
             x.as_ref()
         } else {
@@ -84,7 +84,7 @@ impl HQMServerPlayerList {
         }
     }
 
-    pub fn get_mut(&mut self, player_index: usize) -> Option<&mut HQMConnectedPlayer> {
+    pub fn get_mut(&mut self, player_index: usize) -> Option<&mut HQMServerPlayer> {
         if let Some(x) = self.players.get_mut(player_index) {
             x.as_mut()
         } else {
@@ -96,7 +96,7 @@ impl HQMServerPlayerList {
         self.players[player_index] = None;
     }
 
-    fn add_player(&mut self, player_index: usize, player: HQMConnectedPlayer) {
+    fn add_player(&mut self, player_index: usize, player: HQMServerPlayer) {
         self.players[player_index] = Some(player);
     }
 }
@@ -206,89 +206,89 @@ impl HQMServer {
                 return;
             }
         };
+        if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
+            let current_game_id = parser.read_u32_aligned();
 
-        let current_game_id = parser.read_u32_aligned();
+            let input_stick_angle = parser.read_f32_aligned();
+            let input_turn = parser.read_f32_aligned();
+            let input_unknown = parser.read_f32_aligned();
+            let input_fwbw = parser.read_f32_aligned();
+            let input_stick_rot_1 = parser.read_f32_aligned();
+            let input_stick_rot_2 = parser.read_f32_aligned();
+            let input_head_rot = parser.read_f32_aligned();
+            let input_body_rot = parser.read_f32_aligned();
+            let input_keys = parser.read_u32_aligned();
+            let input = HQMPlayerInput {
+                stick_angle: input_stick_angle,
+                turn: input_turn,
+                unknown: input_unknown,
+                fwbw: input_fwbw,
+                stick: Vector2::new(input_stick_rot_1, input_stick_rot_2),
+                head_rot: input_head_rot,
+                body_rot: input_body_rot,
+                keys: input_keys,
+            };
 
-        let input_stick_angle = parser.read_f32_aligned();
-        let input_turn = parser.read_f32_aligned();
-        let input_unknown = parser.read_f32_aligned();
-        let input_fwbw = parser.read_f32_aligned();
-        let input_stick_rot_1 = parser.read_f32_aligned();
-        let input_stick_rot_2 = parser.read_f32_aligned();
-        let input_head_rot = parser.read_f32_aligned();
-        let input_body_rot = parser.read_f32_aligned();
-        let input_keys = parser.read_u32_aligned();
-        let input = HQMPlayerInput {
-            stick_angle: input_stick_angle,
-            turn: input_turn,
-            unknown: input_unknown,
-            fwbw: input_fwbw,
-            stick: Vector2::new(input_stick_rot_1, input_stick_rot_2),
-            head_rot: input_head_rot,
-            body_rot: input_body_rot,
-            keys: input_keys,
-        };
-
-        let deltatime = if client_version.has_ping() {
-            Some(parser.read_u32_aligned())
-        } else {
-            None
-        };
-
-        let new_known_packet = parser.read_u32_aligned();
-        let known_msgpos = parser.read_u16_aligned() as usize;
-
-        let time_received = Instant::now();
-
-        let chat = {
-            let has_chat_msg = parser.read_bits(1) == 1;
-            if has_chat_msg {
-                let rep = parser.read_bits(3) as u8;
-                let byte_num = parser.read_bits(8) as usize;
-                let message = parser.read_bytes_aligned(byte_num);
-                Some((rep, message))
-            } else {
-                None
-            }
-        };
-
-        let duration_since_packet =
-            if player.game_id == current_game_id && player.known_packet < new_known_packet {
-                let ticks = &self.game.saved_ticks;
-                self.game
-                    .packet
-                    .checked_sub(new_known_packet)
-                    .and_then(|diff| ticks.get(diff as usize))
-                    .map(|x| x.time)
-                    .and_then(|last_time_received| {
-                        time_received.checked_duration_since(last_time_received)
-                    })
+            let deltatime = if client_version.has_ping() {
+                Some(parser.read_u32_aligned())
             } else {
                 None
             };
 
-        if let Some(duration_since_packet) = duration_since_packet {
-            player.last_ping.truncate(100 - 1);
-            player
-                .last_ping
-                .push_front(duration_since_packet.as_secs_f32());
-        }
+            let new_known_packet = parser.read_u32_aligned();
+            let known_msgpos = parser.read_u16_aligned() as usize;
 
-        player.inactivity = 0;
-        player.client_version = client_version;
-        player.known_packet = new_known_packet;
-        player.input = input;
-        player.game_id = current_game_id;
-        player.known_msgpos = known_msgpos;
+            let time_received = Instant::now();
 
-        if let Some(deltatime) = deltatime {
-            player.deltatime = deltatime;
-        }
+            let chat = {
+                let has_chat_msg = parser.read_bits(1) == 1;
+                if has_chat_msg {
+                    let rep = parser.read_bits(3) as u8;
+                    let byte_num = parser.read_bits(8) as usize;
+                    let message = parser.read_bytes_aligned(byte_num);
+                    Some((rep, message))
+                } else {
+                    None
+                }
+            };
 
-        if let Some((rep, message)) = chat {
-            if player.chat_rep != Some(rep) {
-                player.chat_rep = Some(rep);
-                self.process_message(message, player_index, behaviour);
+            let duration_since_packet =
+                if player.game_id == current_game_id && data.known_packet < new_known_packet {
+                    let ticks = &self.game.saved_ticks;
+                    self.game
+                        .packet
+                        .checked_sub(new_known_packet)
+                        .and_then(|diff| ticks.get(diff as usize))
+                        .map(|x| x.time)
+                        .and_then(|last_time_received| {
+                            time_received.checked_duration_since(last_time_received)
+                        })
+                } else {
+                    None
+                };
+
+            if let Some(duration_since_packet) = duration_since_packet {
+                data.last_ping.truncate(100 - 1);
+                data.last_ping
+                    .push_front(duration_since_packet.as_secs_f32());
+            }
+
+            data.inactivity = 0;
+            data.client_version = client_version;
+            data.known_packet = new_known_packet;
+            player.input = input;
+            player.game_id = current_game_id;
+            data.known_msgpos = known_msgpos;
+
+            if let Some(deltatime) = deltatime {
+                data.deltatime = deltatime;
+            }
+
+            if let Some((rep, message)) = chat {
+                if data.chat_rep != Some(rep) {
+                    data.chat_rep = Some(rep);
+                    self.process_message(message, player_index, behaviour);
+                }
             }
         }
     }
@@ -507,12 +507,14 @@ impl HQMServer {
             }
             "restoreview" => {
                 if let Some(player) = self.players.get_mut(player_index) {
-                    if player.view_player_index != player_index {
-                        player.view_player_index = player_index;
-                        self.add_directed_server_chat_message(
-                            "View has been restored",
-                            player_index,
-                        );
+                    if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
+                        if data.view_player_index != player_index {
+                            data.view_player_index = player_index;
+                            self.add_directed_server_chat_message(
+                                "View has been restored",
+                                player_index,
+                            );
+                        }
                     }
                 }
             }
@@ -556,22 +558,24 @@ impl HQMServer {
             if let Some(view_player) = self.players.get(view_player_index) {
                 let view_player_name = view_player.player_name.clone();
                 if let Some(player) = self.players.get_mut(player_index) {
-                    if view_player_index != player.view_player_index {
-                        if self.game.world.objects.has_skater(player_index) {
-                            self.add_directed_server_chat_message(
-                                "You must be a spectator to change view",
-                                player_index,
-                            );
-                        } else {
-                            player.view_player_index = view_player_index;
-                            if player_index != view_player_index {
-                                let str = format!("You are now viewing {}", view_player_name);
-                                self.add_directed_server_chat_message(&str, player_index);
-                            } else {
+                    if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
+                        if view_player_index != data.view_player_index {
+                            if self.game.world.objects.has_skater(player_index) {
                                 self.add_directed_server_chat_message(
-                                    "View has been restored",
+                                    "You must be a spectator to change view",
                                     player_index,
                                 );
+                            } else {
+                                data.view_player_index = view_player_index;
+                                if player_index != view_player_index {
+                                    let str = format!("You are now viewing {}", view_player_name);
+                                    self.add_directed_server_chat_message(&str, player_index);
+                                } else {
+                                    self.add_directed_server_chat_message(
+                                        "View has been restored",
+                                        player_index,
+                                    );
+                                }
                             }
                         }
                     }
@@ -588,41 +592,52 @@ impl HQMServer {
     fn ping(&mut self, ping_player_index: usize, player_index: usize) {
         if ping_player_index < self.players.len() {
             if let Some(ping_player) = self.players.get(ping_player_index) {
-                if ping_player.last_ping.is_empty() {
-                    let msg = format!("No ping values found for {}", ping_player.player_name);
-                    self.add_directed_server_chat_message(&msg, player_index);
-                } else {
-                    let n = ping_player.last_ping.len() as f32;
-                    let mut min = f32::INFINITY;
-                    let mut max = f32::NEG_INFINITY;
-                    let mut sum = 0f32;
-                    for i in ping_player.last_ping.iter() {
-                        min = min.min(*i);
-                        max = max.max(*i);
-                        sum += *i;
-                    }
-                    let avg = sum / n;
-                    let dev = {
-                        let mut s = 0f32;
-                        for i in ping_player.last_ping.iter() {
-                            s += (*i - avg).powi(2);
-                        }
-                        (s / n).sqrt()
-                    };
+                match &ping_player.data {
+                    HQMServerPlayerData::NetworkPlayer { data } => {
+                        if data.last_ping.is_empty() {
+                            let msg =
+                                format!("No ping values found for {}", ping_player.player_name);
+                            self.add_directed_server_chat_message(&msg, player_index);
+                        } else {
+                            let n = data.last_ping.len() as f32;
+                            let mut min = f32::INFINITY;
+                            let mut max = f32::NEG_INFINITY;
+                            let mut sum = 0f32;
+                            for i in data.last_ping.iter() {
+                                min = min.min(*i);
+                                max = max.max(*i);
+                                sum += *i;
+                            }
+                            let avg = sum / n;
+                            let dev = {
+                                let mut s = 0f32;
+                                for i in data.last_ping.iter() {
+                                    s += (*i - avg).powi(2);
+                                }
+                                (s / n).sqrt()
+                            };
 
-                    let msg1 = format!(
-                        "{} ping: avg {:.0} ms",
-                        ping_player.player_name,
-                        (avg * 1000f32)
-                    );
-                    let msg2 = format!(
-                        "min {:.0} ms, max {:.0} ms, std.dev {:.1}",
-                        (min * 1000f32),
-                        (max * 1000f32),
-                        (dev * 1000f32)
-                    );
-                    self.add_directed_server_chat_message(&msg1, player_index);
-                    self.add_directed_server_chat_message(&msg2, player_index);
+                            let msg1 = format!(
+                                "{} ping: avg {:.0} ms",
+                                ping_player.player_name,
+                                (avg * 1000f32)
+                            );
+                            let msg2 = format!(
+                                "min {:.0} ms, max {:.0} ms, std.dev {:.1}",
+                                (min * 1000f32),
+                                (max * 1000f32),
+                                (dev * 1000f32)
+                            );
+                            self.add_directed_server_chat_message(&msg1, player_index);
+                            self.add_directed_server_chat_message(&msg2, player_index);
+                        }
+                    }
+                    HQMServerPlayerData::Bot { .. } => {
+                        self.add_directed_server_chat_message(
+                            "This player is a server-side bot",
+                            player_index,
+                        );
+                    }
                 }
             } else {
                 self.add_directed_server_chat_message(
@@ -746,7 +761,7 @@ impl HQMServer {
                     }));
                 }
 
-                let new_player = HQMConnectedPlayer::new(player_index, player_name, addr, messages);
+                let new_player = HQMServerPlayer::new(player_index, player_name, addr, messages);
 
                 self.players.add_player(player_index, new_player);
 
@@ -1005,7 +1020,10 @@ impl HQMServer {
                     player_index,
                     player.mass,
                 ) {
-                    player.view_player_index = player_index;
+                    if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
+                        data.view_player_index = player_index;
+                    }
+
                     let player_name = player.player_name.clone();
                     self.add_global_message(
                         HQMMessage::PlayerUpdate {
@@ -1047,7 +1065,13 @@ impl HQMServer {
 
     fn find_player_slot(&self, addr: SocketAddr) -> Option<usize> {
         return self.players.iter().position(|x| match x {
-            Some(x) => x.addr == addr,
+            Some(x) => {
+                if let HQMServerPlayerData::NetworkPlayer { data } = &x.data {
+                    data.addr == addr
+                } else {
+                    false
+                }
+            }
             None => false,
         });
     }
@@ -1073,9 +1097,13 @@ impl HQMServer {
                     .enumerate()
                     .filter_map(|(player_index, player)| {
                         if let Some(player) = player {
-                            player.inactivity += 1;
-                            if player.inactivity > 500 {
-                                Some((player_index, player.player_name.clone()))
+                            if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
+                                data.inactivity += 1;
+                                if data.inactivity > 500 {
+                                    Some((player_index, player.player_name.clone()))
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             }
@@ -1179,8 +1207,11 @@ impl HQMServer {
         let mut messages = Vec::new();
         for (i, p) in self.players.iter_mut().enumerate() {
             if let Some(player) = p {
-                player.known_msgpos = 0;
-                player.known_packet = u32::MAX;
+                if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
+                    data.known_msgpos = 0;
+                    data.known_packet = u32::MAX;
+                }
+
                 player.messages.clear();
                 let update = HQMMessage::PlayerUpdate {
                     player_name: player.player_name.clone(),
@@ -1520,7 +1551,7 @@ fn write_replay(game: &mut HQMGame, write_buf: &mut [u8]) {
 async fn send_updates(
     game_id: u32,
     game: &HQMGame,
-    players: &[Option<HQMConnectedPlayer>],
+    players: &[Option<HQMServerPlayer>],
     socket: &UdpSocket,
     write_buf: &mut [u8],
 ) {
@@ -1541,88 +1572,90 @@ async fn send_updates(
 
     for player in players.iter() {
         if let Some(player) = player {
-            let mut writer = HQMMessageWriter::new(write_buf);
+            if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
+                let mut writer = HQMMessageWriter::new(write_buf);
 
-            if player.game_id != game_id {
-                writer.write_bytes_aligned(GAME_HEADER);
-                writer.write_byte_aligned(6);
-                writer.write_u32_aligned(game_id);
-            } else {
-                writer.write_bytes_aligned(GAME_HEADER);
-                writer.write_byte_aligned(5);
-                writer.write_u32_aligned(game_id);
-                writer.write_u32_aligned(game.game_step);
-                writer.write_bits(
-                    1,
-                    match game.game_over {
-                        true => 1,
-                        false => 0,
-                    },
-                );
-                writer.write_bits(8, game.red_score);
-                writer.write_bits(8, game.blue_score);
-                writer.write_bits(16, game.time);
-
-                writer.write_bits(
-                    16,
-                    if game.is_intermission_goal {
-                        game.time_break
-                    } else {
-                        0
-                    },
-                );
-                writer.write_bits(8, game.period);
-                writer.write_bits(8, player.view_player_index as u32);
-
-                // if using a non-cryptic version, send ping
-                if player.client_version.has_ping() {
-                    writer.write_u32_aligned(player.deltatime);
-                }
-
-                // if baba's second version or above, send rules
-                if player.client_version.has_rules() {
-                    let num = match rules_state {
-                        HQMRulesState::Regular {
-                            offside_warning,
-                            icing_warning,
-                        } => {
-                            let mut res = 0;
-                            if offside_warning {
-                                res |= 1;
-                            }
-                            if icing_warning {
-                                res |= 2;
-                            }
-                            res
-                        }
-                        HQMRulesState::Offside => 4,
-                        HQMRulesState::Icing => 8,
-                    };
-                    writer.write_u32_aligned(num);
-                }
-
-                write_objects(&mut writer, game, packets, player.known_packet);
-
-                let (start, remaining_messages) = if player.known_msgpos > player.messages.len() {
-                    (player.messages.len(), 0)
+                if player.game_id != game_id {
+                    writer.write_bytes_aligned(GAME_HEADER);
+                    writer.write_byte_aligned(6);
+                    writer.write_u32_aligned(game_id);
                 } else {
-                    (
-                        player.known_msgpos,
-                        min(player.messages.len() - player.known_msgpos, 15),
-                    )
-                };
+                    writer.write_bytes_aligned(GAME_HEADER);
+                    writer.write_byte_aligned(5);
+                    writer.write_u32_aligned(game_id);
+                    writer.write_u32_aligned(game.game_step);
+                    writer.write_bits(
+                        1,
+                        match game.game_over {
+                            true => 1,
+                            false => 0,
+                        },
+                    );
+                    writer.write_bits(8, game.red_score);
+                    writer.write_bits(8, game.blue_score);
+                    writer.write_bits(16, game.time);
 
-                writer.write_bits(4, remaining_messages as u32);
-                writer.write_bits(16, start as u32);
+                    writer.write_bits(
+                        16,
+                        if game.is_intermission_goal {
+                            game.time_break
+                        } else {
+                            0
+                        },
+                    );
+                    writer.write_bits(8, game.period);
+                    writer.write_bits(8, data.view_player_index as u32);
 
-                for message in &player.messages[start..start + remaining_messages] {
-                    write_message(&mut writer, Rc::as_ref(message));
+                    // if using a non-cryptic version, send ping
+                    if data.client_version.has_ping() {
+                        writer.write_u32_aligned(data.deltatime);
+                    }
+
+                    // if baba's second version or above, send rules
+                    if data.client_version.has_rules() {
+                        let num = match rules_state {
+                            HQMRulesState::Regular {
+                                offside_warning,
+                                icing_warning,
+                            } => {
+                                let mut res = 0;
+                                if offside_warning {
+                                    res |= 1;
+                                }
+                                if icing_warning {
+                                    res |= 2;
+                                }
+                                res
+                            }
+                            HQMRulesState::Offside => 4,
+                            HQMRulesState::Icing => 8,
+                        };
+                        writer.write_u32_aligned(num);
+                    }
+
+                    write_objects(&mut writer, game, packets, data.known_packet);
+
+                    let (start, remaining_messages) = if data.known_msgpos > player.messages.len() {
+                        (player.messages.len(), 0)
+                    } else {
+                        (
+                            data.known_msgpos,
+                            min(player.messages.len() - data.known_msgpos, 15),
+                        )
+                    };
+
+                    writer.write_bits(4, remaining_messages as u32);
+                    writer.write_bits(16, start as u32);
+
+                    for message in &player.messages[start..start + remaining_messages] {
+                        write_message(&mut writer, Rc::as_ref(message));
+                    }
                 }
-            }
-            let bytes_written = writer.get_bytes_written();
+                let bytes_written = writer.get_bytes_written();
 
-            let slice = &write_buf[0..bytes_written];
-            let _ = socket.send_to(slice, player.addr).await;
+                let slice = &write_buf[0..bytes_written];
+                let _ = socket.send_to(slice, data.addr).await;
+            }
         }
     }
 }
@@ -1677,54 +1710,66 @@ pub(crate) enum HQMMuteStatus {
     ShadowMuted,
     Muted,
 }
-
-pub struct HQMConnectedPlayer {
-    pub player_name: String,
+pub struct HQMNetworkPlayerData {
     pub(crate) addr: SocketAddr,
     client_version: HQMClientVersion,
-    game_id: u32,
-    pub input: HQMPlayerInput,
+    inactivity: u32,
     known_packet: u32,
     known_msgpos: usize,
     chat_rep: Option<u8>,
+    deltatime: u32,
+    last_ping: VecDeque<f32>,
+    view_player_index: usize,
+}
+
+pub enum HQMServerPlayerData {
+    NetworkPlayer { data: HQMNetworkPlayerData },
+    Bot {},
+}
+
+pub struct HQMServerPlayer {
+    pub player_name: String,
+    pub(crate) data: HQMServerPlayerData,
+    game_id: u32,
     messages: Vec<Rc<HQMMessage>>,
-    pub(crate) inactivity: u32,
     pub is_admin: bool,
     pub(crate) is_muted: HQMMuteStatus,
     pub team_switch_timer: u32,
     pub(crate) hand: HQMSkaterHand,
     pub mass: f32,
-    deltatime: u32,
-    last_ping: VecDeque<f32>,
-    pub(crate) view_player_index: usize,
+    pub input: HQMPlayerInput,
 }
 
-impl HQMConnectedPlayer {
+impl HQMServerPlayer {
     pub fn new(
         player_index: usize,
         player_name: String,
         addr: SocketAddr,
         global_messages: Vec<Rc<HQMMessage>>,
     ) -> Self {
-        HQMConnectedPlayer {
+        HQMServerPlayer {
             player_name,
-            addr,
-            client_version: HQMClientVersion::Vanilla,
+            data: HQMServerPlayerData::NetworkPlayer {
+                data: HQMNetworkPlayerData {
+                    addr,
+                    client_version: HQMClientVersion::Vanilla,
+                    inactivity: 0,
+                    known_packet: u32::MAX,
+                    known_msgpos: 0,
+                    chat_rep: None,
+                    // store latest deltime client sends you to respond with it
+                    deltatime: 0,
+                    last_ping: VecDeque::new(),
+                    view_player_index: player_index,
+                },
+            },
             game_id: u32::MAX,
-            known_packet: u32::MAX,
-            known_msgpos: 0,
-            chat_rep: None,
             messages: global_messages,
-            input: HQMPlayerInput::default(),
-            inactivity: 0,
             is_admin: false,
+            input: Default::default(),
             is_muted: HQMMuteStatus::NotMuted,
             hand: HQMSkaterHand::Right,
             team_switch_timer: 0,
-            // store latest deltime client sends you to respond with it
-            deltatime: 0,
-            last_ping: VecDeque::new(),
-            view_player_index: player_index,
             mass: 1.0,
         }
     }
