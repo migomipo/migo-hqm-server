@@ -188,7 +188,7 @@ impl HQMMatchBehaviour {
                         goal_scorer_index = Some(touch.player_index)
                     }
                 } else {
-                    if touch.team == team && Some(player_index) != goal_scorer_index {
+                    if touch.team == team && Some(touch.player_index) != goal_scorer_index {
                         if touch.last_time.saturating_sub(time) <= 2000 {
                             assist_index = Some(touch.player_index)
                         }
