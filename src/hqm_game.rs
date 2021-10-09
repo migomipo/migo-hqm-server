@@ -1068,8 +1068,8 @@ pub struct HQMPuckTouch {
     pub player_index: usize,
     pub team: HQMTeam,
     pub puck_pos: Point3<f32>,
-    pub(crate) time: u32,
-    pub(crate) is_first_touch: bool,
+    pub first_time: u32,
+    pub last_time: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -1132,26 +1132,25 @@ impl HQMPuck {
         if let Some(most_recent_touch) = most_recent_touch {
             if most_recent_touch.player_index == player_index && most_recent_touch.team == team {
                 most_recent_touch.puck_pos = puck_pos;
-                most_recent_touch.time = time;
-                most_recent_touch.is_first_touch = false;
+                most_recent_touch.last_time = time;
             } else {
-                self.touches.truncate(3);
+                self.touches.truncate(15);
                 self.touches.push_front(HQMPuckTouch {
                     player_index,
                     team,
                     puck_pos,
-                    time,
-                    is_first_touch: true,
+                    first_time: time,
+                    last_time: time,
                 });
             }
         } else {
-            self.touches.truncate(3);
+            self.touches.truncate(15);
             self.touches.push_front(HQMPuckTouch {
                 player_index,
                 team,
                 puck_pos,
-                time,
-                is_first_touch: true,
+                first_time: time,
+                last_time: time,
             });
         };
     }

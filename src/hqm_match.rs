@@ -179,15 +179,21 @@ impl HQMMatchBehaviour {
 
         let mut goal_scorer_index = None;
         let mut assist_index = None;
+        let time = server.game.time;
 
         if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
             for touch in this_puck.touches.iter() {
-                if touch.team == team {
-                    let player_index = touch.player_index;
-                    if goal_scorer_index.is_none() {
-                        goal_scorer_index = Some(player_index);
-                    } else if assist_index.is_none() && Some(player_index) != goal_scorer_index {
-                        assist_index = Some(player_index);
+                if goal_scorer_index.is_none() {
+                    if touch.team == team {
+                        goal_scorer_index = Some(touch.player_index)
+                    }
+                } else {
+                    if touch.team == team && Some(player_index) != goal_scorer_index {
+                        if touch.last_time.saturating_sub(time) <= 2000 {
+                            assist_index = Some(touch.player_index)
+                        }
+                        break;
+                    } else if touch.team != team && touch.first_time.saturating_sub(touch.last_time) > 200 {
                         break;
                     }
                 }
