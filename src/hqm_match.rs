@@ -179,22 +179,31 @@ impl HQMMatchBehaviour {
 
         let mut goal_scorer_index = None;
         let mut assist_index = None;
-        let time = server.game.time;
+        let mut goal_scorer_first_touch = 0;
 
         if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
             for touch in this_puck.touches.iter() {
                 if goal_scorer_index.is_none() {
                     if touch.team == team {
-                        goal_scorer_index = Some(touch.player_index)
+                        goal_scorer_index = Some(touch.player_index);
+                        goal_scorer_first_touch = touch.first_time;
                     }
                 } else {
-                    if touch.team == team && Some(touch.player_index) != goal_scorer_index {
-                        if touch.last_time.saturating_sub(time) <= 2000 {
-                            assist_index = Some(touch.player_index)
+                    if touch.team == team {
+                        if Some(touch.player_index) == goal_scorer_index {
+                            goal_scorer_first_touch = touch.first_time;
+                        } else {
+                            // This is the first player on the scoring team that touched it apart from the goal scorer
+                            // If more than 10 seconds passed between the goal scorer's first touch
+                            // and this last touch, it doesn't count as an assist
+
+                            let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
+                            println!("{} {} {}", diff, goal_scorer_first_touch, touch.last_time);
+                            if diff <= 1000 {
+                                assist_index = Some(touch.player_index)
+                            }
+                            break;
                         }
-                        break;
-                    } else if touch.team != team && touch.first_time.saturating_sub(touch.last_time) > 200 {
-                        break;
                     }
                 }
             }
