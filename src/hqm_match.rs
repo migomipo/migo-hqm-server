@@ -198,7 +198,7 @@ impl HQMMatchBehaviour {
                             // and this last touch, it doesn't count as an assist
 
                             let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
-                            println!("{} {} {}", diff, goal_scorer_first_touch, touch.last_time);
+
                             if diff <= 1000 {
                                 assist_index = Some(touch.player_index)
                             }
