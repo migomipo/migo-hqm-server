@@ -1100,8 +1100,20 @@ fn get_faceoff_positions(
                 positions.insert(*player_index, s);
             }
         }
-        if available_positions.contains(&c) && !players.is_empty() {
-            positions.insert(players[0].0, (team, c.clone()));
+        if available_positions.contains(&c) && !positions.is_empty() {
+            // No one is C yet
+
+            let mut found_non_goalie = false;
+            for (_, (_, pos)) in positions.iter_mut() {
+                if pos != "G" {
+                    *pos = c.clone();
+                    found_non_goalie = true;
+                    break;
+                }
+            }
+            if !found_non_goalie {
+                positions.insert(players[0].0, (team, c.clone()));
+            }
         }
     }
 
