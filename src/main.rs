@@ -124,6 +124,10 @@ async fn main() -> std::io::Result<()> {
             x.eq_ignore_ascii_case("true")
         });
 
+        let blue_line_location = get_optional(game_section, "blue_line_location", 22.86f32, |x| {
+            x.parse::<f32>().unwrap()
+        });
+
         let config = HQMServerConfiguration {
             welcome: welcome_str,
             password: server_password,
@@ -258,6 +262,7 @@ async fn main() -> std::io::Result<()> {
                     spawn_point,
                     physics_config,
                     team_max: server_team_max,
+                    blue_line_location,
                 };
 
                 hqm_server::run_server(
@@ -295,7 +300,12 @@ async fn main() -> std::io::Result<()> {
                     server_port,
                     server_public,
                     config,
-                    HQMRussianBehaviour::new(attempts, server_team_max, physics_config),
+                    HQMRussianBehaviour::new(
+                        attempts,
+                        server_team_max,
+                        physics_config,
+                        blue_line_location,
+                    ),
                 )
                 .await
             }

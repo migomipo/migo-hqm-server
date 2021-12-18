@@ -24,7 +24,7 @@ pub struct HQMMatchConfiguration {
     pub icing: HQMIcingConfiguration,
     pub warmup_pucks: usize,
     pub physics_config: HQMPhysicsConfiguration,
-
+    pub blue_line_location: f32,
     pub cheats_enabled: bool,
 
     pub spawn_point: HQMSpawnPoint,
@@ -1333,7 +1333,12 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         self.offside_status = HQMOffsideStatus::InNeutralZone;
 
         let warmup_pucks = self.config.warmup_pucks;
-        let mut game = HQMGame::new(warmup_pucks, self.config.physics_config.clone());
+
+        let mut game = HQMGame::new(
+            warmup_pucks,
+            self.config.physics_config.clone(),
+            self.config.blue_line_location,
+        );
         let puck_line_start = game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {

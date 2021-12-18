@@ -293,12 +293,16 @@ pub struct HQMPhysicsConfiguration {
 }
 
 impl HQMGame {
-    pub fn new(puck_slots: usize, config: HQMPhysicsConfiguration) -> Self {
+    pub fn new(
+        puck_slots: usize,
+        config: HQMPhysicsConfiguration,
+        blue_line_location: f32,
+    ) -> Self {
         let mut object_vec = Vec::with_capacity(32);
         for _ in 0..32 {
             object_vec.push(HQMGameObject::None);
         }
-        let rink = HQMRink::new(30.0, 61.0, 8.5);
+        let rink = HQMRink::new(30.0, 61.0, 8.5, blue_line_location);
 
         HQMGame {
             start_time: Utc::now(),
@@ -494,7 +498,7 @@ pub struct HQMRink {
 }
 
 impl HQMRink {
-    fn new(width: f32, length: f32, corner_radius: f32) -> Self {
+    fn new(width: f32, length: f32, corner_radius: f32, blue_line_distance: f32) -> Self {
         let zero = Point3::new(0.0, 0.0, 0.0);
         let planes = vec![
             (zero.clone(), Vector3::y()),
@@ -532,7 +536,7 @@ impl HQMRink {
         let line_width = 0.3; // IIHF rule 17iii, 17iv
         let goal_line_distance = 4.0; // IIHF rule 17iv
 
-        let blue_line_distance_neutral_zone_edge = 22.86;
+        let blue_line_distance_neutral_zone_edge = blue_line_distance;
         let blue_line_distance_mid = blue_line_distance_neutral_zone_edge - line_width / 2.0; // IIHF rule 17v and 17vi
                                                                                               // IIHF specifies distance between end boards and edge closest to the neutral zone, but my code specifies middle of line
         let distance_neutral_faceoff_spot = blue_line_distance_neutral_zone_edge + 1.5; // IIHF rule 18iv and 18vii

@@ -22,15 +22,22 @@ enum HQMRussianStatus {
 pub(crate) struct HQMRussianBehaviour {
     attempts: u32,
     physics_config: HQMPhysicsConfiguration,
+    blue_line_location: f32,
     status: HQMRussianStatus,
     team_max: usize,
 }
 
 impl HQMRussianBehaviour {
-    pub fn new(attempts: u32, team_max: usize, physics_config: HQMPhysicsConfiguration) -> Self {
+    pub fn new(
+        attempts: u32,
+        team_max: usize,
+        physics_config: HQMPhysicsConfiguration,
+        blue_line_location: f32,
+    ) -> Self {
         HQMRussianBehaviour {
             attempts,
             physics_config,
+            blue_line_location,
             status: HQMRussianStatus::Pause,
             team_max,
         }
@@ -410,7 +417,7 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
 
     fn create_game(&mut self) -> HQMGame {
         self.status = HQMRussianStatus::Pause;
-        let mut game = HQMGame::new(1, self.physics_config.clone());
+        let mut game = HQMGame::new(1, self.physics_config.clone(), self.blue_line_location);
 
         game.time = 1000;
         game

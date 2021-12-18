@@ -469,7 +469,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
 
     fn create_game(&mut self) -> HQMGame {
         self.status = HQMShootoutStatus::Pause;
-        let mut game = HQMGame::new(1, self.physics_config.clone());
+        let mut game = HQMGame::new(1, self.physics_config.clone(), -10.0);
 
         game.time = 1000;
         game
