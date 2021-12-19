@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
 use std::rc::Rc;
+use std::time::Instant;
 
 pub struct HQMSkaterObjectRef<'a> {
     pub connected_player_index: usize,
@@ -261,6 +262,7 @@ pub struct HQMGame {
     pub(crate) replay_last_packet: u32,
     pub(crate) replay_messages: Vec<Rc<HQMMessage>>,
     pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
+    pub(crate) saved_pings: VecDeque<Instant>,
     pub icing_indication: HQMRuleIndication,
     pub offside_indication: HQMRuleIndication,
     pub world: HQMGameWorld,
@@ -313,6 +315,7 @@ impl HQMGame {
             replay_last_packet: u32::MAX,
             replay_messages: vec![],
             saved_ticks: VecDeque::with_capacity(256),
+            saved_pings: VecDeque::with_capacity(100),
             icing_indication: HQMRuleIndication::No,
             offside_indication: HQMRuleIndication::No,
             world: HQMGameWorld {

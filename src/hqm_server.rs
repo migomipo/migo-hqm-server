@@ -26,7 +26,6 @@ const GAME_HEADER: &[u8] = b"Hock";
 
 pub struct HQMSavedTick {
     packets: Vec<HQMObjectPacket>,
-    time: Instant,
 }
 
 struct HQMServerReceivedData {
@@ -254,14 +253,13 @@ impl HQMServer {
 
             let duration_since_packet =
                 if player.game_id == current_game_id && data.known_packet < new_known_packet {
-                    let ticks = &self.game.saved_ticks;
+                    let ticks = &self.game.saved_pings;
                     self.game
                         .packet
                         .checked_sub(new_known_packet)
                         .and_then(|diff| ticks.get(diff as usize))
-                        .map(|x| x.time)
                         .and_then(|last_time_received| {
-                            time_received.checked_duration_since(last_time_received)
+                            time_received.checked_duration_since(*last_time_received)
                         })
                 } else {
                     None
@@ -1140,10 +1138,11 @@ impl HQMServer {
                 self.game
                     .saved_ticks
                     .truncate(self.game.saved_ticks.capacity() - 1);
-                self.game.saved_ticks.push_front(HQMSavedTick {
-                    packets,
-                    time: Instant::now(),
-                });
+                self.game.saved_ticks.push_front(HQMSavedTick { packets });
+                self.game
+                    .saved_ticks
+                    .truncate(self.game.saved_pings.capacity() - 1);
+                self.game.saved_pings.push_front(Instant::now());
 
                 self.game.packet = self.game.packet.wrapping_add(1);
                 self.game.game_step = self.game.game_step.wrapping_add(1);
