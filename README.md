@@ -43,7 +43,8 @@ warmup_pucks           | Number of pucks in warmup. Only 32 objects (pucks+playe
 mercy                  | (Match mode only) Mercy rule setting. If 0, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least X goals.
 first                  | (Match mode only) First-to-goals rule setting. If 0, first-to-goals rule will be disabled. Otherwise, games will automatically end if a team scores and and reaches at least X goals scored.
 attempts               | (Russian 1v1 or shootout mode only) How many attempts each team will get. Default is 5 for shootout mode and 10 for Russian 1v1 mode.
-blue_line_location     | (Match or Russian 1v1 only) Distance between the end boards and the edge of the blue line closest to the neutral zone in meters.
+blue_line_location     | (Match or Russian 1v1 only) Distance between the end boards and the edge of the blue line closest to the neutral zone in meters. Default is 22.86, as in official IIHF rules.
+use_mph                | (Match mode only) If true, print puck speeds in miles per hour.
 
 ### Physics
 Property                  | Explanation

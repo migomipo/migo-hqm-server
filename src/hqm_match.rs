@@ -26,6 +26,7 @@ pub struct HQMMatchConfiguration {
     pub physics_config: HQMPhysicsConfiguration,
     pub blue_line_location: f32,
     pub cheats_enabled: bool,
+    pub use_mph: bool,
 
     pub spawn_point: HQMSpawnPoint,
 }
@@ -177,47 +178,94 @@ impl HQMMatchBehaviour {
         server.game.is_intermission_goal = true;
         self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
 
-        let mut goal_scorer_index = None;
-        let mut assist_index = None;
-        let mut goal_scorer_first_touch = 0;
+        let (goal_scorer_index, assist_index, puck_speed) =
+            if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
+                let mut goal_scorer_index = None;
+                let mut assist_index = None;
+                let mut goal_scorer_first_touch = 0;
+                let puck_speed = this_puck.body.linear_velocity.norm();
 
-        if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
-            for touch in this_puck.touches.iter() {
-                if goal_scorer_index.is_none() {
-                    if touch.team == team {
-                        goal_scorer_index = Some(touch.player_index);
-                        goal_scorer_first_touch = touch.first_time;
-                    }
-                } else {
-                    if touch.team == team {
-                        if Some(touch.player_index) == goal_scorer_index {
+                for touch in this_puck.touches.iter() {
+                    if goal_scorer_index.is_none() {
+                        if touch.team == team {
+                            goal_scorer_index = Some(touch.player_index);
                             goal_scorer_first_touch = touch.first_time;
-                        } else {
-                            // This is the first player on the scoring team that touched it apart from the goal scorer
-                            // If more than 10 seconds passed between the goal scorer's first touch
-                            // and this last touch, it doesn't count as an assist
+                        }
+                    } else {
+                        if touch.team == team {
+                            if Some(touch.player_index) == goal_scorer_index {
+                                goal_scorer_first_touch = touch.first_time;
+                            } else {
+                                // This is the first player on the scoring team that touched it apart from the goal scorer
+                                // If more than 10 seconds passed between the goal scorer's first touch
+                                // and this last touch, it doesn't count as an assist
 
-                            let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
+                                let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
 
-                            if diff <= 1000 {
-                                assist_index = Some(touch.player_index)
+                                if diff <= 1000 {
+                                    assist_index = Some(touch.player_index)
+                                }
+                                break;
                             }
-                            break;
                         }
                     }
                 }
-            }
+
+                (goal_scorer_index, assist_index, puck_speed)
+            } else {
+                return;
+            };
+
+        let (new_score, opponent_score) = match team {
+            HQMTeam::Red => (server.game.red_score, server.game.blue_score),
+            HQMTeam::Blue => (server.game.blue_score, server.game.red_score),
+        };
+
+        let game_over = if server.game.period > 3 && server.game.red_score != server.game.blue_score
+        {
+            true
+        } else if self.config.mercy > 0
+            && new_score.saturating_sub(opponent_score) >= self.config.mercy
+        {
+            true
+        } else if self.config.first_to > 0 && new_score >= self.config.first_to {
+            true
+        } else {
+            false
+        };
+
+        let (puck_speed, puck_speed_unit) = if self.config.use_mph {
+            (puck_speed * 100f32 * 2.23693, "mph")
+        } else {
+            (puck_speed * 100f32 * 3.6, "km/h")
+        };
+
+        server.add_goal_message(team, goal_scorer_index, assist_index);
+
+        if server.game.time < 1000 {
+            let time = server.game.time;
+            let seconds = time / 100;
+            let centi = time % 100;
+
+            let s = format!(
+                "Goal scored with {}.{:02} seconds left, {:.1} {}",
+                seconds, centi, puck_speed, puck_speed_unit
+            );
+            server.add_server_chat_message(&s);
+        } else {
+            let s = format!("Goal scored, {:.1} {}", puck_speed, puck_speed_unit);
+            server.add_server_chat_message(&s);
         }
 
-        self.goal_scored(server, team, goal_scorer_index, assist_index);
+        if game_over {
+            server.game.game_over = true;
+        }
 
         if server.game.game_over {
             server.game.time_break = time_gameover;
         } else {
             server.game.time_break = time_break;
         }
-
-        server.add_goal_message(team, goal_scorer_index, assist_index);
     }
 
     fn handle_events(
@@ -984,44 +1032,6 @@ impl HQMMatchBehaviour {
                 self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
                 self.period_over(server);
             }
-        }
-    }
-
-    fn goal_scored(
-        &mut self,
-        server: &mut HQMServer,
-        team: HQMTeam,
-        _goal_index: Option<usize>,
-        _assist_index: Option<usize>,
-    ) {
-        if server.game.time < 1000 {
-            let time = server.game.time;
-            let seconds = time / 100;
-            let centi = time % 100;
-
-            let s = format!("Goal scored with {}.{:02} seconds left", seconds, centi);
-            server.add_server_chat_message(&s);
-        }
-
-        let (new_score, opponent_score) = match team {
-            HQMTeam::Red => (server.game.red_score, server.game.blue_score),
-            HQMTeam::Blue => (server.game.blue_score, server.game.red_score),
-        };
-
-        let game_over = if server.game.period > 3 && server.game.red_score != server.game.blue_score
-        {
-            true
-        } else if self.config.mercy > 0
-            && new_score.saturating_sub(opponent_score) >= self.config.mercy
-        {
-            true
-        } else if self.config.first_to > 0 && new_score >= self.config.first_to {
-            true
-        } else {
-            false
-        };
-        if game_over {
-            server.game.game_over = true;
         }
     }
 

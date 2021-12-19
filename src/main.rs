@@ -246,6 +246,10 @@ async fn main() -> std::io::Result<()> {
                         _ => HQMSpawnPoint::Center,
                     });
 
+                let use_mph = get_optional(game_section, "use_mph", false, |s| {
+                    s.eq_ignore_ascii_case("true")
+                });
+
                 let match_config = HQMMatchConfiguration {
                     time_period: rules_time_period,
                     time_warmup: rules_time_warmup,
@@ -259,6 +263,7 @@ async fn main() -> std::io::Result<()> {
                     force_team_size_parity,
 
                     cheats_enabled,
+                    use_mph,
                     spawn_point,
                     physics_config,
                     team_max: server_team_max,
