@@ -252,7 +252,7 @@ impl HQMServer {
             };
 
             let duration_since_packet =
-                if player.game_id == current_game_id && data.known_packet < new_known_packet {
+                if data.game_id == current_game_id && data.known_packet < new_known_packet {
                     let ticks = &self.game.saved_pings;
                     self.game
                         .packet
@@ -275,7 +275,7 @@ impl HQMServer {
             data.client_version = client_version;
             data.known_packet = new_known_packet;
             player.input = input;
-            player.game_id = current_game_id;
+            data.game_id = current_game_id;
             data.known_msgpos = known_msgpos;
 
             if let Some(deltatime) = deltatime {
@@ -1574,7 +1574,7 @@ async fn send_updates(
             if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
                 let mut writer = HQMMessageWriter::new(write_buf);
 
-                if player.game_id != game_id {
+                if data.game_id != game_id {
                     writer.write_bytes_aligned(GAME_HEADER);
                     writer.write_byte_aligned(6);
                     writer.write_u32_aligned(game_id);
@@ -1719,6 +1719,7 @@ pub struct HQMNetworkPlayerData {
     deltatime: u32,
     last_ping: VecDeque<f32>,
     view_player_index: usize,
+    pub game_id: u32,
 }
 
 pub enum HQMServerPlayerData {
@@ -1729,7 +1730,6 @@ pub enum HQMServerPlayerData {
 pub struct HQMServerPlayer {
     pub player_name: String,
     pub(crate) data: HQMServerPlayerData,
-    game_id: u32,
     messages: Vec<Rc<HQMMessage>>,
     pub is_admin: bool,
     pub(crate) is_muted: HQMMuteStatus,
@@ -1760,9 +1760,9 @@ impl HQMServerPlayer {
                     deltatime: 0,
                     last_ping: VecDeque::new(),
                     view_player_index: player_index,
+                    game_id: u32::MAX,
                 },
             },
-            game_id: u32::MAX,
             messages: global_messages,
             is_admin: false,
             input: Default::default(),
