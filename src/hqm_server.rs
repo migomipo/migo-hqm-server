@@ -1140,7 +1140,7 @@ impl HQMServer {
                     .truncate(self.game.saved_ticks.capacity() - 1);
                 self.game.saved_ticks.push_front(HQMSavedTick { packets });
                 self.game
-                    .saved_ticks
+                    .saved_pings
                     .truncate(self.game.saved_pings.capacity() - 1);
                 self.game.saved_pings.push_front(Instant::now());
 
