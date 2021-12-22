@@ -1,5 +1,5 @@
 use nalgebra::storage::Storage;
-use nalgebra::{Matrix3, U1, U3, Vector3};
+use nalgebra::{Matrix3, Vector3, U1, U3};
 use std::cmp::min;
 
 const UXP: Vector3<f32> = Vector3::new(1.0, 0.0, 0.0);

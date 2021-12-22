@@ -636,8 +636,8 @@ impl HQMServer {
                             "This player is a server-side bot",
                             player_index,
                         );
-                    },
-                    HQMServerPlayerData::Replay { } => {
+                    }
+                    HQMServerPlayerData::Replay {} => {
                         self.add_directed_server_chat_message(
                             "This player is a replay bot",
                             player_index,
@@ -1732,7 +1732,7 @@ pub struct HQMNetworkPlayerData {
 pub enum HQMServerPlayerData {
     NetworkPlayer { data: HQMNetworkPlayerData },
     Bot {},
-    Replay {}
+    Replay {},
 }
 
 pub struct HQMServerPlayer {
@@ -1790,16 +1790,6 @@ impl HQMServerPlayer {
             message: message.to_owned(),
         };
         self.messages.push(Rc::new(chat));
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn add_directed_user_chat_message(&mut self, message: &str, sender_index: usize) {
-        self.add_directed_user_chat_message2(message, Some(sender_index));
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn add_directed_server_chat_message(&mut self, message: &str) {
-        self.add_directed_user_chat_message2(message, None);
     }
 }
 
