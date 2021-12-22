@@ -999,15 +999,17 @@ fn limit_vector_length2(v: &Vector2<f32>, max_len: f32) -> Vector2<f32> {
     res
 }
 
-pub fn limit_friction(v: &mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
+pub fn limit_friction(v: & mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     let projection_length = v.dot(&normal);
     let projection = normal.scale(projection_length);
     let rejection = &*v - &projection;
-
+    let rejection_length = rejection.norm();
     *v = projection.clone_owned();
 
-    if let Some(rejection_norm) = rejection.try_normalize(f32::EPSILON) {
-        let rejection_length2 = rejection.norm().min(projection.norm() * d);
+    if rejection_length > 1.0/65536.0 {
+        let rejection_norm = rejection.normalize();
+
+        let rejection_length2 = rejection_length.min(projection.norm() * d);
         *v += rejection_norm.scale(rejection_length2);
     }
 }
