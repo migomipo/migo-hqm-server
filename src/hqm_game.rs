@@ -1,10 +1,9 @@
 use crate::hqm_parse;
-use crate::hqm_parse::{HQMPuckPacket, HQMSkaterPacket};
 use nalgebra::{Matrix3, Point3, Rotation3, Vector2, Vector3};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::hqm_server::HQMSavedTick;
+use crate::hqm_server::{HQMPuckPacket, HQMSavedTick, HQMSkaterPacket};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;

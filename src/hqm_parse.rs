@@ -1,5 +1,5 @@
 use nalgebra::storage::Storage;
-use nalgebra::{Matrix3, Vector3, U1, U3};
+use nalgebra::{Matrix3, U1, U3, Vector3};
 use std::cmp::min;
 
 const UXP: Vector3<f32> = Vector3::new(1.0, 0.0, 0.0);
@@ -122,29 +122,6 @@ fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(
         }
     }
     res
-}
-
-#[derive(Debug)]
-pub enum HQMObjectPacket {
-    None,
-    Puck(HQMPuckPacket),
-    Skater(HQMSkaterPacket),
-}
-
-#[derive(Debug)]
-pub struct HQMSkaterPacket {
-    pub pos: (u32, u32, u32),
-    pub rot: (u32, u32),
-    pub stick_pos: (u32, u32, u32),
-    pub stick_rot: (u32, u32),
-    pub head_rot: u32,
-    pub body_rot: u32,
-}
-
-#[derive(Debug)]
-pub struct HQMPuckPacket {
-    pub pos: (u32, u32, u32),
-    pub rot: (u32, u32),
 }
 
 pub struct HQMMessageWriter<'a> {

@@ -14,12 +14,13 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
 use tracing::info;
+use uuid::Uuid;
 
 use crate::hqm_game::{
     HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRuleIndication, HQMRulesState,
     HQMSkater, HQMSkaterHand, HQMSkaterObjectRefMut, HQMTeam,
 };
-use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter, HQMObjectPacket};
+use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter};
 use crate::hqm_simulate::HQMSimulationEvent;
 
 const GAME_HEADER: &[u8] = b"Hock";
@@ -635,6 +636,12 @@ impl HQMServer {
                             "This player is a server-side bot",
                             player_index,
                         );
+                    },
+                    HQMServerPlayerData::Replay { } => {
+                        self.add_directed_server_chat_message(
+                            "This player is a replay bot",
+                            player_index,
+                        );
                     }
                 }
             } else {
@@ -1131,8 +1138,6 @@ impl HQMServer {
 
                 let events = self.game.world.simulate_step();
 
-                behaviour.after_tick(self, &events);
-
                 let packets = get_packets(&self.game.world.objects.objects);
 
                 self.game
@@ -1146,6 +1151,8 @@ impl HQMServer {
 
                 self.game.packet = self.game.packet.wrapping_add(1);
                 self.game.game_step = self.game.game_step.wrapping_add(1);
+
+                behaviour.after_tick(self, &events);
             });
 
             send_updates(
@@ -1725,10 +1732,12 @@ pub struct HQMNetworkPlayerData {
 pub enum HQMServerPlayerData {
     NetworkPlayer { data: HQMNetworkPlayerData },
     Bot {},
+    Replay {}
 }
 
 pub struct HQMServerPlayer {
     pub player_name: String,
+    pub id: Uuid,
     pub(crate) data: HQMServerPlayerData,
     messages: Vec<Rc<HQMMessage>>,
     pub is_admin: bool,
@@ -1748,6 +1757,7 @@ impl HQMServerPlayer {
     ) -> Self {
         HQMServerPlayer {
             player_name,
+            id: Uuid::new_v4(),
             data: HQMServerPlayerData::NetworkPlayer {
                 data: HQMNetworkPlayerData {
                     addr,
@@ -1821,4 +1831,27 @@ pub trait HQMServerBehaviour {
     fn after_player_join(&mut self, _server: &mut HQMServer, _player_index: usize) {}
 
     fn get_number_of_players(&self) -> u32;
+}
+
+#[derive(Debug)]
+pub enum HQMObjectPacket {
+    None,
+    Puck(HQMPuckPacket),
+    Skater(HQMSkaterPacket),
+}
+
+#[derive(Debug)]
+pub struct HQMSkaterPacket {
+    pub pos: (u32, u32, u32),
+    pub rot: (u32, u32),
+    pub stick_pos: (u32, u32, u32),
+    pub stick_rot: (u32, u32),
+    pub head_rot: u32,
+    pub body_rot: u32,
+}
+
+#[derive(Debug)]
+pub struct HQMPuckPacket {
+    pub pos: (u32, u32, u32),
+    pub rot: (u32, u32),
 }
