@@ -850,9 +850,9 @@ impl HQMServer {
                 for skater in self.game.world.objects.get_skater_iter() {
                     if skater.team == team {
                         if let Some(player) = self.players.get_mut(skater.connected_player_index) {
-                            player.messages.push(change1.clone());
-                            player.messages.push(chat.clone());
-                            player.messages.push(change2.clone());
+                            player.add_message(change1.clone());
+                            player.add_message(chat.clone());
+                            player.add_message(change2.clone());
                         }
                     }
                 }
@@ -887,7 +887,11 @@ impl HQMServer {
     ) {
         // This message will only be visible to a single player
         if let Some(player) = self.players.get_mut(receiver_index) {
-            player.add_directed_user_chat_message2(message, sender_index);
+            let chat = HQMMessage::Chat {
+                player_index: sender_index,
+                message: message.to_owned(),
+            };
+            player.add_message(Rc::new(chat));
         }
     }
 
@@ -927,7 +931,7 @@ impl HQMServer {
         for player in self.players.iter_mut() {
             match player {
                 Some(player) => {
-                    player.messages.push(rc.clone());
+                    player.add_message(rc.clone());
                 }
                 _ => (),
             }
@@ -1213,12 +1217,8 @@ impl HQMServer {
         let mut messages = Vec::new();
         for (i, p) in self.players.iter_mut().enumerate() {
             if let Some(player) = p {
-                if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
-                    data.known_msgpos = 0;
-                    data.known_packet = u32::MAX;
-                }
+                player.reset();
 
-                player.messages.clear();
                 let update = HQMMessage::PlayerUpdate {
                     player_name: player.player_name.clone(),
                     object: None,
@@ -1641,19 +1641,19 @@ async fn send_updates(
 
                     write_objects(&mut writer, game, packets, data.known_packet);
 
-                    let (start, remaining_messages) = if data.known_msgpos > player.messages.len() {
-                        (player.messages.len(), 0)
+                    let (start, remaining_messages) = if data.known_msgpos > data.messages.len() {
+                        (data.messages.len(), 0)
                     } else {
                         (
                             data.known_msgpos,
-                            min(player.messages.len() - data.known_msgpos, 15),
+                            min(data.messages.len() - data.known_msgpos, 15),
                         )
                     };
 
                     writer.write_bits(4, remaining_messages as u32);
                     writer.write_bits(16, start as u32);
 
-                    for message in &player.messages[start..start + remaining_messages] {
+                    for message in &data.messages[start..start + remaining_messages] {
                         write_message(&mut writer, Rc::as_ref(message));
                     }
                 }
@@ -1727,6 +1727,7 @@ pub struct HQMNetworkPlayerData {
     last_ping: VecDeque<f32>,
     view_player_index: usize,
     pub game_id: u32,
+    messages: Vec<Rc<HQMMessage>>,
 }
 
 pub enum HQMServerPlayerData {
@@ -1739,7 +1740,6 @@ pub struct HQMServerPlayer {
     pub player_name: String,
     pub id: Uuid,
     pub(crate) data: HQMServerPlayerData,
-    messages: Vec<Rc<HQMMessage>>,
     pub is_admin: bool,
     pub(crate) is_muted: HQMMuteStatus,
     pub team_switch_timer: u32,
@@ -1771,9 +1771,9 @@ impl HQMServerPlayer {
                     last_ping: VecDeque::new(),
                     view_player_index: player_index,
                     game_id: u32::MAX,
+                    messages: global_messages,
                 },
             },
-            messages: global_messages,
             is_admin: false,
             input: Default::default(),
             is_muted: HQMMuteStatus::NotMuted,
@@ -1783,13 +1783,23 @@ impl HQMServerPlayer {
         }
     }
 
-    fn add_directed_user_chat_message2(&mut self, message: &str, sender_index: Option<usize>) {
-        // This message will only be visible to a single player
-        let chat = HQMMessage::Chat {
-            player_index: sender_index,
-            message: message.to_owned(),
-        };
-        self.messages.push(Rc::new(chat));
+    fn reset(&mut self) {
+        if let HQMServerPlayerData::NetworkPlayer { data } = &mut self.data {
+            data.known_msgpos = 0;
+            data.known_packet = u32::MAX;
+            data.messages.clear();
+        }
+    }
+
+    fn add_message(&mut self, message: Rc<HQMMessage>) {
+        match &mut self.data {
+            HQMServerPlayerData::NetworkPlayer {
+                data: HQMNetworkPlayerData { messages, .. },
+            } => {
+                messages.push(message);
+            }
+            _ => {}
+        }
     }
 }
 
