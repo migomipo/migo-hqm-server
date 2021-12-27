@@ -211,7 +211,7 @@ impl HQMServer {
 
             let input_stick_angle = parser.read_f32_aligned();
             let input_turn = parser.read_f32_aligned();
-            let input_unknown = parser.read_f32_aligned();
+            let _input_unknown = parser.read_f32_aligned();
             let input_fwbw = parser.read_f32_aligned();
             let input_stick_rot_1 = parser.read_f32_aligned();
             let input_stick_rot_2 = parser.read_f32_aligned();
@@ -221,7 +221,6 @@ impl HQMServer {
             let input = HQMPlayerInput {
                 stick_angle: input_stick_angle,
                 turn: input_turn,
-                unknown: input_unknown,
                 fwbw: input_fwbw,
                 stick: Vector2::new(input_stick_rot_1, input_stick_rot_2),
                 head_rot: input_head_rot,
@@ -636,15 +635,9 @@ impl HQMServer {
                             self.add_directed_server_chat_message(&msg2, player_index);
                         }
                     }
-                    HQMServerPlayerData::Bot { .. } => {
+                    _ => {
                         self.add_directed_server_chat_message(
-                            "This player is a server-side bot",
-                            player_index,
-                        );
-                    }
-                    HQMServerPlayerData::Replay {} => {
-                        self.add_directed_server_chat_message(
-                            "This player is a replay bot",
+                            "This player is not a connected player",
                             player_index,
                         );
                     }
@@ -1138,6 +1131,37 @@ impl HQMServer {
                 }
 
                 behaviour.before_tick(self);
+
+                let mut dual_control_updates = vec![];
+                for (player_index, player) in self.players.iter().enumerate() {
+                    if let Some(player) = player {
+                        if let HQMServerPlayerData::DualControl {
+                            movement, stick
+                        } = &player.data {
+                            let mut current_input = player.input.clone();
+                            let movement = movement.and_then(|x| self.players.get(x))
+                                .map(|x| x.input.clone());
+                            let stick = stick.and_then(|x| self.players.get(x))
+                                .map(|x| x.input.clone());
+                            if let Some(movement) = movement {
+                                current_input.fwbw = movement.fwbw;
+                                current_input.keys = movement.keys & 0x13;
+                                current_input.turn = movement.turn;
+                                current_input.head_rot = movement.head_rot;
+                                current_input.body_rot = movement.body_rot;
+                            }
+                            if let Some(stick) = stick {
+                                current_input.stick = stick.stick;
+                                current_input.stick_angle = stick.stick_angle;
+                            }
+                            dual_control_updates.push((player_index, current_input))
+                        }
+                    }
+                }
+
+                for (player_index, new_input) in dual_control_updates {
+                    self.players.get_mut(player_index).map(|x| x.input = new_input);
+                }
 
                 for skater in self.game.world.objects.get_skater_iter_mut() {
                     if let Some(player) = self.players.get(skater.connected_player_index) {
@@ -1732,6 +1756,10 @@ pub enum HQMServerPlayerData {
     NetworkPlayer { data: HQMNetworkPlayerData },
     Bot {},
     Replay {},
+    DualControl {
+        movement: Option<usize>,
+        stick: Option<usize>
+    }
 }
 
 pub struct HQMServerPlayer {

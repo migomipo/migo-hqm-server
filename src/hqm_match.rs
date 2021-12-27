@@ -27,6 +27,7 @@ pub struct HQMMatchConfiguration {
     pub blue_line_location: f32,
     pub cheats_enabled: bool,
     pub use_mph: bool,
+    pub dual_control: bool,
 
     pub spawn_point: HQMSpawnPoint,
 }

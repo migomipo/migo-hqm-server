@@ -194,6 +194,10 @@ async fn main() -> std::io::Result<()> {
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
         tracing_subscriber::fmt().with_writer(non_blocking).init();
 
+        let dual_control = get_optional(game_section, "dual_control", false, |s| {
+            s.eq_ignore_ascii_case("true")
+        });
+
         return match mode {
             HQMServerMode::Match => {
                 let rules_time_period = get_optional(game_section, "time_period", 300, |x| {
@@ -264,6 +268,7 @@ async fn main() -> std::io::Result<()> {
 
                     cheats_enabled,
                     use_mph,
+                    dual_control,
                     spawn_point,
                     physics_config,
                     team_max: server_team_max,

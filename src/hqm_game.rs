@@ -1020,7 +1020,6 @@ impl HQMSkaterCollisionBall {
 pub struct HQMPlayerInput {
     pub stick_angle: f32,
     pub turn: f32,
-    pub unknown: f32,
     pub fwbw: f32,
     pub stick: Vector2<f32>,
     pub head_rot: f32,
@@ -1033,7 +1032,6 @@ impl Default for HQMPlayerInput {
         HQMPlayerInput {
             stick_angle: 0.0,
             turn: 0.0,
-            unknown: 0.0,
             fwbw: 0.0,
             stick: Vector2::new(0.0, 0.0),
             head_rot: 0.0,
