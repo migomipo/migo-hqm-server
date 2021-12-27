@@ -178,18 +178,20 @@ impl HQMMatchBehaviour {
         server.game.is_intermission_goal = true;
         self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
 
-        let (goal_scorer_index, assist_index, puck_speed) =
+        let (goal_scorer_index, assist_index, puck_speed_across_line, puck_speed_from_stick) =
             if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
                 let mut goal_scorer_index = None;
                 let mut assist_index = None;
                 let mut goal_scorer_first_touch = 0;
-                let puck_speed = this_puck.body.linear_velocity.norm();
+                let mut puck_speed_from_stick = None;
+                let puck_speed_across_line = this_puck.body.linear_velocity.norm();
 
                 for touch in this_puck.touches.iter() {
                     if goal_scorer_index.is_none() {
                         if touch.team == team {
                             goal_scorer_index = Some(touch.player_index);
                             goal_scorer_first_touch = touch.first_time;
+                            puck_speed_from_stick = Some(touch.puck_speed);
                         }
                     } else {
                         if touch.team == team {
@@ -211,7 +213,12 @@ impl HQMMatchBehaviour {
                     }
                 }
 
-                (goal_scorer_index, assist_index, puck_speed)
+                (
+                    goal_scorer_index,
+                    assist_index,
+                    puck_speed_across_line,
+                    puck_speed_from_stick,
+                )
             } else {
                 return;
             };
@@ -234,28 +241,43 @@ impl HQMMatchBehaviour {
             false
         };
 
-        let (puck_speed, puck_speed_unit) = if self.config.use_mph {
-            (puck_speed * 100f32 * 2.23693, "mph")
-        } else {
-            (puck_speed * 100f32 * 3.6, "km/h")
-        };
-
         server.add_goal_message(team, goal_scorer_index, assist_index);
 
-        if server.game.time < 1000 {
+        fn convert(puck_speed: f32, use_mph: bool) -> (f32, &'static str) {
+            if use_mph {
+                (puck_speed * 100f32 * 2.23693, "mph")
+            } else {
+                (puck_speed * 100f32 * 3.6, "km/h")
+            }
+        }
+
+        let (puck_speed_across_line, puck_speed_unit) =
+            convert(puck_speed_across_line, self.config.use_mph);
+
+        let str1 = if server.game.time < 1000 {
             let time = server.game.time;
             let seconds = time / 100;
             let centi = time % 100;
 
-            let s = format!(
-                "Goal scored with {}.{:02} seconds left, {:.1} {}",
-                seconds, centi, puck_speed, puck_speed_unit
-            );
-            server.add_server_chat_message(&s);
+            format!(
+                "Goal scored with {}.{:02} seconds left, {:.1} {} across line",
+                seconds, centi, puck_speed_across_line, puck_speed_unit
+            )
         } else {
-            let s = format!("Goal scored, {:.1} {}", puck_speed, puck_speed_unit);
-            server.add_server_chat_message(&s);
-        }
+            format!(
+                "Goal scored, {:.1} {} across line",
+                puck_speed_across_line, puck_speed_unit
+            )
+        };
+        let str2 = if let Some(puck_speed_from_stick) = puck_speed_from_stick {
+            let (puck_speed, puck_speed_unit) = convert(puck_speed_from_stick, self.config.use_mph);
+            format!(", {:.1} {} from stick", puck_speed, puck_speed_unit)
+        } else {
+            "".to_owned()
+        };
+        let s = format!("{}{}", str1, str2);
+
+        server.add_server_chat_message(&s);
 
         if game_over {
             server.game.game_over = true;
