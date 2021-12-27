@@ -254,21 +254,11 @@ impl HQMMatchBehaviour {
         let (puck_speed_across_line, puck_speed_unit) =
             convert(puck_speed_across_line, self.config.use_mph);
 
-        let str1 = if server.game.time < 1000 {
-            let time = server.game.time;
-            let seconds = time / 100;
-            let centi = time % 100;
+        let str1 = format!(
+            "Goal scored, {:.1} {} across line",
+            puck_speed_across_line, puck_speed_unit
+        );
 
-            format!(
-                "Goal scored with {}.{:02} seconds left, {:.1} {} across line",
-                seconds, centi, puck_speed_across_line, puck_speed_unit
-            )
-        } else {
-            format!(
-                "Goal scored, {:.1} {} across line",
-                puck_speed_across_line, puck_speed_unit
-            )
-        };
         let str2 = if let Some(puck_speed_from_stick) = puck_speed_from_stick {
             let (puck_speed, puck_speed_unit) = convert(puck_speed_from_stick, self.config.use_mph);
             format!(", {:.1} {} from stick", puck_speed, puck_speed_unit)
@@ -278,6 +268,15 @@ impl HQMMatchBehaviour {
         let s = format!("{}{}", str1, str2);
 
         server.add_server_chat_message(&s);
+
+        if server.game.time < 1000 {
+            let time = server.game.time;
+            let seconds = time / 100;
+            let centi = time % 100;
+
+            let s = format!("{}.{:02} seconds left", seconds, centi);
+            server.add_server_chat_message(&s);
+        }
 
         if game_over {
             server.game.game_over = true;
