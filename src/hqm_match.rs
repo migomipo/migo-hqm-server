@@ -1080,71 +1080,12 @@ fn get_faceoff_positions(
                 .objects
                 .get_skater_object_for_player(player_index)
                 .map(|x| x.team);
+            let preferred_position = preferred_positions.get(&player_index).map(String::as_str);
+
             if team == Some(HQMTeam::Red) {
-                red_players.push((player_index, preferred_positions.get(&player_index)));
+                red_players.push((player_index, preferred_position));
             } else if team == Some(HQMTeam::Blue) {
-                blue_players.push((player_index, preferred_positions.get(&player_index)));
-            }
-        }
-    }
-
-    fn setup_position(
-        positions: &mut HashMap<usize, (HQMTeam, String)>,
-        players: &[(usize, Option<&String>)],
-        allowed_positions: &[String],
-        team: HQMTeam,
-    ) {
-        let mut available_positions = Vec::from(allowed_positions);
-
-        // First, we try to give each player its preferred position
-        for (player_index, player_position) in players.iter() {
-            if let Some(player_position) = player_position {
-                if let Some(x) = available_positions
-                    .iter()
-                    .position(|x| *x == **player_position)
-                {
-                    let s = available_positions.remove(x);
-                    positions.insert(*player_index, (team, s));
-                }
-            }
-        }
-        let c = String::from("C");
-        // Some players did not get their preferred positions because they didn't have one,
-        // or because it was already taken
-        for (player_index, player_position) in players.iter() {
-            if !positions.contains_key(player_index) {
-                let s = if let Some(x) = available_positions.iter().position(|x| *x == c) {
-                    // Someone needs to be C
-                    available_positions.remove(x);
-                    (team, c.clone())
-                } else if !available_positions.is_empty() {
-                    // Give out the remaining positions
-                    let x = available_positions.remove(0);
-                    (team, x)
-                } else {
-                    // Oh no, we're out of legal starting positions
-                    if let Some(player_position) = player_position {
-                        (team, (*player_position).clone())
-                    } else {
-                        (team, c.clone())
-                    }
-                };
-                positions.insert(*player_index, s);
-            }
-        }
-        if available_positions.contains(&c) && !positions.is_empty() {
-            // No one is C yet
-
-            let mut found_non_goalie = false;
-            for (_, (_, pos)) in positions.iter_mut() {
-                if pos != "G" {
-                    *pos = c.clone();
-                    found_non_goalie = true;
-                    break;
-                }
-            }
-            if !found_non_goalie {
-                positions.insert(players[0].0, (team, c.clone()));
+                blue_players.push((player_index, preferred_position));
             }
         }
     }
@@ -1399,5 +1340,182 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
 
     fn get_number_of_players(&self) -> u32 {
         self.config.team_max as u32
+    }
+}
+
+fn setup_position(
+    positions: &mut HashMap<usize, (HQMTeam, String)>,
+    players: &[(usize, Option<&str>)],
+    allowed_positions: &[String],
+    team: HQMTeam,
+) {
+    let mut available_positions = Vec::from(allowed_positions);
+
+    // First, we try to give each player its preferred position
+    for (player_index, player_position) in players.iter() {
+        if let Some(player_position) = player_position {
+            if let Some(x) = available_positions
+                .iter()
+                .position(|x| *x == **player_position)
+            {
+                let s = available_positions.remove(x);
+                positions.insert(*player_index, (team, s));
+            }
+        }
+    }
+    let c = String::from("C");
+    // Some players did not get their preferred positions because they didn't have one,
+    // or because it was already taken
+    for (player_index, player_position) in players.iter() {
+        if !positions.contains_key(player_index) {
+            let s = if let Some(x) = available_positions.iter().position(|x| *x == c) {
+                // Someone needs to be C
+                available_positions.remove(x);
+                (team, c.clone())
+            } else if !available_positions.is_empty() {
+                // Give out the remaining positions
+                let x = available_positions.remove(0);
+                (team, x)
+            } else {
+                // Oh no, we're out of legal starting positions
+                if let Some(player_position) = player_position {
+                    (team, (*player_position).to_owned())
+                } else {
+                    (team, c.clone())
+                }
+            };
+            positions.insert(*player_index, s);
+        }
+    }
+
+    if available_positions.contains(&c) {
+        let mut found_new_c = false;
+        for (_, (_, p)) in positions.iter_mut() {
+            if p != "G" {
+                *p = c.clone();
+                found_new_c = true;
+                break;
+            }
+        }
+        if !found_new_c {
+            if let Some((_, (_, p))) = positions.iter_mut().next() {
+                *p = c.clone();
+            }
+        }
+    }
+}
+
+mod tests {
+    use crate::hqm_match::setup_position;
+    use migo_hqm_server::hqm_game::HQMTeam;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test1() {
+        let allowed_positions: Vec<String> = vec![
+            "C", "LW", "RW", "LD", "RD", "G", "LM", "RM", "LLM", "RRM", "LLD", "RRD", "CM", "CD",
+            "LW2", "RW2", "LLW", "RRW",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let c = "C";
+        let lw = "LW";
+        let rw = "RW";
+        let g = "G";
+        let mut res1 = HashMap::new();
+        let players = vec![(0usize, None)];
+        setup_position(
+            &mut res1,
+            players.as_ref(),
+            &allowed_positions,
+            HQMTeam::Red,
+        );
+        assert_eq!(res1[&0].1, "C");
+
+        let mut res1 = HashMap::new();
+        let players = vec![(0usize, Some(c))];
+        setup_position(
+            &mut res1,
+            players.as_ref(),
+            &allowed_positions,
+            HQMTeam::Red,
+        );
+        assert_eq!(res1[&0].1, "C");
+
+        let mut res1 = HashMap::new();
+        let players = vec![(0usize, Some(lw))];
+        setup_position(
+            &mut res1,
+            players.as_ref(),
+            &allowed_positions,
+            HQMTeam::Red,
+        );
+        assert_eq!(res1[&0].1, "C");
+
+        let mut res1 = HashMap::new();
+        let players = vec![(0usize, Some(g))];
+        setup_position(
+            &mut res1,
+            players.as_ref(),
+            &allowed_positions,
+            HQMTeam::Red,
+        );
+        assert_eq!(res1[&0].1, "C");
+
+        let mut res1 = HashMap::new();
+        let players = vec![(0usize, Some(c)), (1usize, Some(lw))];
+        setup_position(
+            &mut res1,
+            players.as_ref(),
+            &allowed_positions,
+            HQMTeam::Red,
+        );
+        assert_eq!(res1[&0].1, "C");
+        assert_eq!(res1[&1].1, "LW");
+
+        let mut res1 = HashMap::new();
+        let players = vec![(0usize, None), (1usize, Some(lw))];
+        setup_position(
+            &mut res1,
+            players.as_ref(),
+            &allowed_positions,
+            HQMTeam::Red,
+        );
+        assert_eq!(res1[&0].1, "C");
+        assert_eq!(res1[&1].1, "LW");
+
+        let mut res1 = HashMap::new();
+        let players = vec![(0usize, Some(rw)), (1usize, Some(lw))];
+        setup_position(
+            &mut res1,
+            players.as_ref(),
+            &allowed_positions,
+            HQMTeam::Red,
+        );
+        assert_eq!(res1[&0].1, "C");
+        assert_eq!(res1[&1].1, "LW");
+
+        let mut res1 = HashMap::new();
+        let players = vec![(0usize, Some(g)), (1usize, Some(lw))];
+        setup_position(
+            &mut res1,
+            players.as_ref(),
+            &allowed_positions,
+            HQMTeam::Red,
+        );
+        assert_eq!(res1[&0].1, "G");
+        assert_eq!(res1[&1].1, "C");
+
+        let mut res1 = HashMap::new();
+        let players = vec![(0usize, Some(c)), (1usize, Some(c))];
+        setup_position(
+            &mut res1,
+            players.as_ref(),
+            &allowed_positions,
+            HQMTeam::Red,
+        );
+        assert_eq!(res1[&0].1, "C");
+        assert_eq!(res1[&1].1, "LW");
     }
 }
