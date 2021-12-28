@@ -1311,6 +1311,14 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 };
                 let msg = format!("{}, {}", offside_str, icing_str);
                 server.add_directed_server_chat_message(&msg, player_index);
+                if self.config.mercy > 0 {
+                    let msg = format!("Mercy rule when team leads by {} goals", self.config.mercy);
+                    server.add_directed_server_chat_message(&msg, player_index);
+                }
+                if self.config.first_to > 0 {
+                    let msg = format!("Game ends when team scores {} goals", self.config.first_to);
+                    server.add_directed_server_chat_message(&msg, player_index);
+                }
             }
             "cheat" => {
                 if self.config.cheats_enabled {
