@@ -27,16 +27,14 @@ impl HQMPermanentWarmup {
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
-        for (player_index, player) in server.players.iter_mut().enumerate() {
+        for (player_index, player) in server.players.iter().enumerate() {
             if let Some(player) = player {
                 let has_skater = server.game.world.objects.has_skater(player_index);
                 if has_skater && player.input.spectate() {
-                    player.team_switch_timer = 500;
                     spectating_players.push((player_index, player.player_name.clone()))
                 } else {
-                    player.team_switch_timer = player.team_switch_timer.saturating_sub(1);
                 }
-                if !has_skater && player.team_switch_timer == 0 {
+                if !has_skater {
                     if player.input.join_red() {
                         joining_red.push((player_index, player.player_name.clone()));
                     } else if player.input.join_blue() {
@@ -57,7 +55,7 @@ impl HQMPermanentWarmup {
                 player_index,
                 HQMTeam::Red
             );
-            server.move_to_team_spawnpoint(player_index, HQMTeam::Red, self.spawn_point);
+            server.spawn_skater_at_spawnpoint(player_index, HQMTeam::Red, self.spawn_point);
         }
         for (player_index, player_name) in joining_blue {
             info!(
@@ -66,7 +64,7 @@ impl HQMPermanentWarmup {
                 player_index,
                 HQMTeam::Blue
             );
-            server.move_to_team_spawnpoint(player_index, HQMTeam::Blue, self.spawn_point);
+            server.spawn_skater_at_spawnpoint(player_index, HQMTeam::Blue, self.spawn_point);
         }
     }
 }

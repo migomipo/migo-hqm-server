@@ -1,4 +1,5 @@
 use nalgebra::{Point3, Rotation3};
+use std::collections::HashMap;
 use tracing::info;
 
 use migo_hqm_server::hqm_game::{
@@ -24,6 +25,7 @@ pub(crate) struct HQMRussianBehaviour {
     physics_config: HQMPhysicsConfiguration,
     blue_line_location: f32,
     status: HQMRussianStatus,
+    team_switch_timer: HashMap<usize, u32>,
     team_max: usize,
 }
 
@@ -39,6 +41,7 @@ impl HQMRussianBehaviour {
             physics_config,
             blue_line_location,
             status: HQMRussianStatus::Pause,
+            team_switch_timer: Default::default(),
             team_max,
         }
     }
@@ -47,16 +50,23 @@ impl HQMRussianBehaviour {
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
-        for (player_index, player) in server.players.iter_mut().enumerate() {
+        for (player_index, player) in server.players.iter().enumerate() {
             if let Some(player) = player {
                 let has_skater = server.game.world.objects.has_skater(player_index);
                 if has_skater && player.input.spectate() {
-                    player.team_switch_timer = 500;
+                    self.team_switch_timer.insert(player_index, 500);
                     spectating_players.push((player_index, player.player_name.clone()))
                 } else {
-                    player.team_switch_timer = player.team_switch_timer.saturating_sub(1);
+                    self.team_switch_timer
+                        .get_mut(&player_index)
+                        .map(|x| *x = x.saturating_sub(1));
                 }
-                if !has_skater && player.team_switch_timer == 0 {
+                if !has_skater
+                    && self
+                        .team_switch_timer
+                        .get(&player_index)
+                        .map_or(true, |x| *x == 0)
+                {
                     if player.input.join_red() {
                         joining_red.push((player_index, player.player_name.clone()));
                     } else if player.input.join_blue() {
@@ -96,7 +106,7 @@ impl HQMRussianBehaviour {
                 player_index,
                 HQMTeam::Red
             );
-            server.move_to_team(*player_index, HQMTeam::Red, pos, rot.clone());
+            server.spawn_skater(*player_index, HQMTeam::Red, pos, rot.clone());
         }
         for (player_index, player_name) in &joining_blue[0..num_joining_blue] {
             let z = (server.game.world.rink.length / 2.0) - 12.0;
@@ -107,7 +117,7 @@ impl HQMRussianBehaviour {
                 player_index,
                 HQMTeam::Blue
             );
-            server.move_to_team(*player_index, HQMTeam::Blue, pos, rot.clone());
+            server.spawn_skater(*player_index, HQMTeam::Blue, pos, rot.clone());
         }
     }
 
@@ -207,12 +217,12 @@ impl HQMRussianBehaviour {
         for (index, player_index) in red_players.into_iter().enumerate() {
             let z = (server.game.world.rink.length / 2.0) + (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
-            server.move_to_team(player_index, HQMTeam::Red, pos, rot.clone());
+            server.spawn_skater(player_index, HQMTeam::Red, pos, rot.clone());
         }
         for (index, player_index) in blue_players.into_iter().enumerate() {
             let z = (server.game.world.rink.length / 2.0) - (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
-            server.move_to_team(player_index, HQMTeam::Blue, pos, rot.clone());
+            server.spawn_skater(player_index, HQMTeam::Blue, pos, rot.clone());
         }
     }
 
@@ -421,6 +431,14 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
 
         game.time = 1000;
         game
+    }
+
+    fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: usize) {
+        self.team_switch_timer.remove(&player_index);
+    }
+
+    fn after_player_force_off(&mut self, _server: &mut HQMServer, player_index: usize) {
+        self.team_switch_timer.insert(player_index, 500);
     }
 
     fn get_number_of_players(&self) -> u32 {

@@ -161,10 +161,11 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn force_player_off_ice(
+    pub(crate) fn force_player_off_ice<B: HQMServerBehaviour>(
         &mut self,
         admin_player_index: usize,
         force_player_index: usize,
+        behaviour: &mut B,
     ) {
         if let Some(player) = self.players.get(admin_player_index) {
             if player.is_admin {
@@ -172,8 +173,7 @@ impl HQMServer {
 
                 if force_player_index < self.players.len() {
                     if self.move_to_spectator(force_player_index) {
-                        if let Some(force_player) = self.players.get_mut(force_player_index) {
-                            force_player.team_switch_timer = 500; // 500 ticks, 5 seconds
+                        if let Some(force_player) = self.players.get(force_player_index) {
                             let force_player_name = force_player.player_name.clone();
                             let msg = format!(
                                 "{} forced off ice by {}",
@@ -187,6 +187,7 @@ impl HQMServer {
                                 force_player_index
                             );
                             self.add_server_chat_message(&msg);
+                            behaviour.after_player_force_off(self, force_player_index);
                         }
                     }
                 }
@@ -263,7 +264,7 @@ impl HQMServer {
                 // Because we allow matching using wildcards, we use vectors for multiple instances found
                 let mut kick_player_list: Vec<(usize, String, SocketAddr)> = Vec::new();
 
-                for (player_index, p) in self.players.iter_mut().enumerate() {
+                for (player_index, p) in self.players.iter().enumerate() {
                     if let Some(player) = p {
                         if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
                             if match_f(&player.player_name) {

@@ -72,7 +72,7 @@ impl HQMServerPlayerList {
         self.players.iter().map(|x| x.as_ref())
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = Option<&mut HQMServerPlayer>> {
+    fn iter_mut(&mut self) -> impl Iterator<Item = Option<&mut HQMServerPlayer>> {
         self.players.iter_mut().map(|x| x.as_mut())
     }
 
@@ -84,7 +84,7 @@ impl HQMServerPlayerList {
         }
     }
 
-    pub fn get_mut(&mut self, player_index: usize) -> Option<&mut HQMServerPlayer> {
+    pub(crate) fn get_mut(&mut self, player_index: usize) -> Option<&mut HQMServerPlayer> {
         if let Some(x) = self.players.get_mut(player_index) {
             x.as_mut()
         } else {
@@ -410,7 +410,7 @@ impl HQMServer {
             "fs" => {
                 if let Ok(force_player_index) = arg.parse::<usize>() {
                     if force_player_index < self.players.len() {
-                        self.force_player_off_ice(player_index, force_player_index);
+                        self.force_player_off_ice(player_index, force_player_index, behaviour);
                     }
                 }
             }
@@ -727,19 +727,17 @@ impl HQMServer {
 
     fn player_exit<B: HQMServerBehaviour>(&mut self, addr: SocketAddr, behaviour: &mut B) {
         let player_index = self.find_player_slot(addr);
-        match player_index {
-            Some(player_index) => {
-                behaviour.before_player_exit(self, player_index);
-                let player_name = {
-                    let player = self.players.get(player_index).unwrap();
-                    player.player_name.clone()
-                };
-                self.remove_player(player_index);
-                info!("{} ({}) exited server", player_name, player_index);
-                let msg = format!("{} exited", player_name);
-                self.add_server_chat_message(&msg);
-            }
-            None => {}
+
+        if let Some(player_index) = player_index {
+            behaviour.before_player_exit(self, player_index);
+            let player_name = {
+                let player = self.players.get(player_index).unwrap();
+                player.player_name.clone()
+            };
+            self.remove_player(player_index);
+            info!("{} ({}) exited server", player_name, player_index);
+            let msg = format!("{} exited", player_name);
+            self.add_server_chat_message(&msg);
         }
     }
 
@@ -764,7 +762,8 @@ impl HQMServer {
                     }));
                 }
 
-                let new_player = HQMServerPlayer::new(player_index, player_name, addr, messages);
+                let new_player =
+                    HQMServerPlayer::new_network_player(player_index, player_name, addr, messages);
 
                 self.players.add_player(player_index, new_player);
 
@@ -775,43 +774,55 @@ impl HQMServer {
     }
 
     pub(crate) fn remove_player(&mut self, player_index: usize) {
-        let mut admin_check: bool = false;
+        if let Some(player) = self.players.get(player_index) {
+            let update = HQMMessage::PlayerUpdate {
+                player_name: player.player_name.clone(),
+                object: None,
+                player_index,
+                in_server: false,
+            };
+            let is_admin = player.is_admin;
 
-        match self.players.get(player_index) {
-            Some(player) => {
-                let update = HQMMessage::PlayerUpdate {
-                    player_name: player.player_name.clone(),
-                    object: None,
-                    player_index,
-                    in_server: false,
-                };
-                self.game.world.remove_player(player_index);
+            let is_real_player = matches!(player.data, HQMServerPlayerData::NetworkPlayer { .. });
+            self.game.world.remove_player(player_index);
 
-                if player.is_admin {
-                    admin_check = true;
-                }
+            self.add_global_message(update, true);
 
-                self.add_global_message(update, true);
+            self.players.remove_player(player_index as usize);
 
-                self.players.remove_player(player_index as usize);
+            if is_real_player {
+                self.remove_player_from_dual_control(player_index);
             }
-            None => {}
+
+            if is_admin {
+                let admin_found = self.players.iter().any(|x| x.map_or(false, |x| x.is_admin));
+
+                if !admin_found {
+                    self.allow_join = true;
+                }
+            }
         }
+    }
 
-        if admin_check {
-            let mut admin_found = false;
-
-            for p in self.players.iter_mut() {
-                if let Some(player) = p {
-                    if player.is_admin {
-                        admin_found = true;
+    pub fn remove_player_from_dual_control(&mut self, player_index: usize) {
+        let mut removals = vec![];
+        for (i, player) in self.players.iter_mut().enumerate() {
+            if let Some(player) = player {
+                if let HQMServerPlayerData::DualControl { movement, stick } = &mut player.data {
+                    if *movement == Some(player_index) {
+                        *movement = None;
+                    }
+                    if *stick == Some(player_index) {
+                        *stick = None;
+                    }
+                    if *movement == None && *stick == None {
+                        removals.push(i);
                     }
                 }
             }
-
-            if !admin_found {
-                self.allow_join = true;
-            }
+        }
+        for i in removals {
+            self.remove_player(i);
         }
     }
 
@@ -956,13 +967,12 @@ impl HQMServer {
         false
     }
 
-    pub fn move_to_team_spawnpoint(
-        &mut self,
-        player_index: usize,
+    pub fn get_spawnpoint(
+        &self,
         team: HQMTeam,
         spawn_point: HQMSpawnPoint,
-    ) -> bool {
-        let (pos, rot) = match team {
+    ) -> (Point3<f32>, Rotation3<f32>) {
+        match team {
             HQMTeam::Red => match spawn_point {
                 HQMSpawnPoint::Center => {
                     let (z, rot) = ((self.game.world.rink.length / 2.0) + 3.0, 0.0);
@@ -991,11 +1001,91 @@ impl HQMServer {
                     (pos, rot)
                 }
             },
-        };
-        self.move_to_team(player_index, team, pos, rot)
+        }
     }
 
-    pub fn move_to_team(
+    pub fn spawn_skater_at_spawnpoint(
+        &mut self,
+        player_index: usize,
+        team: HQMTeam,
+        spawn_point: HQMSpawnPoint,
+    ) -> bool {
+        let (pos, rot) = self.get_spawnpoint(team, spawn_point);
+        self.spawn_skater(player_index, team, pos, rot)
+    }
+
+    pub fn spawn_dual_control_skater_at_spawnpoint(
+        &mut self,
+        team: HQMTeam,
+        spawn_point: HQMSpawnPoint,
+        movement: Option<usize>,
+        stick: Option<usize>,
+    ) {
+        let (pos, rot) = self.get_spawnpoint(team, spawn_point);
+        self.spawn_dual_control_skater(team, pos, rot, movement, stick);
+    }
+
+    pub fn spawn_dual_control_skater(
+        &mut self,
+        team: HQMTeam,
+        pos: Point3<f32>,
+        rot: Rotation3<f32>,
+        movement: Option<usize>,
+        stick: Option<usize>,
+    ) {
+        if movement.is_none() && stick.is_none() {
+            return;
+        }
+
+        let player_index = self.find_empty_player_slot();
+        match player_index {
+            Some(player_index) => {
+                let s1 = movement
+                    .and_then(|i| self.players.get(i))
+                    .map(|player| player.player_name.as_str())
+                    .unwrap_or("?");
+                let s2 = stick
+                    .and_then(|i| self.players.get(i))
+                    .map(|player| player.player_name.as_str())
+                    .unwrap_or("?");
+                let player_name = format!("{}/{}", s1, s2);
+
+                let new_player = HQMServerPlayer {
+                    player_name,
+                    id: Uuid::new_v4(),
+                    data: HQMServerPlayerData::DualControl { movement, stick },
+                    is_admin: false,
+                    is_muted: HQMMuteStatus::NotMuted,
+                    hand: HQMSkaterHand::Right,
+                    mass: 1.0,
+                    input: Default::default(),
+                };
+
+                if let Some(skater) = self.game.world.create_player_object(
+                    team,
+                    pos,
+                    rot,
+                    new_player.hand,
+                    player_index,
+                    new_player.mass,
+                ) {
+                    let update = HQMMessage::PlayerUpdate {
+                        player_name: new_player.player_name.clone(),
+                        object: Some((skater, team)),
+                        player_index,
+                        in_server: true,
+                    };
+
+                    self.players.add_player(player_index, new_player);
+
+                    self.add_global_message(update, true);
+                }
+            }
+            _ => {}
+        };
+    }
+
+    pub fn spawn_skater(
         &mut self,
         player_index: usize,
         team: HQMTeam,
@@ -1046,6 +1136,49 @@ impl HQMServer {
             }
         }
         false
+    }
+
+    pub fn update_dual_control(
+        &mut self,
+        player_index: usize,
+        movement: Option<usize>,
+        stick: Option<usize>,
+    ) {
+        let s1 = movement
+            .and_then(|i| self.players.get(i))
+            .map(|player| player.player_name.as_str())
+            .unwrap_or("?");
+        let s2 = stick
+            .and_then(|i| self.players.get(i))
+            .map(|player| player.player_name.as_str())
+            .unwrap_or("?");
+        let player_name = format!("{}/{}", s1, s2);
+
+        let player = self.players.get_mut(player_index);
+        let skater = self.game.world.objects.get_skater_object_for_player(player_index);
+
+        if let (Some(player), Some(skater)) = (player, skater) {
+            if let HQMServerPlayerData::DualControl {
+                movement: m,
+                stick: s,
+            } = &mut player.data
+            {
+                if movement.is_none() && stick.is_none() {
+                    self.remove_player(player_index);
+                } else {
+                    *m = movement;
+                    *s = stick;
+                    player.player_name = player_name.clone();
+                    let msg = HQMMessage::PlayerUpdate {
+                        player_name,
+                        object: Some((skater.object_index, skater.team)),
+                        player_index,
+                        in_server: true,
+                    };
+                    self.add_global_message(msg, true);
+                }
+            }
+        }
     }
 
     pub fn swap_team(&mut self, player_index: usize, team: HQMTeam) -> bool {
@@ -1135,13 +1268,13 @@ impl HQMServer {
                 let mut dual_control_updates = vec![];
                 for (player_index, player) in self.players.iter().enumerate() {
                     if let Some(player) = player {
-                        if let HQMServerPlayerData::DualControl {
-                            movement, stick
-                        } = &player.data {
+                        if let HQMServerPlayerData::DualControl { movement, stick } = &player.data {
                             let mut current_input = player.input.clone();
-                            let movement = movement.and_then(|x| self.players.get(x))
+                            let movement = movement
+                                .and_then(|x| self.players.get(x))
                                 .map(|x| x.input.clone());
-                            let stick = stick.and_then(|x| self.players.get(x))
+                            let stick = stick
+                                .and_then(|x| self.players.get(x))
                                 .map(|x| x.input.clone());
                             if let Some(movement) = movement {
                                 current_input.fwbw = movement.fwbw;
@@ -1160,7 +1293,9 @@ impl HQMServer {
                 }
 
                 for (player_index, new_input) in dual_control_updates {
-                    self.players.get_mut(player_index).map(|x| x.input = new_input);
+                    self.players
+                        .get_mut(player_index)
+                        .map(|x| x.input = new_input);
                 }
 
                 for skater in self.game.world.objects.get_skater_iter_mut() {
@@ -1753,13 +1888,15 @@ pub struct HQMNetworkPlayerData {
 }
 
 pub enum HQMServerPlayerData {
-    NetworkPlayer { data: HQMNetworkPlayerData },
+    NetworkPlayer {
+        data: HQMNetworkPlayerData,
+    },
     Bot {},
     Replay {},
     DualControl {
         movement: Option<usize>,
-        stick: Option<usize>
-    }
+        stick: Option<usize>,
+    },
 }
 
 pub struct HQMServerPlayer {
@@ -1768,14 +1905,13 @@ pub struct HQMServerPlayer {
     pub(crate) data: HQMServerPlayerData,
     pub is_admin: bool,
     pub(crate) is_muted: HQMMuteStatus,
-    pub team_switch_timer: u32,
     pub(crate) hand: HQMSkaterHand,
     pub mass: f32,
     pub input: HQMPlayerInput,
 }
 
 impl HQMServerPlayer {
-    pub fn new(
+    pub fn new_network_player(
         player_index: usize,
         player_name: String,
         addr: SocketAddr,
@@ -1804,7 +1940,6 @@ impl HQMServerPlayer {
             input: Default::default(),
             is_muted: HQMMuteStatus::NotMuted,
             hand: HQMSkaterHand::Right,
-            team_switch_timer: 0,
             mass: 1.0,
         }
     }
@@ -1855,6 +1990,8 @@ pub trait HQMServerBehaviour {
     fn before_player_exit(&mut self, _server: &mut HQMServer, _player_index: usize) {}
 
     fn after_player_join(&mut self, _server: &mut HQMServer, _player_index: usize) {}
+
+    fn after_player_force_off(&mut self, _server: &mut HQMServer, _player_index: usize) {}
 
     fn get_number_of_players(&self) -> u32;
 }

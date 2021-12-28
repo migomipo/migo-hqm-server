@@ -3,7 +3,7 @@ use tracing::info;
 
 use migo_hqm_server::hqm_game::{
     HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRuleIndication,
-    HQMSkaterHand, HQMSkaterObjectRef, HQMSkaterObjectRefMut, HQMTeam,
+    HQMSkaterHand, HQMSkaterObjectRef, HQMTeam,
 };
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerList, HQMSpawnPoint,
@@ -53,6 +53,7 @@ pub struct HQMMatchBehaviour {
     icing_status: HQMIcingStatus,
     offside_status: HQMOffsideStatus,
     preferred_positions: HashMap<usize, String>,
+    team_switch_timer: HashMap<usize, u32>,
     started_as_goalie: Vec<usize>,
 }
 
@@ -101,6 +102,7 @@ impl HQMMatchBehaviour {
             icing_status: HQMIcingStatus::No,
             offside_status: HQMOffsideStatus::InNeutralZone,
             preferred_positions: HashMap::new(),
+            team_switch_timer: Default::default(),
             started_as_goalie: vec![],
         }
     }
@@ -134,7 +136,7 @@ impl HQMMatchBehaviour {
                 HQMTeam::Red => next_faceoff_spot.red_player_positions[&faceoff_position].clone(),
                 HQMTeam::Blue => next_faceoff_spot.blue_player_positions[&faceoff_position].clone(),
             };
-            server.move_to_team(player_index, team, player_position, player_rotation);
+            server.spawn_skater(player_index, team, player_position, player_rotation);
             if faceoff_position == "G" {
                 self.started_as_goalie.push(player_index);
             }
@@ -480,16 +482,23 @@ impl HQMMatchBehaviour {
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
-        for (player_index, player) in server.players.iter_mut().enumerate() {
+        for (player_index, player) in server.players.iter().enumerate() {
             if let Some(player) = player {
                 let has_skater = server.game.world.objects.has_skater(player_index);
                 if has_skater && player.input.spectate() {
-                    player.team_switch_timer = 500;
+                    self.team_switch_timer.insert(player_index, 500);
                     spectating_players.push((player_index, player.player_name.clone()))
                 } else {
-                    player.team_switch_timer = player.team_switch_timer.saturating_sub(1);
+                    self.team_switch_timer
+                        .get_mut(&player_index)
+                        .map(|x| *x = x.saturating_sub(1));
                 }
-                if !has_skater && player.team_switch_timer == 0 {
+                if !has_skater
+                    && self
+                        .team_switch_timer
+                        .get(&player_index)
+                        .map_or(true, |x| *x == 0)
+                {
                     if player.input.join_red() {
                         joining_red.push((player_index, player.player_name.clone()));
                     } else if player.input.join_blue() {
@@ -535,7 +544,7 @@ impl HQMMatchBehaviour {
                 player_index,
                 HQMTeam::Red
             );
-            server.move_to_team_spawnpoint(*player_index, HQMTeam::Red, self.config.spawn_point);
+            server.spawn_skater_at_spawnpoint(*player_index, HQMTeam::Red, self.config.spawn_point);
 
             if let Some(x) = self
                 .started_as_goalie
@@ -552,7 +561,11 @@ impl HQMMatchBehaviour {
                 player_index,
                 HQMTeam::Blue
             );
-            server.move_to_team_spawnpoint(*player_index, HQMTeam::Blue, self.config.spawn_point);
+            server.spawn_skater_at_spawnpoint(
+                *player_index,
+                HQMTeam::Blue,
+                self.config.spawn_point,
+            );
 
             if let Some(x) = self
                 .started_as_goalie
@@ -617,41 +630,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn cheat_mass(&mut self, server: &mut HQMServer, split: &[&str]) {
-        if split.len() >= 3 {
-            let player_index = split[1].parse::<usize>().ok();
-            if let Some(player_index) = player_index {
-                let player = server.players.get_mut(player_index);
-                let mass = split[2].parse::<f32>();
-                if let Some(player) = player {
-                    if let Ok(mass) = mass {
-                        player.mass = mass;
-
-                        if let Some(HQMSkaterObjectRefMut { skater, .. }) = server
-                            .game
-                            .world
-                            .objects
-                            .get_skater_object_for_player_mut(player_index)
-                        {
-                            for collision_ball in skater.collision_balls.iter_mut() {
-                                collision_ball.mass = mass;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     fn cheat(&mut self, server: &mut HQMServer, player_index: usize, arg: &str) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 let split: Vec<&str> = arg.split_whitespace().collect();
                 if let Some(&command) = split.get(0) {
                     match command {
-                        "mass" => {
-                            self.cheat_mass(server, &split);
-                        }
                         "gravity" => {
                             self.cheat_gravity(server, &split);
                         }
@@ -1374,6 +1358,11 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
             self.started_as_goalie.remove(x);
         }
         self.preferred_positions.remove(&player_index);
+        self.team_switch_timer.remove(&player_index);
+    }
+
+    fn after_player_force_off(&mut self, _server: &mut HQMServer, player_index: usize) {
+        self.team_switch_timer.insert(player_index, 500);
     }
 
     fn get_number_of_players(&self) -> u32 {

@@ -2,6 +2,7 @@ use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMSkaterObjec
 use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMSpawnPoint};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
+use std::collections::HashMap;
 use std::f32::consts::PI;
 
 use tracing::info;
@@ -26,6 +27,7 @@ pub struct HQMShootoutBehaviour {
     attempts: u32,
     status: HQMShootoutStatus,
     physics_config: HQMPhysicsConfiguration,
+    team_switch_timer: HashMap<usize, u32>,
     team_max: usize,
 }
 
@@ -35,6 +37,7 @@ impl HQMShootoutBehaviour {
             attempts,
             status: HQMShootoutStatus::Pause,
             physics_config,
+            team_switch_timer: Default::default(),
             team_max: 1,
         }
     }
@@ -132,7 +135,7 @@ impl HQMShootoutBehaviour {
                 };
                 pos += &attacking_rot * side;
             }
-            server.move_to_team(player_index, next_team, pos, attacking_rot.clone());
+            server.spawn_skater(player_index, next_team, pos, attacking_rot.clone());
         }
         for (index, player_index) in defending_players.into_iter().enumerate() {
             let mut pos = goalie_pos.clone();
@@ -146,7 +149,7 @@ impl HQMShootoutBehaviour {
                 };
                 pos += &defending_rot * side;
             }
-            server.move_to_team(player_index, defending_team, pos, defending_rot.clone());
+            server.spawn_skater(player_index, defending_team, pos, defending_rot.clone());
         }
 
         self.status = HQMShootoutStatus::Game {
@@ -160,16 +163,23 @@ impl HQMShootoutBehaviour {
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
-        for (player_index, player) in server.players.iter_mut().enumerate() {
+        for (player_index, player) in server.players.iter().enumerate() {
             if let Some(player) = player {
                 let has_skater = server.game.world.objects.has_skater(player_index);
                 if has_skater && player.input.spectate() {
-                    player.team_switch_timer = 500;
+                    self.team_switch_timer.insert(player_index, 500);
                     spectating_players.push((player_index, player.player_name.clone()))
                 } else {
-                    player.team_switch_timer = player.team_switch_timer.saturating_sub(1);
+                    self.team_switch_timer
+                        .get_mut(&player_index)
+                        .map(|x| *x = x.saturating_sub(1));
                 }
-                if !has_skater && player.team_switch_timer == 0 {
+                if !has_skater
+                    && self
+                        .team_switch_timer
+                        .get(&player_index)
+                        .map_or(true, |x| *x == 0)
+                {
                     if player.input.join_red() {
                         joining_red.push((player_index, player.player_name.clone()));
                     } else if player.input.join_blue() {
@@ -206,7 +216,7 @@ impl HQMShootoutBehaviour {
                 player_index,
                 HQMTeam::Red
             );
-            server.move_to_team_spawnpoint(*player_index, HQMTeam::Red, HQMSpawnPoint::Bench);
+            server.spawn_skater_at_spawnpoint(*player_index, HQMTeam::Red, HQMSpawnPoint::Bench);
         }
         for (player_index, player_name) in &joining_blue[0..num_joining_blue] {
             info!(
@@ -215,7 +225,7 @@ impl HQMShootoutBehaviour {
                 player_index,
                 HQMTeam::Blue
             );
-            server.move_to_team_spawnpoint(*player_index, HQMTeam::Blue, HQMSpawnPoint::Bench);
+            server.spawn_skater_at_spawnpoint(*player_index, HQMTeam::Blue, HQMSpawnPoint::Bench);
         }
     }
 
@@ -473,6 +483,14 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
 
         game.time = 1000;
         game
+    }
+
+    fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: usize) {
+        self.team_switch_timer.remove(&player_index);
+    }
+
+    fn after_player_force_off(&mut self, _server: &mut HQMServer, player_index: usize) {
+        self.team_switch_timer.insert(player_index, 500);
     }
 
     fn get_number_of_players(&self) -> u32 {
