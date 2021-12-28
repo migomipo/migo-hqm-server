@@ -276,12 +276,7 @@ impl HQMServer {
             data.known_packet = new_known_packet;
             player.input = input;
             data.game_id = current_game_id;
-
-            if known_msgpos > data.known_msgpos {
-                let diff = known_msgpos - data.known_msgpos;
-                data.known_msgpos = known_msgpos;
-                std::mem::drop(data.messages.drain(..diff));
-            }
+            data.known_msgpos = known_msgpos;
 
             if let Some(deltatime) = deltatime {
                 data.deltatime = deltatime;
@@ -1805,12 +1800,19 @@ async fn send_updates(
 
                     write_objects(&mut writer, game, packets, data.known_packet);
 
-                    let remaining_messages = min(data.messages.len(), 15);
+                    let (start, remaining_messages) = if data.known_msgpos > data.messages.len() {
+                        (data.messages.len(), 0)
+                    } else {
+                        (
+                            data.known_msgpos,
+                            min(data.messages.len() - data.known_msgpos, 15),
+                        )
+                    };
 
                     writer.write_bits(4, remaining_messages as u32);
-                    writer.write_bits(16, data.known_msgpos as u32);
+                    writer.write_bits(16, start as u32);
 
-                    for message in data.messages.iter().take(remaining_messages) {
+                    for message in &data.messages[start..start + remaining_messages] {
                         write_message(&mut writer, Rc::as_ref(message));
                     }
                 }
@@ -1879,12 +1881,12 @@ pub struct HQMNetworkPlayerData {
     inactivity: u32,
     known_packet: u32,
     known_msgpos: usize,
-    messages: VecDeque<Rc<HQMMessage>>,
     chat_rep: Option<u8>,
     deltatime: u32,
     last_ping: VecDeque<f32>,
     view_player_index: usize,
     pub game_id: u32,
+    messages: Vec<Rc<HQMMessage>>,
 }
 
 pub enum HQMServerPlayerData {
@@ -1933,7 +1935,7 @@ impl HQMServerPlayer {
                     last_ping: VecDeque::new(),
                     view_player_index: player_index,
                     game_id: u32::MAX,
-                    messages: VecDeque::from(global_messages),
+                    messages: global_messages,
                 },
             },
             is_admin: false,
@@ -1957,7 +1959,7 @@ impl HQMServerPlayer {
             HQMServerPlayerData::NetworkPlayer {
                 data: HQMNetworkPlayerData { messages, .. },
             } => {
-                messages.push_back(message);
+                messages.push(message);
             }
             _ => {}
         }
