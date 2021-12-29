@@ -825,127 +825,6 @@ impl HQMServer {
         }
     }
 
-    fn add_user_team_message(&mut self, message: &str, sender_index: usize) {
-        if let Some(player) = self.players.get(sender_index) {
-            if let Some(skater) = self
-                .game
-                .world
-                .objects
-                .get_skater_object_for_player(sender_index)
-            {
-                let team = skater.team;
-                info!(
-                    "{} ({}) to team {}: {}",
-                    &player.player_name, sender_index, team, message
-                );
-
-                let change1 = Rc::new(HQMMessage::PlayerUpdate {
-                    player_name: format!("[{}] {}", team, player.player_name),
-                    object: Some((skater.object_index, team)),
-                    player_index: sender_index,
-                    in_server: true,
-                });
-                let change2 = Rc::new(HQMMessage::PlayerUpdate {
-                    player_name: player.player_name.clone(),
-                    object: Some((skater.object_index, team)),
-                    player_index: sender_index,
-                    in_server: true,
-                });
-                let chat = Rc::new(HQMMessage::Chat {
-                    player_index: Some(sender_index),
-                    message: message.to_owned(),
-                });
-                for skater in self.game.world.objects.get_skater_iter() {
-                    if skater.team == team {
-                        if let Some(player) = self.players.get_mut(skater.connected_player_index) {
-                            player.add_message(change1.clone());
-                            player.add_message(chat.clone());
-                            player.add_message(change2.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn add_user_chat_message(&mut self, message: &str, sender_index: usize) {
-        if let Some(player) = self.players.get_mut(sender_index) {
-            info!("{} ({}): {}", &player.player_name, sender_index, &message);
-            let chat = HQMMessage::Chat {
-                player_index: Some(sender_index),
-                message: message.to_owned(),
-            };
-            self.add_global_message(chat, false);
-        }
-    }
-
-    pub fn add_server_chat_message(&mut self, message: &str) {
-        let chat = HQMMessage::Chat {
-            player_index: None,
-            message: message.to_owned(),
-        };
-        self.add_global_message(chat, false);
-    }
-
-    pub fn add_directed_chat_message(
-        &mut self,
-        message: &str,
-        receiver_index: usize,
-        sender_index: Option<usize>,
-    ) {
-        // This message will only be visible to a single player
-        if let Some(player) = self.players.get_mut(receiver_index) {
-            let chat = HQMMessage::Chat {
-                player_index: sender_index,
-                message: message.to_owned(),
-            };
-            player.add_message(Rc::new(chat));
-        }
-    }
-
-    pub fn add_directed_user_chat_message(
-        &mut self,
-        message: &str,
-        receiver_index: usize,
-        sender_index: usize,
-    ) {
-        self.add_directed_chat_message(message, receiver_index, Some(sender_index));
-    }
-
-    pub fn add_directed_server_chat_message(&mut self, message: &str, receiver_index: usize) {
-        self.add_directed_chat_message(message, receiver_index, None);
-    }
-
-    pub fn add_goal_message(
-        &mut self,
-        team: HQMTeam,
-        goal_player_index: Option<usize>,
-        assist_player_index: Option<usize>,
-    ) {
-        let message = HQMMessage::Goal {
-            team,
-            goal_player_index,
-            assist_player_index,
-        };
-        self.add_global_message(message, true);
-    }
-
-    fn add_global_message(&mut self, message: HQMMessage, persistent: bool) {
-        let rc = Rc::new(message);
-        self.game.replay_messages.push(rc.clone());
-        if persistent {
-            self.game.persistent_messages.push(rc.clone());
-        }
-        for player in self.players.iter_mut() {
-            match player {
-                Some(player) => {
-                    player.add_message(rc.clone());
-                }
-                _ => (),
-            }
-        }
-    }
-
     pub fn move_to_spectator(&mut self, player_index: usize) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
             if self.game.world.remove_player(player_index).is_some() {
@@ -1115,6 +994,7 @@ impl HQMServer {
                         },
                         true,
                     );
+                    self.remove_player_from_dual_control(player_index);
                     return true;
                 }
             }
@@ -1128,6 +1008,18 @@ impl HQMServer {
         movement: Option<usize>,
         stick: Option<usize>,
     ) {
+        fn set_view_player_index(i: usize, players: &mut HQMServerPlayerList, val: usize) {
+            if let Some(player) = players.get_mut(i) {
+                if let HQMServerPlayerData::NetworkPlayer {
+                    data: HQMNetworkPlayerData {
+                        view_player_index, ..
+                    }
+                } = &mut player.data {
+                    *view_player_index = val;
+                }
+            }
+        }
+
         let s1 = movement
             .and_then(|i| self.players.get(i))
             .map(|player| player.player_name.as_str())
@@ -1165,18 +1057,7 @@ impl HQMServer {
 
                 }
 
-                fn set_view_player_index(i: usize, players: &mut HQMServerPlayerList, val: usize) {
-                    if let Some(player) = players.get_mut(i) {
-                        if let HQMServerPlayerData::NetworkPlayer {
-                            data: HQMNetworkPlayerData {
-                                view_player_index, ..
-                            }
-                        } = &mut player.data {
-                            *view_player_index = val;
-                        }
-                    }
 
-                }
                 if let Some(old_movement) = old_movement {
                     set_view_player_index(old_movement, &mut self.players, old_movement);
                 }
@@ -1213,6 +1094,127 @@ impl HQMServer {
             }
         }
         false
+    }
+
+    fn add_user_team_message(&mut self, message: &str, sender_index: usize) {
+        if let Some(player) = self.players.get(sender_index) {
+            if let Some(skater) = self
+                .game
+                .world
+                .objects
+                .get_skater_object_for_player(sender_index)
+            {
+                let team = skater.team;
+                info!(
+                    "{} ({}) to team {}: {}",
+                    &player.player_name, sender_index, team, message
+                );
+
+                let change1 = Rc::new(HQMMessage::PlayerUpdate {
+                    player_name: format!("[{}] {}", team, player.player_name),
+                    object: Some((skater.object_index, team)),
+                    player_index: sender_index,
+                    in_server: true,
+                });
+                let change2 = Rc::new(HQMMessage::PlayerUpdate {
+                    player_name: player.player_name.clone(),
+                    object: Some((skater.object_index, team)),
+                    player_index: sender_index,
+                    in_server: true,
+                });
+                let chat = Rc::new(HQMMessage::Chat {
+                    player_index: Some(sender_index),
+                    message: message.to_owned(),
+                });
+                for skater in self.game.world.objects.get_skater_iter() {
+                    if skater.team == team {
+                        if let Some(player) = self.players.get_mut(skater.connected_player_index) {
+                            player.add_message(change1.clone());
+                            player.add_message(chat.clone());
+                            player.add_message(change2.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn add_user_chat_message(&mut self, message: &str, sender_index: usize) {
+        if let Some(player) = self.players.get_mut(sender_index) {
+            info!("{} ({}): {}", &player.player_name, sender_index, &message);
+            let chat = HQMMessage::Chat {
+                player_index: Some(sender_index),
+                message: message.to_owned(),
+            };
+            self.add_global_message(chat, false);
+        }
+    }
+
+    pub fn add_server_chat_message(&mut self, message: &str) {
+        let chat = HQMMessage::Chat {
+            player_index: None,
+            message: message.to_owned(),
+        };
+        self.add_global_message(chat, false);
+    }
+
+    pub fn add_directed_chat_message(
+        &mut self,
+        message: &str,
+        receiver_index: usize,
+        sender_index: Option<usize>,
+    ) {
+        // This message will only be visible to a single player
+        if let Some(player) = self.players.get_mut(receiver_index) {
+            let chat = HQMMessage::Chat {
+                player_index: sender_index,
+                message: message.to_owned(),
+            };
+            player.add_message(Rc::new(chat));
+        }
+    }
+
+    pub fn add_directed_user_chat_message(
+        &mut self,
+        message: &str,
+        receiver_index: usize,
+        sender_index: usize,
+    ) {
+        self.add_directed_chat_message(message, receiver_index, Some(sender_index));
+    }
+
+    pub fn add_directed_server_chat_message(&mut self, message: &str, receiver_index: usize) {
+        self.add_directed_chat_message(message, receiver_index, None);
+    }
+
+    pub fn add_goal_message(
+        &mut self,
+        team: HQMTeam,
+        goal_player_index: Option<usize>,
+        assist_player_index: Option<usize>,
+    ) {
+        let message = HQMMessage::Goal {
+            team,
+            goal_player_index,
+            assist_player_index,
+        };
+        self.add_global_message(message, true);
+    }
+
+    fn add_global_message(&mut self, message: HQMMessage, persistent: bool) {
+        let rc = Rc::new(message);
+        self.game.replay_messages.push(rc.clone());
+        if persistent {
+            self.game.persistent_messages.push(rc.clone());
+        }
+        for player in self.players.iter_mut() {
+            match player {
+                Some(player) => {
+                    player.add_message(rc.clone());
+                }
+                _ => (),
+            }
+        }
     }
 
     fn find_player_slot(&self, addr: SocketAddr) -> Option<usize> {
