@@ -5,9 +5,7 @@ use migo_hqm_server::hqm_game::{
     HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRuleIndication,
     HQMSkaterHand, HQMSkaterObjectRef, HQMTeam,
 };
-use migo_hqm_server::hqm_server::{
-    HQMServer, HQMServerBehaviour, HQMServerPlayerList, HQMSpawnPoint,
-};
+use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerList, HQMSpawnPoint};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::HashMap;
 
@@ -1059,12 +1057,18 @@ fn get_faceoff_positions(
     let mut red_players = vec![];
     let mut blue_players = vec![];
     for (player_index, player) in players.iter().enumerate() {
-        if player.is_some() {
+        if let Some(player) = player {
             let team = world
                 .objects
                 .get_skater_object_for_player(player_index)
                 .map(|x| x.team);
-            let preferred_position = preferred_positions.get(&player_index).map(String::as_str);
+            let i = match &player.data {
+                HQMServerPlayerData::DualControl { movement, stick } => {
+                    movement.or(*stick).unwrap_or(player_index)
+                },
+                _ => player_index
+            };
+            let preferred_position = preferred_positions.get(&i).map(String::as_str);
 
             if team == Some(HQMTeam::Red) {
                 red_players.push((player_index, preferred_position));

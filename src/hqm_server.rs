@@ -1870,7 +1870,7 @@ async fn get_master_server() -> Result<SocketAddr, Box<dyn Error>> {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub(crate) enum HQMMuteStatus {
+pub enum HQMMuteStatus {
     NotMuted,
     ShadowMuted,
     Muted,
@@ -1904,10 +1904,10 @@ pub enum HQMServerPlayerData {
 pub struct HQMServerPlayer {
     pub player_name: String,
     pub id: Uuid,
-    pub(crate) data: HQMServerPlayerData,
+    pub data: HQMServerPlayerData,
     pub is_admin: bool,
-    pub(crate) is_muted: HQMMuteStatus,
-    pub(crate) hand: HQMSkaterHand,
+    pub is_muted: HQMMuteStatus,
+    pub hand: HQMSkaterHand,
     pub mass: f32,
     pub input: HQMPlayerInput,
 }
