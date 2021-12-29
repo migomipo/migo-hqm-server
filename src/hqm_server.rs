@@ -1035,20 +1035,11 @@ impl HQMServer {
         let player_index = self.find_empty_player_slot();
         match player_index {
             Some(player_index) => {
-                let s1 = movement
-                    .and_then(|i| self.players.get(i))
-                    .map(|player| player.player_name.as_str())
-                    .unwrap_or("?");
-                let s2 = stick
-                    .and_then(|i| self.players.get(i))
-                    .map(|player| player.player_name.as_str())
-                    .unwrap_or("?");
-                let player_name = format!("{}/{}", s1, s2);
 
                 let new_player = HQMServerPlayer {
-                    player_name,
+                    player_name: "?/?".to_owned(),
                     id: Uuid::new_v4(),
-                    data: HQMServerPlayerData::DualControl { movement, stick },
+                    data: HQMServerPlayerData::DualControl { movement: None, stick: None },
                     is_admin: false,
                     is_muted: HQMMuteStatus::NotMuted,
                     hand: HQMSkaterHand::Right,
@@ -1056,24 +1047,18 @@ impl HQMServer {
                     input: Default::default(),
                 };
 
-                if let Some(skater) = self.game.world.create_player_object(
+                self.game.world.create_player_object(
                     team,
                     pos,
                     rot,
                     new_player.hand,
                     player_index,
                     new_player.mass,
-                ) {
-                    let update = HQMMessage::PlayerUpdate {
-                        player_name: new_player.player_name.clone(),
-                        object: Some((skater, team)),
-                        player_index,
-                        in_server: true,
-                    };
+                ).is_some() {
 
                     self.players.add_player(player_index, new_player);
 
-                    self.add_global_message(update, true);
+                    self.update_dual_control(player_index, movement, stick);
                 }
             }
             _ => {}
@@ -1135,7 +1120,7 @@ impl HQMServer {
 
     pub fn update_dual_control(
         &mut self,
-        player_index: usize,
+        dual_control_player_index: usize,
         movement: Option<usize>,
         stick: Option<usize>,
     ) {
@@ -1149,8 +1134,8 @@ impl HQMServer {
             .unwrap_or("?");
         let player_name = format!("{}/{}", s1, s2);
 
-        let player = self.players.get_mut(player_index);
-        let skater = self.game.world.objects.get_skater_object_for_player(player_index);
+        let player = self.players.get_mut(dual_control_player_index);
+        let skater = self.game.world.objects.get_skater_object_for_player(dual_control_player_index);
 
         if let (Some(player), Some(skater)) = (player, skater) {
             if let HQMServerPlayerData::DualControl {
@@ -1158,8 +1143,10 @@ impl HQMServer {
                 stick: s,
             } = &mut player.data
             {
+                let old_movement = *m;
+                let old_stick = *s;
                 if movement.is_none() && stick.is_none() {
-                    self.remove_player(player_index);
+                    self.remove_player(dual_control_player_index);
                 } else {
                     *m = movement;
                     *s = stick;
@@ -1167,10 +1154,36 @@ impl HQMServer {
                     let msg = HQMMessage::PlayerUpdate {
                         player_name,
                         object: Some((skater.object_index, skater.team)),
-                        player_index,
+                        player_index: dual_control_player_index,
                         in_server: true,
                     };
                     self.add_global_message(msg, true);
+
+                }
+
+                fn set_view_player_index(i: usize, players: &mut HQMServerPlayerList, val: usize) {
+                    if let Some(player) = players.get_mut(i) {
+                        if let HQMServerPlayerData::NetworkPlayer {
+                            data: HQMNetworkPlayerData {
+                                view_player_index, ..
+                            }
+                        } = &mut player.data {
+                            *view_player_index = val;
+                        }
+                    }
+
+                }
+                if let Some(old_movement) = old_movement {
+                    set_view_player_index(old_movement, &mut self.players, old_movement);
+                }
+                if let Some(old_stick) = old_stick {
+                    set_view_player_index(old_stick, &mut self.players, old_stick);
+                }
+                if let Some(movement) = movement {
+                    set_view_player_index(movement, &mut self.players, dual_control_player_index);
+                }
+                if let Some(stick) = stick {
+                    set_view_player_index(stick, &mut self.players, dual_control_player_index);
                 }
             }
         }
