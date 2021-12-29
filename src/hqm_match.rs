@@ -5,7 +5,9 @@ use migo_hqm_server::hqm_game::{
     HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRuleIndication,
     HQMSkaterHand, HQMSkaterObjectRef, HQMTeam,
 };
-use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerList, HQMSpawnPoint};
+use migo_hqm_server::hqm_server::{
+    HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerList, HQMSpawnPoint,
+};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::HashMap;
 
@@ -1065,8 +1067,8 @@ fn get_faceoff_positions(
             let i = match &player.data {
                 HQMServerPlayerData::DualControl { movement, stick } => {
                     movement.or(*stick).unwrap_or(player_index)
-                },
-                _ => player_index
+                }
+                _ => player_index,
             };
             let preferred_position = preferred_positions.get(&i).map(String::as_str);
 

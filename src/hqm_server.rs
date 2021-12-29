@@ -800,24 +800,28 @@ impl HQMServer {
     }
 
     pub fn remove_player_from_dual_control(&mut self, player_index: usize) {
-        let mut removals = vec![];
-        for (i, player) in self.players.iter_mut().enumerate() {
+        let mut changes = vec![];
+        for (i, player) in self.players.iter().enumerate() {
             if let Some(player) = player {
-                if let HQMServerPlayerData::DualControl { movement, stick } = &mut player.data {
-                    if *movement == Some(player_index) {
-                        *movement = None;
-                    }
-                    if *stick == Some(player_index) {
-                        *stick = None;
-                    }
-                    if *movement == None && *stick == None {
-                        removals.push(i);
+                if let HQMServerPlayerData::DualControl { movement, stick } = & player.data {
+                    let new_movement = if *movement == Some(player_index) {
+                        None
+                    } else {
+                        *movement
+                    };
+                    let new_stick = if *stick == Some(player_index) {
+                        None
+                    } else {
+                        *stick
+                    };
+                    if new_movement != *movement || new_stick != *stick {
+                        changes.push((i, new_movement, new_stick));
                     }
                 }
             }
         }
-        for i in removals {
-            self.remove_player(i);
+        for (i, movement, stick) in changes {
+            self.update_dual_control(i, movement, stick)
         }
     }
 
@@ -1047,7 +1051,7 @@ impl HQMServer {
                     input: Default::default(),
                 };
 
-                self.game.world.create_player_object(
+                if self.game.world.create_player_object(
                     team,
                     pos,
                     rot,
