@@ -1089,6 +1089,21 @@ impl HQMServer {
         }
     }
 
+    pub fn get_dual_control_player(&self, player_index: usize) -> Option<(usize, Option<usize>, Option<usize>)> {
+        for (i, player) in self.players.iter().enumerate() {
+            if let Some(player) = player {
+                if let HQMServerPlayerData::DualControl {
+                    movement, stick
+                } = player.data {
+                    if movement == Some(player_index) || stick == Some(player_index) {
+                        return Some((i, movement, stick))
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub fn swap_team(&mut self, player_index: usize, team: HQMTeam) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
             if let Some((object_index, object)) = self.game.world.get_internal_ref(player_index) {
