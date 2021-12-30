@@ -835,7 +835,7 @@ impl HQMServer {
             }
         }
         for (i, movement, stick) in changes {
-            self.update_dual_control(i, movement, stick)
+            self.update_dual_control_internal(i, movement, stick)
         }
     }
 
@@ -918,7 +918,7 @@ impl HQMServer {
 
                     self.players.add_player(player_index, new_player);
 
-                    self.update_dual_control(player_index, movement, stick);
+                    self.update_dual_control_internal(player_index, movement, stick);
                 }
             }
             _ => {}
@@ -985,6 +985,44 @@ impl HQMServer {
         movement: Option<usize>,
         stick: Option<usize>,
     ) {
+        let mut changes = vec![];
+        for (i, player) in self.players.iter() {
+            if i == dual_control_player_index {
+                continue;
+            }
+            if let HQMServerPlayerData::DualControl {
+                movement: m,
+                stick: s,
+            } = player.data {
+                let mut changed = false;
+                let mut new_movement = m;
+                let mut new_stick = s;
+                if m.is_some() && (m == movement || m == stick) {
+                    new_movement = None;
+                    changed = true;
+                }
+                if s.is_some() && (s == movement || s == stick) {
+                    new_stick = None;
+                    changed = true;
+                }
+                if changed {
+                    changes.push((i, new_movement, new_stick));
+                }
+            }
+        }
+        for (i, new_movement, new_stick) in changes {
+            self.update_dual_control_internal(i, new_movement, new_stick);
+        }
+        self.update_dual_control_internal(dual_control_player_index, movement, stick);
+
+    }
+
+    fn update_dual_control_internal(
+        &mut self,
+        dual_control_player_index: usize,
+        movement: Option<usize>,
+        stick: Option<usize>,
+    ) {
         let player_name = get_dual_control_name(&self.players, movement, stick);
 
         let player = self.players.get_mut(dual_control_player_index);
@@ -1012,22 +1050,20 @@ impl HQMServer {
                         in_server: true,
                     };
                     self.add_global_message(msg, true);
-
-                }
-
-                if let Some(old_movement) = old_movement {
-                    set_view_player_index(old_movement, &mut self.players, old_movement);
-                }
-                if let Some(old_stick) = old_stick {
-                    set_view_player_index(old_stick, &mut self.players, old_stick);
-                }
-                if let Some(movement) = movement {
-                    set_view_player_index(movement, &mut self.players, dual_control_player_index);
-                    self.move_to_spectator(movement);
-                }
-                if let Some(stick) = stick {
-                    set_view_player_index(stick, &mut self.players, dual_control_player_index);
-                    self.move_to_spectator(stick);
+                    if let Some(old_movement) = old_movement {
+                        set_view_player_index(old_movement, &mut self.players, old_movement);
+                    }
+                    if let Some(old_stick) = old_stick {
+                        set_view_player_index(old_stick, &mut self.players, old_stick);
+                    }
+                    if let Some(movement) = movement {
+                        set_view_player_index(movement, &mut self.players, dual_control_player_index);
+                        self.move_to_spectator(movement);
+                    }
+                    if let Some(stick) = stick {
+                        set_view_player_index(stick, &mut self.players, dual_control_player_index);
+                        self.move_to_spectator(stick);
+                    }
                 }
             }
         }
