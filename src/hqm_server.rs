@@ -185,8 +185,16 @@ impl HQMServer {
     fn player_count(&self) -> usize {
         let mut player_count = 0;
         for player in self.players.iter() {
-            if player.is_some() {
-                player_count += 1;
+            if let Some(player) = player {
+                let is_actual_player = match player.data {
+                    HQMServerPlayerData::NetworkPlayer { .. } => true,
+                    HQMServerPlayerData::Bot { .. } => true,
+                    HQMServerPlayerData::Replay { .. } => false,
+                    HQMServerPlayerData::DualControl { .. } => false
+                };
+                if is_actual_player {
+                    player_count += 1;
+                }
             }
         }
         player_count

@@ -21,7 +21,6 @@ impl HQMPermanentWarmup {
         spawn_point: HQMSpawnPoint,
         use_dual_control: bool,
     ) -> Self {
-        println!("{}", use_dual_control);
         HQMPermanentWarmup {
             physics_config,
             pucks,
@@ -106,7 +105,6 @@ impl HQMPermanentWarmup {
         ) {
             let mut current_empty = find_empty_dual_control(server, team);
             for (player_index, _) in joining {
-                println!("{:?}", current_empty);
                 match current_empty {
                     Some((index, movement @ Some(_), None)) => {
                         server.update_dual_control(index, movement, Some(player_index));
