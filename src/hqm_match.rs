@@ -559,12 +559,16 @@ impl HQMMatchBehaviour {
             let num_joining_blue = new_blue_player_count.saturating_sub(blue_player_count);
             for (player_index, player_name) in &joining_red[0..num_joining_red] {
                 info!(
-                "{} ({}) has joined team {:?}",
-                player_name,
-                player_index,
-                HQMTeam::Red
-            );
-                server.spawn_skater_at_spawnpoint(*player_index, HQMTeam::Red, self.config.spawn_point);
+                    "{} ({}) has joined team {:?}",
+                    player_name,
+                    player_index,
+                    HQMTeam::Red
+                );
+                server.spawn_skater_at_spawnpoint(
+                    *player_index,
+                    HQMTeam::Red,
+                    self.config.spawn_point,
+                );
 
                 if let Some(x) = self
                     .started_as_goalie
@@ -576,11 +580,11 @@ impl HQMMatchBehaviour {
             }
             for (player_index, player_name) in &joining_blue[0..num_joining_blue] {
                 info!(
-                "{} ({}) has joined team {:?}",
-                player_name,
-                player_index,
-                HQMTeam::Blue
-            );
+                    "{} ({}) has joined team {:?}",
+                    player_name,
+                    player_index,
+                    HQMTeam::Blue
+                );
                 server.spawn_skater_at_spawnpoint(
                     *player_index,
                     HQMTeam::Blue,
@@ -604,7 +608,6 @@ impl HQMMatchBehaviour {
                 server.game.time = 2000;
             }
         }
-
     }
 
     fn set_team_parity(&mut self, server: &mut HQMServer, player_index: usize, rule: &str) {

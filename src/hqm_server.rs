@@ -865,7 +865,7 @@ impl HQMServer {
         player_index: usize,
         team: HQMTeam,
         spawn_point: HQMSpawnPoint,
-    ) -> bool {
+    ) -> Option<usize> {
         let (pos, rot) = get_spawnpoint(&self.game.world.rink, team, spawn_point);
         self.spawn_skater(player_index, team, pos, rot)
     }
@@ -876,9 +876,9 @@ impl HQMServer {
         spawn_point: HQMSpawnPoint,
         movement: Option<usize>,
         stick: Option<usize>,
-    ) {
+    ) -> Option<(usize, usize)> {
         let (pos, rot) = get_spawnpoint(&self.game.world.rink, team, spawn_point);
-        self.spawn_dual_control_skater(team, pos, rot, movement, stick);
+        self.spawn_dual_control_skater(team, pos, rot, movement, stick)
     }
 
     pub fn spawn_dual_control_skater(
@@ -888,9 +888,9 @@ impl HQMServer {
         rot: Rotation3<f32>,
         movement: Option<usize>,
         stick: Option<usize>,
-    ) {
+    ) -> Option<(usize, usize)> {
         if movement.is_none() && stick.is_none() {
-            return;
+            return None;
         }
 
         let player_index = self.find_empty_player_slot();
@@ -910,26 +910,25 @@ impl HQMServer {
                     input: Default::default(),
                 };
 
-                if self
-                    .game
-                    .world
-                    .create_player_object(
-                        team,
-                        pos,
-                        rot,
-                        new_player.hand,
-                        player_index,
-                        new_player.mass,
-                    )
-                    .is_some()
-                {
+                if let Some(skater) = self.game.world.create_player_object(
+                    team,
+                    pos,
+                    rot,
+                    new_player.hand,
+                    player_index,
+                    new_player.mass,
+                ) {
                     self.players.add_player(player_index, new_player);
 
                     self.update_dual_control_internal(player_index, movement, stick);
+
+                    Some((player_index, skater))
+                } else {
+                    None
                 }
             }
-            _ => {}
-        };
+            _ => None,
+        }
     }
 
     pub fn spawn_skater(
@@ -938,7 +937,7 @@ impl HQMServer {
         team: HQMTeam,
         pos: Point3<f32>,
         rot: Rotation3<f32>,
-    ) -> bool {
+    ) -> Option<usize> {
         if let Some(player) = self.players.get_mut(player_index) {
             if let Some((object_index, object)) = self.game.world.get_internal_ref(player_index) {
                 if let HQMGameObject::Player(_, current_team, skater) = object {
@@ -979,11 +978,11 @@ impl HQMServer {
                         true,
                     );
                     self.remove_player_from_dual_control(player_index);
-                    return true;
+                    return Some(skater);
                 }
             }
         }
-        false
+        None
     }
 
     pub fn update_dual_control(
@@ -1089,14 +1088,15 @@ impl HQMServer {
         }
     }
 
-    pub fn get_dual_control_player(&self, player_index: usize) -> Option<(usize, Option<usize>, Option<usize>)> {
+    pub fn get_dual_control_player(
+        &self,
+        player_index: usize,
+    ) -> Option<(usize, Option<usize>, Option<usize>)> {
         for (i, player) in self.players.iter().enumerate() {
             if let Some(player) = player {
-                if let HQMServerPlayerData::DualControl {
-                    movement, stick
-                } = player.data {
+                if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                     if movement == Some(player_index) || stick == Some(player_index) {
-                        return Some((i, movement, stick))
+                        return Some((i, movement, stick));
                     }
                 }
             }

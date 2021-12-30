@@ -298,7 +298,12 @@ async fn main() -> std::io::Result<()> {
                     server_port,
                     server_public,
                     config,
-                    HQMPermanentWarmup::new(physics_config, warmup_pucks, spawn_point),
+                    HQMPermanentWarmup::new(
+                        physics_config,
+                        warmup_pucks,
+                        spawn_point,
+                        dual_control,
+                    ),
                 )
                 .await
             }
