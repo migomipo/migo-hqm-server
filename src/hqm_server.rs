@@ -994,28 +994,30 @@ impl HQMServer {
     ) {
         if movement.is_some() || stick.is_some() {
             let mut changes = vec![];
-            for (i, player) in self.players.iter() {
+            for (i, player) in self.players.iter().enumerate() {
                 if i == dual_control_player_index {
                     continue;
                 }
-                if let HQMServerPlayerData::DualControl {
-                    movement: m,
-                    stick: s,
-                } = player.data
-                {
-                    let mut changed = false;
-                    let mut new_movement = m;
-                    let mut new_stick = s;
-                    if m.is_some() && (m == movement || m == stick) {
-                        new_movement = None;
-                        changed = true;
-                    }
-                    if s.is_some() && (s == movement || s == stick) {
-                        new_stick = None;
-                        changed = true;
-                    }
-                    if changed {
-                        changes.push((i, new_movement, new_stick));
+                if let Some(player) = player {
+                    if let HQMServerPlayerData::DualControl {
+                        movement: m,
+                        stick: s,
+                    } = player.data
+                    {
+                        let mut changed = false;
+                        let mut new_movement = m;
+                        let mut new_stick = s;
+                        if m.is_some() && (m == movement || m == stick) {
+                            new_movement = None;
+                            changed = true;
+                        }
+                        if s.is_some() && (s == movement || s == stick) {
+                            new_stick = None;
+                            changed = true;
+                        }
+                        if changed {
+                            changes.push((i, new_movement, new_stick));
+                        }
                     }
                 }
             }
