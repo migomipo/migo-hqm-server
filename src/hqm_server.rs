@@ -16,10 +16,7 @@ use tokio::net::UdpSocket;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::hqm_game::{
-    HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRuleIndication, HQMRulesState,
-    HQMSkater, HQMSkaterHand, HQMSkaterObjectRefMut, HQMTeam,
-};
+use crate::hqm_game::{HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRink, HQMRuleIndication, HQMRulesState, HQMSkater, HQMSkaterHand, HQMSkaterObjectRefMut, HQMTeam};
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter};
 use crate::hqm_simulate::HQMSimulationEvent;
 
@@ -845,50 +842,13 @@ impl HQMServer {
         false
     }
 
-    pub fn get_spawnpoint(
-        &self,
-        team: HQMTeam,
-        spawn_point: HQMSpawnPoint,
-    ) -> (Point3<f32>, Rotation3<f32>) {
-        match team {
-            HQMTeam::Red => match spawn_point {
-                HQMSpawnPoint::Center => {
-                    let (z, rot) = ((self.game.world.rink.length / 2.0) + 3.0, 0.0);
-                    let pos = Point3::new(self.game.world.rink.width / 2.0, 2.0, z);
-                    let rot = Rotation3::from_euler_angles(0.0, rot, 0.0);
-                    (pos, rot)
-                }
-                HQMSpawnPoint::Bench => {
-                    let z = (self.game.world.rink.length / 2.0) + 4.0;
-                    let pos = Point3::new(0.5, 2.0, z);
-                    let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
-                    (pos, rot)
-                }
-            },
-            HQMTeam::Blue => match spawn_point {
-                HQMSpawnPoint::Center => {
-                    let (z, rot) = ((self.game.world.rink.length / 2.0) - 3.0, PI);
-                    let pos = Point3::new(self.game.world.rink.width / 2.0, 2.0, z);
-                    let rot = Rotation3::from_euler_angles(0.0, rot, 0.0);
-                    (pos, rot)
-                }
-                HQMSpawnPoint::Bench => {
-                    let z = (self.game.world.rink.length / 2.0) - 4.0;
-                    let pos = Point3::new(0.5, 2.0, z);
-                    let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
-                    (pos, rot)
-                }
-            },
-        }
-    }
-
     pub fn spawn_skater_at_spawnpoint(
         &mut self,
         player_index: usize,
         team: HQMTeam,
         spawn_point: HQMSpawnPoint,
     ) -> bool {
-        let (pos, rot) = self.get_spawnpoint(team, spawn_point);
+        let (pos, rot) = get_spawnpoint(&self.game.world.rink, team, spawn_point);
         self.spawn_skater(player_index, team, pos, rot)
     }
 
@@ -899,7 +859,7 @@ impl HQMServer {
         movement: Option<usize>,
         stick: Option<usize>,
     ) {
-        let (pos, rot) = self.get_spawnpoint(team, spawn_point);
+        let (pos, rot) = get_spawnpoint(&self.game.world.rink, team, spawn_point);
         self.spawn_dual_control_skater(team, pos, rot, movement, stick);
     }
 
@@ -1008,27 +968,7 @@ impl HQMServer {
         movement: Option<usize>,
         stick: Option<usize>,
     ) {
-        fn set_view_player_index(i: usize, players: &mut HQMServerPlayerList, val: usize) {
-            if let Some(player) = players.get_mut(i) {
-                if let HQMServerPlayerData::NetworkPlayer {
-                    data: HQMNetworkPlayerData {
-                        view_player_index, ..
-                    }
-                } = &mut player.data {
-                    *view_player_index = val;
-                }
-            }
-        }
-
-        let s1 = movement
-            .and_then(|i| self.players.get(i))
-            .map(|player| player.player_name.as_str())
-            .unwrap_or("?");
-        let s2 = stick
-            .and_then(|i| self.players.get(i))
-            .map(|player| player.player_name.as_str())
-            .unwrap_or("?");
-        let player_name = format!("{}/{}", s1, s2);
+        let player_name = get_dual_control_name(&self.players, movement, stick);
 
         let player = self.players.get_mut(dual_control_player_index);
         let skater = self.game.world.objects.get_skater_object_for_player(dual_control_player_index);
@@ -1041,8 +981,6 @@ impl HQMServer {
             {
                 let old_movement = *m;
                 let old_stick = *s;
-
-
 
                 if movement.is_none() && stick.is_none() {
                     self.remove_player(dual_control_player_index);
@@ -1894,6 +1832,67 @@ async fn get_master_server() -> Result<SocketAddr, Box<dyn Error>> {
     let addr = split.get(1).unwrap_or(&"").parse::<IpAddr>()?;
     let port = split.get(2).unwrap_or(&"").parse::<u16>()?;
     Ok(SocketAddr::new(addr, port))
+}
+
+fn set_view_player_index(i: usize, players: &mut HQMServerPlayerList, val: usize) {
+    if let Some(player) = players.get_mut(i) {
+        if let HQMServerPlayerData::NetworkPlayer {
+            data: HQMNetworkPlayerData {
+                view_player_index, ..
+            }
+        } = &mut player.data {
+            *view_player_index = val;
+        }
+    }
+}
+
+pub fn get_spawnpoint(
+    rink: &HQMRink,
+    team: HQMTeam,
+    spawn_point: HQMSpawnPoint,
+) -> (Point3<f32>, Rotation3<f32>) {
+    match team {
+        HQMTeam::Red => match spawn_point {
+            HQMSpawnPoint::Center => {
+                let (z, rot) = ((rink.length / 2.0) + 3.0, 0.0);
+                let pos = Point3::new(rink.width / 2.0, 2.0, z);
+                let rot = Rotation3::from_euler_angles(0.0, rot, 0.0);
+                (pos, rot)
+            }
+            HQMSpawnPoint::Bench => {
+                let z = (rink.length / 2.0) + 4.0;
+                let pos = Point3::new(0.5, 2.0, z);
+                let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
+                (pos, rot)
+            }
+        },
+        HQMTeam::Blue => match spawn_point {
+            HQMSpawnPoint::Center => {
+                let (z, rot) = ((rink.length / 2.0) - 3.0, PI);
+                let pos = Point3::new(rink.width / 2.0, 2.0, z);
+                let rot = Rotation3::from_euler_angles(0.0, rot, 0.0);
+                (pos, rot)
+            }
+            HQMSpawnPoint::Bench => {
+                let z = (rink.length / 2.0) - 4.0;
+                let pos = Point3::new(0.5, 2.0, z);
+                let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
+                (pos, rot)
+            }
+        },
+    }
+}
+
+fn get_dual_control_name(players: &HQMServerPlayerList, movement: Option<usize>, stick: Option<usize>) -> String {
+    let s1 = movement
+        .and_then(|i| players.get(i))
+        .map(|player| player.player_name.as_str())
+        .unwrap_or("?");
+    let s2 = stick
+        .and_then(|i| players.get(i))
+        .map(|player| player.player_name.as_str())
+        .unwrap_or("?");
+    format!("{}/{}", s1, s2)
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
