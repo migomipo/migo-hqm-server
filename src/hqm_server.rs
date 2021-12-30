@@ -850,20 +850,26 @@ impl HQMServer {
 
     pub fn move_to_spectator(&mut self, player_index: usize) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
-            if self.game.world.remove_player(player_index).is_some() {
-                let player_name = player.player_name.clone();
-                self.add_global_message(
-                    HQMMessage::PlayerUpdate {
-                        player_name,
-                        object: None,
-                        player_index,
-                        in_server: true,
-                    },
-                    true,
-                );
-
+            if let HQMServerPlayerData::DualControl { .. } = player.data {
+                self.remove_player(player_index);
                 return true;
+            } else {
+                if self.game.world.remove_player(player_index).is_some() {
+                    let player_name = player.player_name.clone();
+                    self.add_global_message(
+                        HQMMessage::PlayerUpdate {
+                            player_name,
+                            object: None,
+                            player_index,
+                            in_server: true,
+                        },
+                        true,
+                    );
+
+                    return true;
+                }
             }
+
         }
         false
     }

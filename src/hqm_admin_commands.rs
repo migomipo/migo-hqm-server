@@ -172,9 +172,9 @@ impl HQMServer {
                 let admin_player_name = player.player_name.clone();
 
                 if force_player_index < self.players.len() {
-                    if self.move_to_spectator(force_player_index) {
-                        if let Some(force_player) = self.players.get(force_player_index) {
-                            let force_player_name = force_player.player_name.clone();
+                    if let Some(force_player) = self.players.get(force_player_index) {
+                        let force_player_name = force_player.player_name.clone();
+                        if self.move_to_spectator(force_player_index) {
                             let msg = format!(
                                 "{} forced off ice by {}",
                                 force_player_name, admin_player_name
@@ -183,7 +183,7 @@ impl HQMServer {
                                 "{} ({}) forced {} ({}) off ice",
                                 admin_player_name,
                                 admin_player_index,
-                                force_player.player_name,
+                                force_player_name,
                                 force_player_index
                             );
                             self.add_server_chat_message(&msg);
