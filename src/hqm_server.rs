@@ -1041,6 +1041,9 @@ impl HQMServer {
             {
                 let old_movement = *m;
                 let old_stick = *s;
+
+
+
                 if movement.is_none() && stick.is_none() {
                     self.remove_player(dual_control_player_index);
                 } else {
@@ -1056,7 +1059,12 @@ impl HQMServer {
                     self.add_global_message(msg, true);
 
                 }
-
+                if let Some(movement) = movement {
+                    self.move_to_spectator(movement);
+                }
+                if let Some(stick) = stick {
+                    self.move_to_spectator(stick);
+                }
 
                 if let Some(old_movement) = old_movement {
                     set_view_player_index(old_movement, &mut self.players, old_movement);
