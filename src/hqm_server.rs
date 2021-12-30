@@ -16,7 +16,10 @@ use tokio::net::UdpSocket;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::hqm_game::{HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRink, HQMRuleIndication, HQMRulesState, HQMSkater, HQMSkaterHand, HQMSkaterObjectRefMut, HQMTeam};
+use crate::hqm_game::{
+    HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRink, HQMRuleIndication, HQMRulesState,
+    HQMSkater, HQMSkaterHand, HQMSkaterObjectRefMut, HQMTeam,
+};
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter};
 use crate::hqm_simulate::HQMSimulationEvent;
 
@@ -783,15 +786,13 @@ impl HQMServer {
                     let movement = *movement;
                     let stick = *stick;
                     if let Some(movement) = movement {
-                        set_view_player_index(movement,&mut self.players, movement)
+                        set_view_player_index(movement, &mut self.players, movement)
                     }
                     if let Some(stick) = stick {
-                        set_view_player_index(stick,&mut self.players, stick)
+                        set_view_player_index(stick, &mut self.players, stick)
                     }
                 }
-                HQMServerPlayerData::Bot {} => {
-
-                }
+                HQMServerPlayerData::Bot {} => {}
                 HQMServerPlayerData::Replay {} => {
                     return; // Replay bots can not be removed like that
                 }
@@ -817,7 +818,7 @@ impl HQMServer {
         let mut changes = vec![];
         for (i, player) in self.players.iter().enumerate() {
             if let Some(player) = player {
-                if let HQMServerPlayerData::DualControl { movement, stick } = & player.data {
+                if let HQMServerPlayerData::DualControl { movement, stick } = &player.data {
                     let new_movement = if *movement == Some(player_index) {
                         None
                     } else {
@@ -895,11 +896,13 @@ impl HQMServer {
         let player_index = self.find_empty_player_slot();
         match player_index {
             Some(player_index) => {
-
                 let new_player = HQMServerPlayer {
                     player_name: "?/?".to_owned(),
                     id: Uuid::new_v4(),
-                    data: HQMServerPlayerData::DualControl { movement: None, stick: None },
+                    data: HQMServerPlayerData::DualControl {
+                        movement: None,
+                        stick: None,
+                    },
                     is_admin: false,
                     is_muted: HQMMuteStatus::NotMuted,
                     hand: HQMSkaterHand::Right,
@@ -907,15 +910,19 @@ impl HQMServer {
                     input: Default::default(),
                 };
 
-                if self.game.world.create_player_object(
-                    team,
-                    pos,
-                    rot,
-                    new_player.hand,
-                    player_index,
-                    new_player.mass,
-                ).is_some() {
-
+                if self
+                    .game
+                    .world
+                    .create_player_object(
+                        team,
+                        pos,
+                        rot,
+                        new_player.hand,
+                        player_index,
+                        new_player.mass,
+                    )
+                    .is_some()
+                {
                     self.players.add_player(player_index, new_player);
 
                     self.update_dual_control_internal(player_index, movement, stick);
@@ -994,7 +1001,8 @@ impl HQMServer {
                 if let HQMServerPlayerData::DualControl {
                     movement: m,
                     stick: s,
-                } = player.data {
+                } = player.data
+                {
                     let mut changed = false;
                     let mut new_movement = m;
                     let mut new_stick = s;
@@ -1017,7 +1025,6 @@ impl HQMServer {
         }
 
         self.update_dual_control_internal(dual_control_player_index, movement, stick);
-
     }
 
     fn update_dual_control_internal(
@@ -1029,7 +1036,11 @@ impl HQMServer {
         let player_name = get_dual_control_name(&self.players, movement, stick);
 
         let player = self.players.get_mut(dual_control_player_index);
-        let skater = self.game.world.objects.get_skater_object_for_player(dual_control_player_index);
+        let skater = self
+            .game
+            .world
+            .objects
+            .get_skater_object_for_player(dual_control_player_index);
 
         if let (Some(player), Some(skater)) = (player, skater) {
             if let HQMServerPlayerData::DualControl {
@@ -1060,7 +1071,11 @@ impl HQMServer {
                         set_view_player_index(old_stick, &mut self.players, old_stick);
                     }
                     if let Some(movement) = movement {
-                        set_view_player_index(movement, &mut self.players, dual_control_player_index);
+                        set_view_player_index(
+                            movement,
+                            &mut self.players,
+                            dual_control_player_index,
+                        );
                         self.move_to_spectator(movement);
                     }
                     if let Some(stick) = stick {
@@ -1891,8 +1906,9 @@ fn set_view_player_index(i: usize, players: &mut HQMServerPlayerList, val: usize
         if let HQMServerPlayerData::NetworkPlayer {
             data: HQMNetworkPlayerData {
                 view_player_index, ..
-            }
-        } = &mut player.data {
+            },
+        } = &mut player.data
+        {
             *view_player_index = val;
         }
     }
@@ -1935,7 +1951,11 @@ pub fn get_spawnpoint(
     }
 }
 
-fn get_dual_control_name(players: &HQMServerPlayerList, movement: Option<usize>, stick: Option<usize>) -> String {
+fn get_dual_control_name(
+    players: &HQMServerPlayerList,
+    movement: Option<usize>,
+    stick: Option<usize>,
+) -> String {
     let s1 = movement
         .and_then(|i| players.get(i))
         .map(|player| player.player_name.as_str())
