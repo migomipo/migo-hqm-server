@@ -68,10 +68,7 @@ async fn main() -> std::io::Result<()> {
             .unwrap()
             .parse::<usize>()
             .unwrap();
-        let force_team_size_parity = match server_section.get("force_team_size_parity") {
-            Some(s) => s.eq_ignore_ascii_case("true"),
-            None => false,
-        };
+
         let server_password = server_section
             .get("password")
             .unwrap()
@@ -264,8 +261,6 @@ async fn main() -> std::io::Result<()> {
                     icing,
                     offside,
                     warmup_pucks,
-                    force_team_size_parity,
-
                     cheats_enabled,
                     use_mph,
                     dual_control,

@@ -190,7 +190,7 @@ impl HQMServer {
                     HQMServerPlayerData::NetworkPlayer { .. } => true,
                     HQMServerPlayerData::Bot { .. } => true,
                     HQMServerPlayerData::Replay { .. } => false,
-                    HQMServerPlayerData::DualControl { .. } => false
+                    HQMServerPlayerData::DualControl { .. } => false,
                 };
                 if is_actual_player {
                     player_count += 1;
@@ -856,6 +856,7 @@ impl HQMServer {
             } else {
                 if self.game.world.remove_player(player_index).is_some() {
                     let player_name = player.player_name.clone();
+
                     self.add_global_message(
                         HQMMessage::PlayerUpdate {
                             player_name,
@@ -869,7 +870,6 @@ impl HQMServer {
                     return true;
                 }
             }
-
         }
         false
     }

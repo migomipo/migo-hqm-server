@@ -23,7 +23,6 @@ public                 | If true, the server will notify the master server so th
 log_name               | (optional) Log name prefix. Log files will end up in a "log" folder in the current working directory, and be named *log_name*-*date*. Default log name prefix is the server name + ".log".
 team_max               | Number of players allowed in each team.
 player_max             | Number of players allowed in the server.
-force_team_size_parity | (optional) If true, players will not be able to join the team that already has more players than the other one. Default value is false.
 password               | Administrator password.
 welcome                | Welcome message that is sent to all players when they're joining. \n will create a new line. The client can only show 7 chat lines at a time, and it is not recommended to have more than three lines.
 replays                | (optional) If true, all matches that start will be saved as replays. Games that ended before the warmup ended will not be saved.               
@@ -45,6 +44,7 @@ first                  | (Match mode only) First-to-goals rule setting. If 0, fi
 attempts               | (Russian 1v1 or shootout mode only) How many attempts each team will get. Default is 5 for shootout mode and 10 for Russian 1v1 mode.
 blue_line_location     | (Match or Russian 1v1 only) Distance between the end boards and the edge of the blue line closest to the neutral zone in meters. Default is 22.86, as in official IIHF rules.
 use_mph                | (Match mode only) If true, print puck speeds in miles per hour.
+dual_control           | Weird dual control mode.
 
 ### Physics
 Property                  | Explanation
@@ -104,7 +104,6 @@ Commands                 | Explanation
 /set icing *S*           | Sets icing rule. Allowed values are "off", "on" (touch icing" and "notouch" (no-touch icing)
 /set offside *S*         | Sets offside rule. Allowed values are "off", "on" (delayed offside) and "imm" or "immediate" (immediate offside, no offside warnings).
 /set teamsize *N*        | Sets team size.
-/set teamparity *on/off* | If enabled, players will not be able to join the team that already has more players than the other one.
 /set replay *on/off*     | Enables/disables server-side replays
 /set mercy *N*           | Sets mercy rule setting. If 0, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least X goals.
 /set first *N*           | Sets first-to-goals rule setting. If 0, first-to-goals rule will be disabled. Otherwise, games will automatically end if a team scores and and reaches at least X goals scored.
