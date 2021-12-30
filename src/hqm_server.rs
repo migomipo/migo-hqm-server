@@ -997,12 +997,6 @@ impl HQMServer {
                     self.add_global_message(msg, true);
 
                 }
-                if let Some(movement) = movement {
-                    self.move_to_spectator(movement);
-                }
-                if let Some(stick) = stick {
-                    self.move_to_spectator(stick);
-                }
 
                 if let Some(old_movement) = old_movement {
                     set_view_player_index(old_movement, &mut self.players, old_movement);
@@ -1012,9 +1006,11 @@ impl HQMServer {
                 }
                 if let Some(movement) = movement {
                     set_view_player_index(movement, &mut self.players, dual_control_player_index);
+                    self.move_to_spectator(movement);
                 }
                 if let Some(stick) = stick {
                     set_view_player_index(stick, &mut self.players, dual_control_player_index);
+                    self.move_to_spectator(stick);
                 }
             }
         }
