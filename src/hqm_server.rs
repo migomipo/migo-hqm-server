@@ -1437,17 +1437,27 @@ impl HQMServer {
         }
 
         let mut messages = Vec::new();
-        for (i, p) in self.players.iter_mut().enumerate() {
+        for (i, p) in self.players.players.iter_mut().enumerate() {
             if let Some(player) = p {
-                player.reset();
-
-                let update = HQMMessage::PlayerUpdate {
-                    player_name: player.player_name.clone(),
-                    object: None,
-                    player_index: i,
-                    in_server: true,
-                };
-                messages.push(update);
+                let player_name = player.player_name.clone();
+                if player.reset() {
+                    let update = HQMMessage::PlayerUpdate {
+                        player_name,
+                        object: None,
+                        player_index: i,
+                        in_server: true,
+                    };
+                    messages.push(update);
+                } else {
+                    *p = None;
+                    let update = HQMMessage::PlayerUpdate {
+                        player_name,
+                        object: None,
+                        player_index: i,
+                        in_server: false,
+                    };
+                    messages.push(update);
+                }
             }
         }
         for message in messages {
@@ -2075,12 +2085,15 @@ impl HQMServerPlayer {
         }
     }
 
-    fn reset(&mut self) {
+    fn reset(&mut self) -> bool {
         if let HQMServerPlayerData::NetworkPlayer { data } = &mut self.data {
             data.known_msgpos = 0;
             data.known_packet = u32::MAX;
             data.messages.clear();
+        } else if let HQMServerPlayerData::DualControl { .. } = &mut self.data {
+            return false;
         }
+        return true;
     }
 
     fn add_message(&mut self, message: Rc<HQMMessage>) {
