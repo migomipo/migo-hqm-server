@@ -1995,7 +1995,7 @@ fn get_dual_control_name(
         .and_then(|i| players.get(i))
         .map(|player| player.player_name.as_str())
         .unwrap_or("?");
-    format!("{}/{}", s1, s2)
+    format!("{}+{}", s1, s2)
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
