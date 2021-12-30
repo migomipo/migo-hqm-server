@@ -775,16 +775,33 @@ impl HQMServer {
             };
             let is_admin = player.is_admin;
 
-            let is_real_player = matches!(player.data, HQMServerPlayerData::NetworkPlayer { .. });
+            match &player.data {
+                HQMServerPlayerData::NetworkPlayer { .. } => {
+                    self.remove_player_from_dual_control(player_index);
+                }
+                HQMServerPlayerData::DualControl { movement, stick } => {
+                    let movement = *movement;
+                    let stick = *stick;
+                    if let Some(movement) = movement {
+                        set_view_player_index(movement,&mut self.players, movement)
+                    }
+                    if let Some(stick) = stick {
+                        set_view_player_index(stick,&mut self.players, stick)
+                    }
+                }
+                HQMServerPlayerData::Bot {} => {
+
+                }
+                HQMServerPlayerData::Replay {} => {
+                    return; // Replay bots can not be removed like that
+                }
+            }
+
             self.game.world.remove_player(player_index);
 
             self.add_global_message(update, true);
 
             self.players.remove_player(player_index as usize);
-
-            if is_real_player {
-                self.remove_player_from_dual_control(player_index);
-            }
 
             if is_admin {
                 let admin_found = self.players.iter().any(|x| x.map_or(false, |x| x.is_admin));
