@@ -985,34 +985,37 @@ impl HQMServer {
         movement: Option<usize>,
         stick: Option<usize>,
     ) {
-        let mut changes = vec![];
-        for (i, player) in self.players.iter() {
-            if i == dual_control_player_index {
-                continue;
+        if movement.is_some() || stick.is_some() {
+            let mut changes = vec![];
+            for (i, player) in self.players.iter() {
+                if i == dual_control_player_index {
+                    continue;
+                }
+                if let HQMServerPlayerData::DualControl {
+                    movement: m,
+                    stick: s,
+                } = player.data {
+                    let mut changed = false;
+                    let mut new_movement = m;
+                    let mut new_stick = s;
+                    if m.is_some() && (m == movement || m == stick) {
+                        new_movement = None;
+                        changed = true;
+                    }
+                    if s.is_some() && (s == movement || s == stick) {
+                        new_stick = None;
+                        changed = true;
+                    }
+                    if changed {
+                        changes.push((i, new_movement, new_stick));
+                    }
+                }
             }
-            if let HQMServerPlayerData::DualControl {
-                movement: m,
-                stick: s,
-            } = player.data {
-                let mut changed = false;
-                let mut new_movement = m;
-                let mut new_stick = s;
-                if m.is_some() && (m == movement || m == stick) {
-                    new_movement = None;
-                    changed = true;
-                }
-                if s.is_some() && (s == movement || s == stick) {
-                    new_stick = None;
-                    changed = true;
-                }
-                if changed {
-                    changes.push((i, new_movement, new_stick));
-                }
+            for (i, new_movement, new_stick) in changes {
+                self.update_dual_control_internal(i, new_movement, new_stick);
             }
         }
-        for (i, new_movement, new_stick) in changes {
-            self.update_dual_control_internal(i, new_movement, new_stick);
-        }
+
         self.update_dual_control_internal(dual_control_player_index, movement, stick);
 
     }
