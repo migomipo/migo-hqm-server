@@ -524,10 +524,21 @@ impl HQMServer {
                     }
                 }
             }
+            "swap" => {
+                self.swap_dual_control(player_index);
+            }
             "t" => {
                 self.add_user_team_message(arg, player_index);
             }
             _ => behaviour.handle_command(self, command, arg, player_index),
+        }
+    }
+
+    fn swap_dual_control(&mut self, player_index: usize) {
+        if let Some((dual_control_player_index, movement, stick)) =
+            self.get_dual_control_player(player_index)
+        {
+            self.update_dual_control_internal(dual_control_player_index, stick, movement);
         }
     }
 
