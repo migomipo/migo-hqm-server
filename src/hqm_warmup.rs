@@ -5,8 +5,6 @@ use migo_hqm_server::hqm_server::{
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3};
 
-use tracing::info;
-
 pub struct HQMPermanentWarmup {
     physics_config: HQMPhysicsConfiguration,
     pucks: usize,
@@ -37,20 +35,19 @@ impl HQMPermanentWarmup {
                 let has_skater = server.game.world.objects.has_skater(player_index)
                     || server.get_dual_control_player(player_index).is_some();
                 if has_skater && player.input.spectate() {
-                    spectating_players.push((player_index, player.player_name.clone()))
+                    spectating_players.push(player_index);
                 } else {
                 }
                 if !has_skater {
                     if player.input.join_red() {
-                        joining_red.push((player_index, player.player_name.clone()));
+                        joining_red.push(player_index);
                     } else if player.input.join_blue() {
-                        joining_blue.push((player_index, player.player_name.clone()));
+                        joining_blue.push(player_index);
                     }
                 }
             }
         }
-        for (player_index, player_name) in spectating_players {
-            info!("{} ({}) is spectating", player_name, player_index);
+        for player_index in spectating_players {
             if self.use_dual_control {
                 server.remove_player_from_dual_control(player_index);
             } else {
@@ -60,17 +57,11 @@ impl HQMPermanentWarmup {
 
         fn internal_add(
             server: &mut HQMServer,
-            joining: Vec<(usize, String)>,
+            joining: Vec<usize>,
             team: HQMTeam,
             spawn_point: HQMSpawnPoint,
         ) {
-            for (player_index, player_name) in joining {
-                info!(
-                    "{} ({}) has joined team {:?}",
-                    player_name,
-                    player_index,
-                    HQMTeam::Red
-                );
+            for player_index in joining {
                 server.spawn_skater_at_spawnpoint(player_index, team, spawn_point);
             }
         }
@@ -99,12 +90,12 @@ impl HQMPermanentWarmup {
 
         fn internal_add_dual_control(
             server: &mut HQMServer,
-            joining: Vec<(usize, String)>,
+            joining: Vec<usize>,
             team: HQMTeam,
             spawn_point: HQMSpawnPoint,
         ) {
             let mut current_empty = find_empty_dual_control(server, team);
-            for (player_index, _) in joining {
+            for player_index in joining {
                 match current_empty {
                     Some((index, movement @ Some(_), None)) => {
                         server.update_dual_control(index, movement, Some(player_index));
