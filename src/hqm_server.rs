@@ -1451,7 +1451,7 @@ impl HQMServer {
         for (i, p) in self.players.players.iter_mut().enumerate() {
             if let Some(player) = p {
                 let player_name = player.player_name.clone();
-                if player.reset() {
+                if player.reset(i) {
                     let update = HQMMessage::PlayerUpdate {
                         player_name,
                         object: None,
@@ -2096,11 +2096,12 @@ impl HQMServerPlayer {
         }
     }
 
-    fn reset(&mut self) -> bool {
+    fn reset(&mut self, player_index: usize) -> bool {
         if let HQMServerPlayerData::NetworkPlayer { data } = &mut self.data {
             data.known_msgpos = 0;
             data.known_packet = u32::MAX;
             data.messages.clear();
+            data.view_player_index = player_index;
         } else if let HQMServerPlayerData::DualControl { .. } = &mut self.data {
             return false;
         }
