@@ -510,10 +510,12 @@ impl HQMMatchBehaviour {
                 if player.input.join_red() || player.input.join_blue() {
                     let has_skater = server.game.world.objects.has_skater(player_index)
                         || server.get_dual_control_player(player_index).is_some();
-                    if !has_skater && self
-                        .team_switch_timer
-                        .get(&player_index)
-                        .map_or(true, |x| *x == 0) {
+                    if !has_skater
+                        && self
+                            .team_switch_timer
+                            .get(&player_index)
+                            .map_or(true, |x| *x == 0)
+                    {
                         if player.input.join_red() {
                             joining_red.push((player_index, player.player_name.clone()));
                         } else if player.input.join_blue() {

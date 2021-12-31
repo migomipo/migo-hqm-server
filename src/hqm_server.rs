@@ -563,25 +563,25 @@ impl HQMServer {
         if view_player_index < self.players.len() {
             if let Some(view_player) = self.players.get(view_player_index) {
                 let view_player_name = view_player.player_name.clone();
-                if let Some(player) = self.players.get_mut(player_index) {
+                if self.game.world.objects.has_skater(player_index)
+                    || self.get_dual_control_player(player_index).is_some()
+                {
+                    self.add_directed_server_chat_message(
+                        "You must be a spectator to change view",
+                        player_index,
+                    );
+                } else if let Some(player) = self.players.get_mut(player_index) {
                     if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
                         if view_player_index != data.view_player_index {
-                            if self.game.world.objects.has_skater(player_index) {
+                            data.view_player_index = view_player_index;
+                            if player_index != view_player_index {
+                                let str = format!("You are now viewing {}", view_player_name);
+                                self.add_directed_server_chat_message(&str, player_index);
+                            } else {
                                 self.add_directed_server_chat_message(
-                                    "You must be a spectator to change view",
+                                    "View has been restored",
                                     player_index,
                                 );
-                            } else {
-                                data.view_player_index = view_player_index;
-                                if player_index != view_player_index {
-                                    let str = format!("You are now viewing {}", view_player_name);
-                                    self.add_directed_server_chat_message(&str, player_index);
-                                } else {
-                                    self.add_directed_server_chat_message(
-                                        "View has been restored",
-                                        player_index,
-                                    );
-                                }
                             }
                         }
                     }
