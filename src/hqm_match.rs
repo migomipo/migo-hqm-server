@@ -600,11 +600,11 @@ impl HQMMatchBehaviour {
                     match current_empty {
                         Some((index, movement @ Some(_), None)) => {
                             server.update_dual_control(index, movement, Some(player_index));
-                            current_empty = None;
+                            current_empty = find_empty_dual_control(server, team);
                         }
                         Some((index, None, stick @ Some(_))) => {
                             server.update_dual_control(index, Some(player_index), stick);
-                            current_empty = None;
+                            current_empty = find_empty_dual_control(server, team);
                         }
                         _ => {
                             if *player_count >= team_max {
