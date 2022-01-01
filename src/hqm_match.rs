@@ -1474,7 +1474,7 @@ fn find_empty_dual_control(
     None
 }
 
-#[test]
+#[cfg(test)]
 mod tests {
     use crate::hqm_match::setup_position;
     use migo_hqm_server::hqm_game::HQMTeam;
