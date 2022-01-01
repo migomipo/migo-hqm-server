@@ -351,7 +351,12 @@ impl HQMServer {
         if let Some(player) = self.players.get_mut(player_index) {
             player.hand = hand;
 
-            fn change_skater(server: & mut HQMServer, player_index: usize, msg_player_index: usize, hand: HQMSkaterHand) {
+            fn change_skater(
+                server: &mut HQMServer,
+                player_index: usize,
+                msg_player_index: usize,
+                hand: HQMSkaterHand,
+            ) {
                 if let Some(HQMSkaterObjectRefMut { skater, .. }) = server
                     .game
                     .world
@@ -369,8 +374,8 @@ impl HQMServer {
                 }
             }
 
-            if let Some((dual_control_index, _, stick)) =
-                self.get_dual_control_player(player_index) {
+            if let Some((dual_control_index, _, stick)) = self.get_dual_control_player(player_index)
+            {
                 if stick == Some(player_index) {
                     if let Some(dual_control_player) = self.players.get_mut(dual_control_index) {
                         dual_control_player.hand = hand;
@@ -1074,6 +1079,9 @@ impl HQMServer {
         stick: Option<usize>,
     ) {
         let player_name = get_dual_control_name(&self.players, movement, stick);
+        let hand = stick
+            .and_then(|x| self.players.get(x))
+            .map(|player| player.hand);
 
         let player = self.players.get_mut(dual_control_player_index);
         let skater = self
@@ -1097,6 +1105,9 @@ impl HQMServer {
                     *m = movement;
                     *s = stick;
                     player.player_name = player_name.clone();
+                    if let Some(hand) = hand {
+                        player.hand = hand;
+                    }
                     let msg = HQMMessage::PlayerUpdate {
                         player_name,
                         object: Some((skater.object_index, skater.team)),
