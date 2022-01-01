@@ -351,21 +351,35 @@ impl HQMServer {
         if let Some(player) = self.players.get_mut(player_index) {
             player.hand = hand;
 
-            if let Some(HQMSkaterObjectRefMut { skater, .. }) = self
-                .game
-                .world
-                .objects
-                .get_skater_object_for_player_mut(player_index)
-            {
-                if self.game.period != 0 {
-                    let msg = format!("Stick hand will change after next intermission");
-                    self.add_directed_server_chat_message(&msg, player_index);
+            fn change_skater(server: & mut HQMServer, player_index: usize, msg_player_index: usize, hand: HQMSkaterHand) {
+                if let Some(HQMSkaterObjectRefMut { skater, .. }) = server
+                    .game
+                    .world
+                    .objects
+                    .get_skater_object_for_player_mut(player_index)
+                {
+                    if server.game.period != 0 {
+                        let msg = format!("Stick hand will change after next intermission");
+                        server.add_directed_server_chat_message(&msg, msg_player_index);
 
-                    return;
+                        return;
+                    }
+
+                    skater.hand = hand;
                 }
-
-                skater.hand = hand;
             }
+
+            if let Some((dual_control_index, _, stick)) =
+                self.get_dual_control_player(player_index) {
+                if stick == Some(player_index) {
+                    if let Some(dual_control_player) = self.players.get_mut(dual_control_index) {
+                        dual_control_player.hand = hand;
+                        change_skater(self, dual_control_index, player_index, hand);
+                    }
+                }
+            } else {
+                change_skater(self, player_index, player_index, hand);
+            };
         }
     }
 
