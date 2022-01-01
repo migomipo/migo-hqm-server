@@ -1416,7 +1416,7 @@ fn setup_position(
     // or because it was already taken
     for (player_index, player_position) in players.iter() {
         if !positions.contains_key(player_index) {
-            let s = if let Some(x) = available_positions.iter().position(|x| x.as_str() == "C") {
+            let s = if let Some(x) = available_positions.iter().position(|x| x == "C") {
                 // Someone needs to be C
                 let x = available_positions.remove(x);
                 (team, x)
@@ -1436,18 +1436,20 @@ fn setup_position(
         }
     }
 
-    if available_positions.iter().any(|x| x.as_str() == "C") {
+    if let Some(x) = available_positions.iter().position(|x| x == "C") {
         let mut found_new_c = false;
-        for (_, (_, p)) in positions.iter_mut() {
-            if p.as_str() != "G" {
-                *p = "C".to_owned();
-                found_new_c = true;
-                break;
+        for (player_index, _) in players.iter() {
+            if let Some((_, pos)) = positions.get_mut(player_index) {
+                if pos != "G" {
+                    *pos = available_positions.remove(x);
+                    found_new_c = true;
+                    break;
+                }
             }
         }
         if !found_new_c {
-            if let Some((_, (_, p))) = positions.iter_mut().next() {
-                *p = "C".to_owned();
+            if let Some((_, (_, pos))) = positions.iter_mut().next() {
+                *pos = available_positions.remove(x);
             }
         }
     }
