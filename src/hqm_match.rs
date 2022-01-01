@@ -1404,7 +1404,7 @@ fn setup_position(
         if let Some(player_position) = player_position {
             if let Some(x) = available_positions
                 .iter()
-                .position(|x| *x == **player_position)
+                .position(|x| x == *player_position)
             {
                 let s = available_positions.remove(x);
                 positions.insert(*player_index, (team, s));
