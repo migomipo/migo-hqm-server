@@ -1411,15 +1411,15 @@ fn setup_position(
             }
         }
     }
-    let c = String::from("C");
+
     // Some players did not get their preferred positions because they didn't have one,
     // or because it was already taken
     for (player_index, player_position) in players.iter() {
         if !positions.contains_key(player_index) {
-            let s = if let Some(x) = available_positions.iter().position(|x| *x == c) {
+            let s = if let Some(x) = available_positions.iter().position(|x| x.as_str() == "C") {
                 // Someone needs to be C
-                available_positions.remove(x);
-                (team, c.clone())
+                let x = available_positions.remove(x);
+                (team, x)
             } else if !available_positions.is_empty() {
                 // Give out the remaining positions
                 let x = available_positions.remove(0);
@@ -1429,25 +1429,25 @@ fn setup_position(
                 if let Some(player_position) = player_position {
                     (team, (*player_position).to_owned())
                 } else {
-                    (team, c.clone())
+                    (team, "C".to_owned())
                 }
             };
             positions.insert(*player_index, s);
         }
     }
 
-    if available_positions.contains(&c) {
+    if available_positions.iter().any(|x| x.as_str() == "C") {
         let mut found_new_c = false;
         for (_, (_, p)) in positions.iter_mut() {
-            if p != "G" {
-                *p = c.clone();
+            if p.as_str() != "G" {
+                *p = "C".to_owned();
                 found_new_c = true;
                 break;
             }
         }
         if !found_new_c {
             if let Some((_, (_, p))) = positions.iter_mut().next() {
-                *p = c.clone();
+                *p = "C".to_owned();
             }
         }
     }
