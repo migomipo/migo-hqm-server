@@ -1,5 +1,6 @@
 use crate::hqm_parse;
 use nalgebra::{Matrix3, Point3, Rotation3, Vector2, Vector3};
+use std::borrow::Cow;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
@@ -1181,7 +1182,7 @@ pub enum HQMMessage {
     },
     Chat {
         player_index: Option<usize>,
-        message: String,
+        message: Cow<'static, str>,
     },
 }
 

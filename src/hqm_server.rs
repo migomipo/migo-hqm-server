@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::min;
 use std::collections::{HashSet, VecDeque};
 use std::error::Error;
@@ -1208,7 +1209,7 @@ impl HQMServer {
                 });
                 let chat = Rc::new(HQMMessage::Chat {
                     player_index: Some(sender_index),
-                    message: message.to_owned(),
+                    message: Cow::Owned(message.to_owned()),
                 });
                 for skater in self.game.world.objects.get_skater_iter() {
                     if skater.team == team {
@@ -1228,7 +1229,7 @@ impl HQMServer {
             info!("{} ({}): {}", &player.player_name, sender_index, &message);
             let chat = HQMMessage::Chat {
                 player_index: Some(sender_index),
-                message,
+                message: Cow::Owned(message),
             };
             self.add_global_message(chat, false);
         }
@@ -1237,15 +1238,15 @@ impl HQMServer {
     pub fn add_server_chat_message(&mut self, message: String) {
         let chat = HQMMessage::Chat {
             player_index: None,
-            message,
+            message: Cow::Owned(message),
         };
         self.add_global_message(chat, false);
     }
 
-    pub fn add_server_chat_message_str(&mut self, message: &str) {
+    pub fn add_server_chat_message_str(&mut self, message: &'static str) {
         let chat = HQMMessage::Chat {
             player_index: None,
-            message: message.to_owned(),
+            message: Cow::Borrowed(message),
         };
         self.add_global_message(chat, false);
     }
@@ -1260,7 +1261,23 @@ impl HQMServer {
         if let Some(player) = self.players.get_mut(receiver_index) {
             let chat = HQMMessage::Chat {
                 player_index: sender_index,
-                message,
+                message: Cow::Owned(message),
+            };
+            player.add_message(Rc::new(chat));
+        }
+    }
+
+    pub fn add_directed_chat_message_str(
+        &mut self,
+        message: &'static str,
+        receiver_index: usize,
+        sender_index: Option<usize>,
+    ) {
+        // This message will only be visible to a single player
+        if let Some(player) = self.players.get_mut(receiver_index) {
+            let chat = HQMMessage::Chat {
+                player_index: sender_index,
+                message: Cow::Borrowed(message),
             };
             player.add_message(Rc::new(chat));
         }
@@ -1279,8 +1296,12 @@ impl HQMServer {
         self.add_directed_chat_message(message, receiver_index, None);
     }
 
-    pub fn add_directed_server_chat_message_str(&mut self, message: &str, receiver_index: usize) {
-        self.add_directed_chat_message(message.to_owned(), receiver_index, None);
+    pub fn add_directed_server_chat_message_str(
+        &mut self,
+        message: &'static str,
+        receiver_index: usize,
+    ) {
+        self.add_directed_chat_message_str(message, receiver_index, None);
     }
 
     pub fn add_goal_message(
