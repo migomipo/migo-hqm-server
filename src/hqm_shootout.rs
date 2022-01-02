@@ -1,5 +1,7 @@
 use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMSkaterObjectRef, HQMTeam};
-use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMSpawnPoint};
+use migo_hqm_server::hqm_server::{
+    HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMSpawnPoint,
+};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
 use std::collections::HashMap;
@@ -29,16 +31,18 @@ pub struct HQMShootoutBehaviour {
     physics_config: HQMPhysicsConfiguration,
     team_switch_timer: HashMap<usize, u32>,
     team_max: usize,
+    pub dual_control: bool,
 }
 
 impl HQMShootoutBehaviour {
-    pub fn new(attempts: u32, physics_config: HQMPhysicsConfiguration) -> Self {
+    pub fn new(attempts: u32, physics_config: HQMPhysicsConfiguration, dual_control: bool) -> Self {
         HQMShootoutBehaviour {
             attempts,
             status: HQMShootoutStatus::Pause,
             physics_config,
             team_switch_timer: Default::default(),
             team_max: 1,
+            dual_control,
         }
     }
 
@@ -165,67 +169,158 @@ impl HQMShootoutBehaviour {
         let mut joining_blue = vec![];
         for (player_index, player) in server.players.iter().enumerate() {
             if let Some(player) = player {
-                let has_skater = server.game.world.objects.has_skater(player_index);
-                if has_skater && player.input.spectate() {
-                    self.team_switch_timer.insert(player_index, 500);
-                    spectating_players.push((player_index, player.player_name.clone()))
-                } else {
-                    self.team_switch_timer
-                        .get_mut(&player_index)
-                        .map(|x| *x = x.saturating_sub(1));
-                }
-                if !has_skater
-                    && self
-                        .team_switch_timer
-                        .get(&player_index)
-                        .map_or(true, |x| *x == 0)
-                {
-                    if player.input.join_red() {
-                        joining_red.push((player_index, player.player_name.clone()));
-                    } else if player.input.join_blue() {
-                        joining_blue.push((player_index, player.player_name.clone()));
+                self.team_switch_timer
+                    .get_mut(&player_index)
+                    .map(|x| *x = x.saturating_sub(1));
+                if player.input.join_red() || player.input.join_blue() {
+                    let has_skater = server.game.world.objects.has_skater(player_index)
+                        || server.get_dual_control_player(player_index).is_some();
+                    if !has_skater
+                        && self
+                            .team_switch_timer
+                            .get(&player_index)
+                            .map_or(true, |x| *x == 0)
+                    {
+                        if player.input.join_red() {
+                            joining_red.push((player_index, player.player_name.clone()));
+                        } else if player.input.join_blue() {
+                            joining_blue.push((player_index, player.player_name.clone()));
+                        }
+                    }
+                } else if player.input.spectate() {
+                    let has_skater = server.game.world.objects.has_skater(player_index)
+                        || server.get_dual_control_player(player_index).is_some();
+                    if has_skater {
+                        self.team_switch_timer.insert(player_index, 500);
+                        spectating_players.push((player_index, player.player_name.clone()))
                     }
                 }
             }
         }
         for (player_index, player_name) in spectating_players {
             info!("{} ({}) is spectating", player_name, player_index);
-            server.move_to_spectator(player_index);
+            if self.dual_control {
+                server.remove_player_from_dual_control(player_index);
+            } else {
+                server.move_to_spectator(player_index);
+            }
         }
-        let (red_player_count, blue_player_count) = {
-            let mut red_player_count = 0usize;
-            let mut blue_player_count = 0usize;
-            for HQMSkaterObjectRef { team, .. } in server.game.world.objects.get_skater_iter() {
-                if team == HQMTeam::Red {
-                    red_player_count += 1;
-                } else if team == HQMTeam::Blue {
-                    blue_player_count += 1;
+        if !joining_red.is_empty() || !joining_blue.is_empty() {
+            let (red_player_count, blue_player_count) = {
+                let mut red_player_count = 0usize;
+                let mut blue_player_count = 0usize;
+                for HQMSkaterObjectRef { team, .. } in server.game.world.objects.get_skater_iter() {
+                    if team == HQMTeam::Red {
+                        red_player_count += 1;
+                    } else if team == HQMTeam::Blue {
+                        blue_player_count += 1;
+                    }
+                }
+                (red_player_count, blue_player_count)
+            };
+            let mut new_red_player_count = red_player_count;
+            let mut new_blue_player_count = blue_player_count;
+
+            fn add_players(
+                joining: Vec<(usize, String)>,
+                server: &mut HQMServer,
+                team: HQMTeam,
+                player_count: &mut usize,
+                team_max: usize,
+            ) {
+                for (player_index, player_name) in joining {
+                    if *player_count >= team_max {
+                        break;
+                    }
+
+                    if server
+                        .spawn_skater_at_spawnpoint(player_index, team, HQMSpawnPoint::Bench)
+                        .is_some()
+                    {
+                        info!(
+                            "{} ({}) has joined team {:?}",
+                            player_name, player_index, team
+                        );
+                        *player_count += 1
+                    }
                 }
             }
-            (red_player_count, blue_player_count)
-        };
-        let new_red_player_count = (red_player_count + joining_red.len()).min(self.team_max);
-        let new_blue_player_count = (blue_player_count + joining_blue.len()).min(self.team_max);
+            fn add_players_dual_control(
+                joining: Vec<(usize, String)>,
+                server: &mut HQMServer,
+                team: HQMTeam,
+                player_count: &mut usize,
+                team_max: usize,
+            ) {
+                let mut current_empty = find_empty_dual_control(server, team);
+                for (player_index, player_name) in joining {
+                    match current_empty {
+                        Some((index, movement @ Some(_), None)) => {
+                            server.update_dual_control(index, movement, Some(player_index));
+                            current_empty = find_empty_dual_control(server, team);
+                        }
+                        Some((index, None, stick @ Some(_))) => {
+                            server.update_dual_control(index, Some(player_index), stick);
+                            current_empty = find_empty_dual_control(server, team);
+                        }
+                        _ => {
+                            if *player_count >= team_max {
+                                break;
+                            }
 
-        let num_joining_red = new_red_player_count.saturating_sub(red_player_count);
-        let num_joining_blue = new_blue_player_count.saturating_sub(blue_player_count);
-        for (player_index, player_name) in &joining_red[0..num_joining_red] {
-            info!(
-                "{} ({}) has joined team {:?}",
-                player_name,
-                player_index,
-                HQMTeam::Red
-            );
-            server.spawn_skater_at_spawnpoint(*player_index, HQMTeam::Red, HQMSpawnPoint::Bench);
-        }
-        for (player_index, player_name) in &joining_blue[0..num_joining_blue] {
-            info!(
-                "{} ({}) has joined team {:?}",
-                player_name,
-                player_index,
-                HQMTeam::Blue
-            );
-            server.spawn_skater_at_spawnpoint(*player_index, HQMTeam::Blue, HQMSpawnPoint::Bench);
+                            if let Some((dual_control_player_index, _)) = server
+                                .spawn_dual_control_skater_at_spawnpoint(
+                                    team,
+                                    HQMSpawnPoint::Bench,
+                                    Some(player_index),
+                                    None,
+                                )
+                            {
+                                info!(
+                                    "{} ({}) has joined team {:?}",
+                                    player_name, player_index, team
+                                );
+                                *player_count += 1;
+
+                                current_empty =
+                                    Some((dual_control_player_index, Some(player_index), None));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if self.dual_control {
+                add_players_dual_control(
+                    joining_red,
+                    server,
+                    HQMTeam::Red,
+                    &mut new_red_player_count,
+                    self.team_max,
+                );
+                add_players_dual_control(
+                    joining_blue,
+                    server,
+                    HQMTeam::Blue,
+                    &mut new_blue_player_count,
+                    self.team_max,
+                );
+            } else {
+                add_players(
+                    joining_red,
+                    server,
+                    HQMTeam::Red,
+                    &mut new_red_player_count,
+                    self.team_max,
+                );
+                add_players(
+                    joining_blue,
+                    server,
+                    HQMTeam::Blue,
+                    &mut new_blue_player_count,
+                    self.team_max,
+                );
+            }
         }
     }
 
@@ -496,4 +591,25 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
     fn get_number_of_players(&self) -> u32 {
         self.team_max as u32
     }
+}
+
+fn find_empty_dual_control(
+    server: &HQMServer,
+    team: HQMTeam,
+) -> Option<(usize, Option<usize>, Option<usize>)> {
+    for (i, player) in server.players.iter().enumerate() {
+        if let Some(player) = player {
+            if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
+                if movement.is_none() || stick.is_none() {
+                    if let Some(skater) = server.game.world.objects.get_skater_object_for_player(i)
+                    {
+                        if skater.team == team {
+                            return Some((i, movement, stick));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }

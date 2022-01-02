@@ -315,6 +315,7 @@ async fn main() -> std::io::Result<()> {
                         server_team_max,
                         physics_config,
                         blue_line_location,
+                        dual_control,
                     ),
                 )
                 .await
@@ -327,7 +328,7 @@ async fn main() -> std::io::Result<()> {
                     server_port,
                     server_public,
                     config,
-                    HQMShootoutBehaviour::new(attempts, physics_config),
+                    HQMShootoutBehaviour::new(attempts, physics_config, dual_control),
                 )
                 .await
             }

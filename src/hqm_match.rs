@@ -1455,7 +1455,6 @@ fn setup_position(
             let c = available_positions.remove(x);
             positions.insert(*change_index, (team, c));
         }
-
     }
 }
 
