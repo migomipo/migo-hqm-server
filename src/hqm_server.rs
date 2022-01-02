@@ -1183,13 +1183,29 @@ impl HQMServer {
 
     fn add_user_team_message(&mut self, message: &str, sender_index: usize) {
         if let Some(player) = self.players.get(sender_index) {
-            if let Some(skater) = self
+            let skater = if let Some(skater) = self
                 .game
                 .world
                 .objects
                 .get_skater_object_for_player(sender_index)
             {
-                let team = skater.team;
+                Some((skater.team, Some((skater.object_index, skater.team))))
+            } else if let Some((dual_control_player_index, _, _)) =
+                self.get_dual_control_player(sender_index)
+            {
+                if let Some(skater) = self.game
+                    .world
+                    .objects
+                    .get_skater_object_for_player(dual_control_player_index) {
+                    Some((skater.team, None))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some((team, object)) = skater
+            {
                 info!(
                     "{} ({}) to team {}: {}",
                     &player.player_name, sender_index, team, message
@@ -1197,13 +1213,13 @@ impl HQMServer {
 
                 let change1 = Rc::new(HQMMessage::PlayerUpdate {
                     player_name: Rc::new(format!("[{}] {}", team, player.player_name)),
-                    object: Some((skater.object_index, team)),
+                    object,
                     player_index: sender_index,
                     in_server: true,
                 });
                 let change2 = Rc::new(HQMMessage::PlayerUpdate {
                     player_name: player.player_name.clone(),
-                    object: Some((skater.object_index, team)),
+                    object,
                     player_index: sender_index,
                     in_server: true,
                 });
@@ -1211,12 +1227,22 @@ impl HQMServer {
                     player_index: Some(sender_index),
                     message: Cow::Owned(message.to_owned()),
                 });
+                fn add_message(player: & mut HQMServerPlayer, change1: &Rc<HQMMessage>, chat: &Rc<HQMMessage>, change2: &Rc<HQMMessage>) {
+                    player.add_message(change1.clone());
+                    player.add_message(chat.clone());
+                    player.add_message(change2.clone());
+                }
+                let players = & mut self.players;
                 for skater in self.game.world.objects.get_skater_iter() {
                     if skater.team == team {
-                        if let Some(player) = self.players.get_mut(skater.connected_player_index) {
-                            player.add_message(change1.clone());
-                            player.add_message(chat.clone());
-                            player.add_message(change2.clone());
+                        if let Some(player) = players.get_mut(skater.connected_player_index) {
+                            add_message(player, &change1, &chat, &change2);
+                            if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
+                                movement.and_then(|i| players.get_mut(i))
+                                    .map(|player| add_message(player, &change1, &chat, &change2));
+                                stick.and_then(|i| players.get_mut(i))
+                                    .map(|player| add_message(player, &change1, &chat, &change2));
+                            }
                         }
                     }
                 }
