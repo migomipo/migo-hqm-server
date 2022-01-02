@@ -1437,21 +1437,25 @@ fn setup_position(
     }
 
     if let Some(x) = available_positions.iter().position(|x| x == "C") {
-        let mut found_new_c = false;
+        let mut change_index = None;
         for (player_index, _) in players.iter() {
-            if let Some((_, pos)) = positions.get_mut(player_index) {
+            if change_index.is_none() {
+                change_index = Some(player_index);
+            }
+
+            if let Some((_, pos)) = positions.get(player_index) {
                 if pos != "G" {
-                    *pos = available_positions.remove(x);
-                    found_new_c = true;
+                    change_index = Some(player_index);
                     break;
                 }
             }
         }
-        if !found_new_c {
-            if let Some((_, (_, pos))) = positions.iter_mut().next() {
-                *pos = available_positions.remove(x);
-            }
+
+        if let Some(change_index) = change_index {
+            let c = available_positions.remove(x);
+            positions.insert(*change_index, (team, c));
         }
+
     }
 }
 
