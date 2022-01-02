@@ -6,6 +6,7 @@ use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
 use std::collections::HashMap;
 use std::f32::consts::PI;
+use std::rc::Rc;
 
 use tracing::info;
 
@@ -222,7 +223,7 @@ impl HQMShootoutBehaviour {
             let mut new_blue_player_count = blue_player_count;
 
             fn add_players(
-                joining: Vec<(usize, String)>,
+                joining: Vec<(usize, Rc<String>)>,
                 server: &mut HQMServer,
                 team: HQMTeam,
                 player_count: &mut usize,
@@ -246,7 +247,7 @@ impl HQMShootoutBehaviour {
                 }
             }
             fn add_players_dual_control(
-                joining: Vec<(usize, String)>,
+                joining: Vec<(usize, Rc<String>)>,
                 server: &mut HQMServer,
                 team: HQMTeam,
                 player_count: &mut usize,

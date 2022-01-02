@@ -9,6 +9,7 @@ use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMServerPlayer
 use migo_hqm_server::hqm_simulate;
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::f32::consts::FRAC_PI_2;
+use std::rc::Rc;
 
 enum HQMRussianStatus {
     Pause,
@@ -108,7 +109,7 @@ impl HQMRussianBehaviour {
             let mut new_blue_player_count = blue_player_count;
 
             fn add_players(
-                joining: Vec<(usize, String)>,
+                joining: Vec<(usize, Rc<String>)>,
                 server: &mut HQMServer,
                 team: HQMTeam,
                 player_count: &mut usize,
@@ -139,7 +140,7 @@ impl HQMRussianBehaviour {
                 }
             }
             fn add_players_dual_control(
-                joining: Vec<(usize, String)>,
+                joining: Vec<(usize, Rc<String>)>,
                 server: &mut HQMServer,
                 team: HQMTeam,
                 player_count: &mut usize,

@@ -684,11 +684,11 @@ impl HQMServer {
         }
     }
 
-    pub fn player_exact_unique_match(&self, name: &str) -> Option<(usize, String)> {
+    pub fn player_exact_unique_match(&self, name: &str) -> Option<(usize, Rc<String>)> {
         let mut found = None;
         for (player_index, player) in self.players.iter().enumerate() {
             if let Some(player) = player {
-                if player.player_name == name {
+                if player.player_name.as_str() == name {
                     if found.is_none() {
                         found = Some((player_index, player.player_name.clone()));
                     } else {
@@ -700,7 +700,7 @@ impl HQMServer {
         found
     }
 
-    pub fn player_search(&self, name: &str) -> Vec<(usize, String)> {
+    pub fn player_search(&self, name: &str) -> Vec<(usize, Rc<String>)> {
         let name = name.to_lowercase();
         let mut found = vec![];
         for (player_index, player) in self.players.iter().enumerate() {
@@ -778,8 +778,18 @@ impl HQMServer {
         let player_index = self.find_empty_player_slot();
         match player_index {
             Some(player_index) => {
+                let new_player = HQMServerPlayer::new_network_player(
+                    player_index,
+                    player_name,
+                    addr,
+                    self.game.persistent_messages.clone(),
+                );
+                let player_name = new_player.player_name.clone();
+
+                self.players.add_player(player_index, new_player);
+
                 let update = HQMMessage::PlayerUpdate {
-                    player_name: player_name.clone(),
+                    player_name,
                     object: None,
                     player_index,
                     in_server: true,
@@ -787,18 +797,10 @@ impl HQMServer {
 
                 self.add_global_message(update, true);
 
-                let mut messages = self.game.persistent_messages.clone();
-                for welcome_msg in self.config.welcome.iter() {
-                    messages.push(Rc::new(HQMMessage::Chat {
-                        player_index: None,
-                        message: welcome_msg.clone(),
-                    }));
+                let welcome = self.config.welcome.clone();
+                for welcome_msg in welcome {
+                    self.add_directed_server_chat_message(welcome_msg.as_str(), player_index);
                 }
-
-                let new_player =
-                    HQMServerPlayer::new_network_player(player_index, player_name, addr, messages);
-
-                self.players.add_player(player_index, new_player);
 
                 Some(player_index)
             }
@@ -941,7 +943,7 @@ impl HQMServer {
         match player_index {
             Some(player_index) => {
                 let new_player = HQMServerPlayer {
-                    player_name: "?/?".to_owned(),
+                    player_name: Rc::new("?/?".to_owned()),
                     id: Uuid::new_v4(),
                     data: HQMServerPlayerData::DualControl {
                         movement: None,
@@ -1078,7 +1080,7 @@ impl HQMServer {
         movement: Option<usize>,
         stick: Option<usize>,
     ) {
-        let player_name = get_dual_control_name(&self.players, movement, stick);
+        let player_name = Rc::new(get_dual_control_name(&self.players, movement, stick));
         let hand = stick
             .and_then(|x| self.players.get(x))
             .map(|player| player.hand);
@@ -1191,7 +1193,7 @@ impl HQMServer {
                 );
 
                 let change1 = Rc::new(HQMMessage::PlayerUpdate {
-                    player_name: format!("[{}] {}", team, player.player_name),
+                    player_name: Rc::new(format!("[{}] {}", team, player.player_name)),
                     object: Some((skater.object_index, team)),
                     player_index: sender_index,
                     in_server: true,
@@ -1325,7 +1327,7 @@ impl HQMServer {
             tokio::task::block_in_place(|| {
                 let mut chat_messages = vec![];
 
-                let inactive_players: Vec<(usize, String)> = self
+                let inactive_players: Vec<(usize, Rc<String>)> = self
                     .players
                     .iter_mut()
                     .enumerate()
@@ -2077,7 +2079,7 @@ pub enum HQMServerPlayerData {
 }
 
 pub struct HQMServerPlayer {
-    pub player_name: String,
+    pub player_name: Rc<String>,
     pub id: Uuid,
     pub data: HQMServerPlayerData,
     pub is_admin: bool,
@@ -2095,7 +2097,7 @@ impl HQMServerPlayer {
         global_messages: Vec<Rc<HQMMessage>>,
     ) -> Self {
         HQMServerPlayer {
-            player_name,
+            player_name: Rc::new(player_name),
             id: Uuid::new_v4(),
             data: HQMServerPlayerData::NetworkPlayer {
                 data: HQMNetworkPlayerData {

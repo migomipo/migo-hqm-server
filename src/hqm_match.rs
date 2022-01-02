@@ -10,6 +10,7 @@ use migo_hqm_server::hqm_server::{
 };
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 pub struct HQMMatchConfiguration {
     pub team_max: usize,
@@ -557,7 +558,7 @@ impl HQMMatchBehaviour {
             let mut new_blue_player_count = blue_player_count;
 
             fn add_players(
-                joining: Vec<(usize, String)>,
+                joining: Vec<(usize, Rc<String>)>,
                 server: &mut HQMServer,
                 team: HQMTeam,
                 spawn_point: HQMSpawnPoint,
@@ -587,7 +588,7 @@ impl HQMMatchBehaviour {
                 }
             }
             fn add_players_dual_control(
-                joining: Vec<(usize, String)>,
+                joining: Vec<(usize, Rc<String>)>,
                 server: &mut HQMServer,
                 team: HQMTeam,
                 spawn_point: HQMSpawnPoint,

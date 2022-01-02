@@ -1,6 +1,5 @@
 use crate::hqm_server::{HQMMuteStatus, HQMServer, HQMServerBehaviour, HQMServerPlayerData};
 
-use std::net::SocketAddr;
 use tracing::info;
 
 impl HQMServer {
@@ -262,7 +261,7 @@ impl HQMServer {
                     };
 
                 // Because we allow matching using wildcards, we use vectors for multiple instances found
-                let mut kick_player_list: Vec<(usize, String, SocketAddr)> = Vec::new();
+                let mut kick_player_list = Vec::new();
 
                 for (player_index, p) in self.players.iter().enumerate() {
                     if let Some(player) = p {

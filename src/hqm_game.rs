@@ -1169,7 +1169,7 @@ pub(crate) enum HQMGameObject {
 #[derive(Debug, Clone)]
 pub enum HQMMessage {
     PlayerUpdate {
-        player_name: String,
+        player_name: Rc<String>,
         object: Option<(usize, HQMTeam)>,
         player_index: usize,
         in_server: bool,
