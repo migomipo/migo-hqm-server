@@ -1355,22 +1355,22 @@ fn setup_position(
         if let Some(player_position) = player_position {
             if let Some(x) = available_positions
                 .iter()
-                .position(|x| *x == **player_position)
+                .position(|x| x == *player_position)
             {
                 let s = available_positions.remove(x);
                 positions.insert(*player_index, (team, s));
             }
         }
     }
-    let c = String::from("C");
+
     // Some players did not get their preferred positions because they didn't have one,
     // or because it was already taken
     for (player_index, player_position) in players.iter() {
         if !positions.contains_key(player_index) {
-            let s = if let Some(x) = available_positions.iter().position(|x| *x == c) {
+            let s = if let Some(x) = available_positions.iter().position(|x| x == "C") {
                 // Someone needs to be C
-                available_positions.remove(x);
-                (team, c.clone())
+                let x = available_positions.remove(x);
+                (team, x)
             } else if !available_positions.is_empty() {
                 // Give out the remaining positions
                 let x = available_positions.remove(0);
@@ -1380,27 +1380,33 @@ fn setup_position(
                 if let Some(player_position) = player_position {
                     (team, (*player_position).to_owned())
                 } else {
-                    (team, c.clone())
+                    (team, "C".to_owned())
                 }
             };
             positions.insert(*player_index, s);
         }
     }
 
-    if available_positions.contains(&c) {
-        let mut found_new_c = false;
-        for (_, (_, p)) in positions.iter_mut() {
-            if p != "G" {
-                *p = c.clone();
-                found_new_c = true;
-                break;
+    if let Some(x) = available_positions.iter().position(|x| x == "C") {
+        let mut change_index = None;
+        for (player_index, _) in players.iter() {
+            if change_index.is_none() {
+                change_index = Some(player_index);
+            }
+
+            if let Some((_, pos)) = positions.get(player_index) {
+                if pos != "G" {
+                    change_index = Some(player_index);
+                    break;
+                }
             }
         }
-        if !found_new_c {
-            if let Some((_, (_, p))) = positions.iter_mut().next() {
-                *p = c.clone();
-            }
+
+        if let Some(change_index) = change_index {
+            let c = available_positions.remove(x);
+            positions.insert(*change_index, (team, c));
         }
+
     }
 }
 
