@@ -68,13 +68,13 @@ impl HQMShootoutBehaviour {
         let remaining_attempts = self.attempts.saturating_sub(next_round);
         if remaining_attempts >= 2 {
             let msg = format!("{} attempts left for {}", remaining_attempts, next_team);
-            server.add_server_chat_message(&msg);
+            server.add_server_chat_message(msg);
         } else if remaining_attempts == 1 {
             let msg = format!("Last attempt for {}", next_team);
-            server.add_server_chat_message(&msg);
+            server.add_server_chat_message(msg);
         } else {
             let msg = format!("Tie-breaker round for {}", next_team);
-            server.add_server_chat_message(&msg);
+            server.add_server_chat_message(msg);
         }
 
         let defending_team = next_team.get_other_team();
@@ -340,7 +340,7 @@ impl HQMShootoutBehaviour {
                 }
                 server.add_goal_message(*team, None, None);
             } else {
-                server.add_server_chat_message("Miss");
+                server.add_server_chat_message_str("Miss");
             }
 
             let red_attempts_taken = *round + 1;
@@ -382,7 +382,7 @@ impl HQMShootoutBehaviour {
 
                 server.new_game(self.create_game());
 
-                server.add_server_chat_message(&msg);
+                server.add_server_chat_message(msg);
             } else {
                 server.admin_deny_message(player_index);
             }

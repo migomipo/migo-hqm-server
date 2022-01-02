@@ -255,13 +255,13 @@ impl HQMRussianBehaviour {
                 let remaining_attempts = self.attempts;
                 if remaining_attempts >= 2 {
                     let msg = format!("{} attempts left for {}", remaining_attempts, team);
-                    server.add_server_chat_message(&msg);
+                    server.add_server_chat_message(msg);
                 } else if remaining_attempts == 1 {
                     let msg = format!("Last attempt for {}", team);
-                    server.add_server_chat_message(&msg);
+                    server.add_server_chat_message(msg);
                 } else {
                     let msg = format!("Tie-breaker round for {}", team);
-                    server.add_server_chat_message(&msg);
+                    server.add_server_chat_message(msg);
                 }
             }
             HQMRussianStatus::Game { in_zone, round, .. } => {
@@ -274,13 +274,13 @@ impl HQMRussianBehaviour {
                     let remaining_attempts = self.attempts.saturating_sub(*round);
                     if remaining_attempts >= 2 {
                         let msg = format!("{} attempts left for {}", remaining_attempts, team);
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     } else if remaining_attempts == 1 {
                         let msg = format!("Last attempt for {}", team);
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     } else {
                         let msg = format!("Tie-breaker round for {}", team);
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                 }
             }
@@ -295,7 +295,7 @@ impl HQMRussianBehaviour {
         server.game.world.clear_pucks();
 
         let s = format!("Each team will get {} attempts", self.attempts);
-        server.add_server_chat_message(&s);
+        server.add_server_chat_message(s);
 
         let mut red_players = vec![];
         let mut blue_players = vec![];
@@ -362,7 +362,7 @@ impl HQMRussianBehaviour {
 
                 server.new_game(self.create_game());
 
-                server.add_server_chat_message(&msg);
+                server.add_server_chat_message(msg);
             } else {
                 server.admin_deny_message(player_index);
             }

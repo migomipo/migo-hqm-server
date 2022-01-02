@@ -270,7 +270,7 @@ impl HQMMatchBehaviour {
         };
         let s = format!("{}{}", str1, str2);
 
-        server.add_server_chat_message(&s);
+        server.add_server_chat_message(s);
 
         if server.game.time < 1000 {
             let time = server.game.time;
@@ -278,7 +278,7 @@ impl HQMMatchBehaviour {
             let centi = time % 100;
 
             let s = format!("{}.{:02} seconds left", seconds, centi);
-            server.add_server_chat_message(&s);
+            server.add_server_chat_message(s);
         }
 
         if game_over {
@@ -365,14 +365,14 @@ impl HQMMatchBehaviour {
                                         .contains(&this_connected_player_index)
                                     {
                                         self.icing_status = HQMIcingStatus::No;
-                                        server.add_server_chat_message("Icing waved off");
+                                        server.add_server_chat_message_str("Icing waved off");
                                     } else {
                                         let copy = p.clone();
                                         self.call_icing(server, other_team, &copy, time_break);
                                     }
                                 } else {
                                     self.icing_status = HQMIcingStatus::No;
-                                    server.add_server_chat_message("Icing waved off");
+                                    server.add_server_chat_message_str("Icing waved off");
                                 }
                             } else if let HQMIcingStatus::NotTouched(_, _) = self.icing_status {
                                 self.icing_status = HQMIcingStatus::No;
@@ -398,7 +398,7 @@ impl HQMMatchBehaviour {
                             match icing {
                                 HQMIcingConfiguration::Touch => {
                                     self.icing_status = HQMIcingStatus::Warning(team, p.clone());
-                                    server.add_server_chat_message("Icing warning");
+                                    server.add_server_chat_message_str("Icing warning");
                                 }
                                 HQMIcingConfiguration::NoTouch => {
                                     let copy = p.clone();
@@ -428,7 +428,7 @@ impl HQMMatchBehaviour {
                                                 touch.puck_pos.clone(),
                                                 touch.player_index,
                                             );
-                                            server.add_server_chat_message("Offside warning");
+                                            server.add_server_chat_message_str("Offside warning");
                                         }
                                         HQMOffsideConfiguration::Immediate => {
                                             let copy = touch.puck_pos.clone();
@@ -450,7 +450,7 @@ impl HQMMatchBehaviour {
                 }
                 HQMSimulationEvent::PuckLeftOffensiveZone { team: _, puck: _ } => {
                     if let HQMOffsideStatus::Warning(_, _, _) = self.offside_status {
-                        server.add_server_chat_message("Offside waved off");
+                        server.add_server_chat_message_str("Offside waved off");
                     }
                     self.offside_status = HQMOffsideStatus::InNeutralZone;
                 }
@@ -460,7 +460,7 @@ impl HQMMatchBehaviour {
         if let HQMOffsideStatus::Warning(team, _, _) = self.offside_status {
             if !has_players_in_offensive_zone(&server.game.world, team, None) {
                 self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
-                server.add_server_chat_message("Offside waved off");
+                server.add_server_chat_message_str("Offside waved off");
             }
         }
     }
@@ -479,7 +479,7 @@ impl HQMMatchBehaviour {
             .get_offside_faceoff_spot(pass_origin, team);
         server.game.time_break = time_break;
         self.offside_status = HQMOffsideStatus::Offside(team);
-        server.add_server_chat_message("Offside");
+        server.add_server_chat_message_str("Offside");
     }
 
     fn call_icing(
@@ -496,7 +496,7 @@ impl HQMMatchBehaviour {
             .get_icing_faceoff_spot(pass_origin, team);
         server.game.time_break = time_break;
         self.icing_status = HQMIcingStatus::Icing(team);
-        server.add_server_chat_message("Icing");
+        server.add_server_chat_message_str("Icing");
     }
 
     fn update_players(&mut self, server: &mut HQMServer) {
@@ -733,7 +733,7 @@ impl HQMMatchBehaviour {
                         );
                         let msg = format!("Team size set to {} by {}", new_num, player.player_name);
 
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                 }
             } else {
@@ -754,7 +754,7 @@ impl HQMMatchBehaviour {
                         );
                         let msg = format!("Touch icing enabled by {}", player.player_name);
 
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                     "notouch" => {
                         self.config.icing = HQMIcingConfiguration::NoTouch;
@@ -764,14 +764,14 @@ impl HQMMatchBehaviour {
                         );
                         let msg = format!("No-touch icing enabled by {}", player.player_name);
 
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                     "off" => {
                         self.config.icing = HQMIcingConfiguration::Off;
                         info!("{} ({}) disabled icing", player.player_name, player_index);
                         let msg = format!("Icing disabled by {}", player.player_name);
 
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                     _ => {}
                 }
@@ -790,7 +790,7 @@ impl HQMMatchBehaviour {
                         info!("{} ({}) enabled offside", player.player_name, player_index);
                         let msg = format!("Offside enabled by {}", player.player_name);
 
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                     "imm" | "immediate" => {
                         self.config.offside = HQMOffsideConfiguration::Immediate;
@@ -800,14 +800,14 @@ impl HQMMatchBehaviour {
                         );
                         let msg = format!("Immediate offside enabled by {}", player.player_name);
 
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                     "off" => {
                         self.config.offside = HQMOffsideConfiguration::Off;
                         info!("{} ({}) disabled offside", player.player_name, player_index);
                         let msg = format!("Offside disabled by {}", player.player_name);
 
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                     _ => {}
                 }
@@ -832,14 +832,14 @@ impl HQMMatchBehaviour {
                             "First-to-goals rule set to {} goals by {}",
                             new_num, player.player_name
                         );
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     } else {
                         info!(
                             "{} ({}) disabled first-to-goals rule",
                             player.player_name, player_index
                         );
                         let msg = format!("First-to-goals rule disabled by {}", player.player_name);
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                 }
             } else {
@@ -863,14 +863,14 @@ impl HQMMatchBehaviour {
                             "Mercy rule set to {} goals by {}",
                             new_num, player.player_name
                         );
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     } else {
                         info!(
                             "{} ({}) disabled mercy rule",
                             player.player_name, player_index
                         );
                         let msg = format!("Mercy rule disabled by {}", player.player_name);
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                 }
             } else {
@@ -891,7 +891,7 @@ impl HQMMatchBehaviour {
                         "{} ({}) initiated faceoff",
                         player.player_name, player_index
                     );
-                    server.add_server_chat_message(&msg);
+                    server.add_server_chat_message(msg);
                 } else {
                     server.admin_deny_message(player_index);
                 }
@@ -907,7 +907,7 @@ impl HQMMatchBehaviour {
 
                 server.new_game(self.create_game());
 
-                server.add_server_chat_message(&msg);
+                server.add_server_chat_message(msg);
             } else {
                 server.admin_deny_message(player_index);
             }
@@ -923,7 +923,7 @@ impl HQMMatchBehaviour {
                     self.paused = false;
                     server.game.time = 1;
 
-                    server.add_server_chat_message(&msg);
+                    server.add_server_chat_message(msg);
                 }
             } else {
                 server.admin_deny_message(player_index);
@@ -942,7 +942,7 @@ impl HQMMatchBehaviour {
                 }
                 info!("{} ({}) paused game", player.player_name, player_index);
                 let msg = format!("Game paused by {}", player.player_name);
-                server.add_server_chat_message(&msg);
+                server.add_server_chat_message(msg);
             } else {
                 server.admin_deny_message(player_index);
             }
@@ -956,7 +956,7 @@ impl HQMMatchBehaviour {
                 info!("{} ({}) resumed game", player.player_name, player_index);
                 let msg = format!("Game resumed by {}", player.player_name);
 
-                server.add_server_chat_message(&msg);
+                server.add_server_chat_message(msg);
             } else {
                 server.admin_deny_message(player_index);
             }
@@ -978,7 +978,7 @@ impl HQMMatchBehaviour {
                     input_minutes, input_seconds, player.player_name, player_index
                 );
                 let msg = format!("Clock set by {}", player.player_name);
-                server.add_server_chat_message(&msg);
+                server.add_server_chat_message(msg);
             } else {
                 server.admin_deny_message(player_index);
             }
@@ -1002,7 +1002,7 @@ impl HQMMatchBehaviour {
                             player.player_name, player_index, input_score
                         );
                         let msg = format!("Red score changed by {}", player.player_name);
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                     HQMTeam::Blue => {
                         server.game.blue_score = input_score;
@@ -1012,7 +1012,7 @@ impl HQMMatchBehaviour {
                             player.player_name, player_index, input_score
                         );
                         let msg = format!("Blue score changed by {}", player.player_name);
-                        server.add_server_chat_message(&msg);
+                        server.add_server_chat_message(msg);
                     }
                 }
             } else {
@@ -1031,7 +1031,7 @@ impl HQMMatchBehaviour {
                     player.player_name, player_index, input_period
                 );
                 let msg = format!("Period set by {}", player.player_name);
-                server.add_server_chat_message(&msg);
+                server.add_server_chat_message(msg);
             } else {
                 server.admin_deny_message(player_index);
             }
@@ -1061,7 +1061,7 @@ impl HQMMatchBehaviour {
 
                 self.preferred_positions
                     .insert(player_index, input_position);
-                server.add_server_chat_message(&msg);
+                server.add_server_chat_message(msg);
             }
         }
     }
@@ -1324,14 +1324,14 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                     HQMIcingConfiguration::NoTouch => "No-touch icing enabled",
                 };
                 let msg = format!("{}, {}", offside_str, icing_str);
-                server.add_directed_server_chat_message(&msg, player_index);
+                server.add_directed_server_chat_message(msg, player_index);
                 if self.config.mercy > 0 {
                     let msg = format!("Mercy rule when team leads by {} goals", self.config.mercy);
-                    server.add_directed_server_chat_message(&msg, player_index);
+                    server.add_directed_server_chat_message(msg, player_index);
                 }
                 if self.config.first_to > 0 {
                     let msg = format!("Game ends when team scores {} goals", self.config.first_to);
-                    server.add_directed_server_chat_message(&msg, player_index);
+                    server.add_directed_server_chat_message(msg, player_index);
                 }
             }
             "cheat" => {
