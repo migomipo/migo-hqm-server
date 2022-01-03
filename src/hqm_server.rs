@@ -1496,6 +1496,7 @@ impl HQMServer {
                 &self.players.players,
                 socket,
                 write_buf,
+                None,
             )
             .await;
             if self.config.replays_enabled {
@@ -1901,6 +1902,7 @@ async fn send_updates(
     players: &[Option<HQMServerPlayer>],
     socket: &UdpSocket,
     write_buf: &mut [u8],
+    force_view: Option<usize>,
 ) {
     let packets = &game.saved_ticks;
 
@@ -1938,7 +1940,8 @@ async fn send_updates(
                         },
                     );
                     writer.write_bits(8, game.period);
-                    writer.write_bits(8, data.view_player_index as u32);
+                    let view = force_view.unwrap_or(data.view_player_index);
+                    writer.write_bits(8, view as u32);
 
                     // if using a non-cryptic version, send ping
                     if data.client_version.has_ping() {
