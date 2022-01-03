@@ -115,7 +115,7 @@ impl HQMRussianBehaviour {
                 player_count: &mut usize,
                 team_max: usize,
             ) {
-                let mid_z = (server.game.world.rink.length / 2.0) + 12.0;
+                let mid_z = (server.game.world.rink.length / 2.0);
                 let z = match team {
                     HQMTeam::Red => mid_z + 12.0,
                     HQMTeam::Blue => mid_z - 12.0,
