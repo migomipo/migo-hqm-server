@@ -246,13 +246,6 @@ impl HQMGameWorld {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum HQMRuleIndication {
-    No,
-    Warning,
-    Yes,
-}
-
 pub struct HQMGame {
     pub(crate) start_time: DateTime<Utc>,
 
@@ -263,8 +256,7 @@ pub struct HQMGame {
     pub(crate) replay_messages: Vec<Rc<HQMMessage>>,
     pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
     pub(crate) saved_pings: VecDeque<Instant>,
-    pub icing_indication: HQMRuleIndication,
-    pub offside_indication: HQMRuleIndication,
+    pub rules_state: HQMRulesState,
     pub world: HQMGameWorld,
     pub red_score: u32,
     pub blue_score: u32,
@@ -316,8 +308,10 @@ impl HQMGame {
             replay_messages: vec![],
             saved_ticks: VecDeque::with_capacity(256),
             saved_pings: VecDeque::with_capacity(100),
-            icing_indication: HQMRuleIndication::No,
-            offside_indication: HQMRuleIndication::No,
+            rules_state: HQMRulesState::Regular {
+                offside_warning: false,
+                icing_warning: false,
+            },
             world: HQMGameWorld {
                 objects: HQMGameWorldObjectList {
                     objects: object_vec,

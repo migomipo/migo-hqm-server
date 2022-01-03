@@ -2,7 +2,7 @@ use nalgebra::{Point3, Rotation3, Vector3};
 use tracing::info;
 
 use migo_hqm_server::hqm_game::{
-    HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRuleIndication,
+    HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRulesState,
     HQMSkaterHand, HQMSkaterObjectRef, HQMTeam,
 };
 use migo_hqm_server::hqm_server::{
@@ -65,32 +65,12 @@ pub enum HQMIcingStatus {
     Icing(HQMTeam),                   // Icing has been called
 }
 
-impl HQMIcingStatus {
-    pub fn get_indication(&self) -> HQMRuleIndication {
-        match self {
-            HQMIcingStatus::Warning(_, _) => HQMRuleIndication::Warning,
-            HQMIcingStatus::Icing(_) => HQMRuleIndication::Yes,
-            _ => HQMRuleIndication::No,
-        }
-    }
-}
-
 #[derive(PartialEq, Debug, Clone)]
 pub enum HQMOffsideStatus {
     InNeutralZone,                        // No offside
     InOffensiveZone(HQMTeam),             // No offside, puck in offensive zone
     Warning(HQMTeam, Point3<f32>, usize), // Warning, puck entered offensive zone in an offside situation but not touched yet
     Offside(HQMTeam),                     // Offside has been called
-}
-
-impl HQMOffsideStatus {
-    pub fn get_indication(&self) -> HQMRuleIndication {
-        match self {
-            HQMOffsideStatus::Warning(_, _, _) => HQMRuleIndication::Warning,
-            HQMOffsideStatus::Offside(_) => HQMRuleIndication::Yes,
-            _ => HQMRuleIndication::No,
-        }
-    }
 }
 
 impl HQMMatchBehaviour {
@@ -1191,8 +1171,20 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 self.config.time_intermission * 100,
             );
         }
-        server.game.icing_indication = self.icing_status.get_indication();
-        server.game.offside_indication = self.offside_status.get_indication();
+        let rules_state = if let HQMOffsideStatus::Offside(_) = self.offside_status {
+            HQMRulesState::Offside
+        } else if let HQMIcingStatus::Icing(_) = self.icing_status {
+            HQMRulesState::Icing
+        } else {
+            let icing_warning = matches!(self.icing_status, HQMIcingStatus::Warning(_, _));
+            let offside_warning = matches!(self.offside_status, HQMOffsideStatus::Warning(_, _, _));
+            HQMRulesState::Regular {
+                offside_warning,
+                icing_warning,
+            }
+        };
+
+        server.game.rules_state = rules_state;
     }
 
     fn handle_command(

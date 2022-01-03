@@ -18,8 +18,8 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::hqm_game::{
-    HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRink, HQMRuleIndication, HQMRulesState,
-    HQMSkater, HQMSkaterHand, HQMSkaterObjectRefMut, HQMTeam,
+    HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRink, HQMRulesState, HQMSkater,
+    HQMSkaterHand, HQMSkaterObjectRefMut, HQMTeam,
 };
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter};
 use crate::hqm_simulate::HQMSimulationEvent;
@@ -1193,10 +1193,12 @@ impl HQMServer {
             } else if let Some((dual_control_player_index, _, _)) =
                 self.get_dual_control_player(sender_index)
             {
-                if let Some(skater) = self.game
+                if let Some(skater) = self
+                    .game
                     .world
                     .objects
-                    .get_skater_object_for_player(dual_control_player_index) {
+                    .get_skater_object_for_player(dual_control_player_index)
+                {
                     Some((skater.team, None))
                 } else {
                     None
@@ -1204,8 +1206,7 @@ impl HQMServer {
             } else {
                 None
             };
-            if let Some((team, object)) = skater
-            {
+            if let Some((team, object)) = skater {
                 info!(
                     "{} ({}) to team {}: {}",
                     &player.player_name, sender_index, team, message
@@ -1227,20 +1228,29 @@ impl HQMServer {
                     player_index: Some(sender_index),
                     message: Cow::Owned(message.to_owned()),
                 });
-                fn add_message(player: & mut HQMServerPlayer, change1: &Rc<HQMMessage>, chat: &Rc<HQMMessage>, change2: &Rc<HQMMessage>) {
+                fn add_message(
+                    player: &mut HQMServerPlayer,
+                    change1: &Rc<HQMMessage>,
+                    chat: &Rc<HQMMessage>,
+                    change2: &Rc<HQMMessage>,
+                ) {
                     player.add_message(change1.clone());
                     player.add_message(chat.clone());
                     player.add_message(change2.clone());
                 }
-                let players = & mut self.players;
+                let players = &mut self.players;
                 for skater in self.game.world.objects.get_skater_iter() {
                     if skater.team == team {
                         if let Some(player) = players.get_mut(skater.connected_player_index) {
                             add_message(player, &change1, &chat, &change2);
-                            if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
-                                movement.and_then(|i| players.get_mut(i))
+                            if let HQMServerPlayerData::DualControl { movement, stick } =
+                                player.data
+                            {
+                                movement
+                                    .and_then(|i| players.get_mut(i))
                                     .map(|player| add_message(player, &change1, &chat, &change2));
-                                stick.and_then(|i| players.get_mut(i))
+                                stick
+                                    .and_then(|i| players.get_mut(i))
                                     .map(|player| add_message(player, &change1, &chat, &change2));
                             }
                         }
@@ -1894,19 +1904,6 @@ async fn send_updates(
 ) {
     let packets = &game.saved_ticks;
 
-    let rules_state = if game.offside_indication == HQMRuleIndication::Yes {
-        HQMRulesState::Offside
-    } else if game.icing_indication == HQMRuleIndication::Yes {
-        HQMRulesState::Icing
-    } else {
-        let icing_warning = game.icing_indication == HQMRuleIndication::Warning;
-        let offside_warning = game.offside_indication == HQMRuleIndication::Warning;
-        HQMRulesState::Regular {
-            offside_warning,
-            icing_warning,
-        }
-    };
-
     for player in players.iter() {
         if let Some(player) = player {
             if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
@@ -1950,7 +1947,7 @@ async fn send_updates(
 
                     // if baba's second version or above, send rules
                     if data.client_version.has_rules() {
-                        let num = match rules_state {
+                        let num = match game.rules_state {
                             HQMRulesState::Regular {
                                 offside_warning,
                                 icing_warning,
