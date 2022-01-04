@@ -1492,7 +1492,20 @@ impl HQMServer {
 
             send_updates(
                 self.game_id,
-                &self.game,
+                &self.game.saved_ticks,
+                self.game.game_step,
+                self.game.game_over,
+                self.game.red_score,
+                self.game.blue_score,
+                self.game.time,
+                if self.game.is_intermission_goal {
+                    self.game.time_break
+                } else {
+                    0
+                },
+                self.game.period,
+                self.game.rules_state,
+                self.game.packet,
                 &self.players.players,
                 socket,
                 write_buf,
@@ -1750,8 +1763,8 @@ fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage) {
 
 fn write_objects(
     writer: &mut HQMMessageWriter,
-    game: &HQMGame,
     packets: &VecDeque<HQMSavedTick>,
+    current_packet: u32,
     known_packet: u32,
 ) {
     let current_packets = &packets[0].packets;
@@ -1760,7 +1773,7 @@ fn write_objects(
         let diff = if known_packet == u32::MAX {
             None
         } else {
-            game.packet.checked_sub(known_packet)
+            current_packet.checked_sub(known_packet)
         };
         if let Some(diff) = diff {
             let index = diff as usize;
@@ -1774,7 +1787,7 @@ fn write_objects(
         }
     };
 
-    writer.write_u32_aligned(game.packet);
+    writer.write_u32_aligned(current_packet);
     writer.write_u32_aligned(known_packet);
 
     for i in 0..32 {
@@ -1876,7 +1889,7 @@ fn write_replay(game: &mut HQMGame, write_buf: &mut [u8]) {
 
     let packets = &game.saved_ticks;
 
-    write_objects(&mut writer, game, packets, game.replay_last_packet);
+    write_objects(&mut writer, packets, game.packet, game.replay_last_packet);
     game.replay_last_packet = game.packet;
 
     let remaining_messages = game.replay_messages.len() - game.replay_msg_pos;
@@ -1898,14 +1911,21 @@ fn write_replay(game: &mut HQMGame, write_buf: &mut [u8]) {
 
 async fn send_updates(
     game_id: u32,
-    game: &HQMGame,
+    packets: &VecDeque<HQMSavedTick>,
+    game_step: u32,
+    game_over: bool,
+    red_score: u32,
+    blue_score: u32,
+    time: u32,
+    time_break: u32,
+    period: u32,
+    rules_state: HQMRulesState,
+    current_packet: u32,
     players: &[Option<HQMServerPlayer>],
     socket: &UdpSocket,
     write_buf: &mut [u8],
     force_view: Option<usize>,
 ) {
-    let packets = &game.saved_ticks;
-
     for player in players.iter() {
         if let Some(player) = player {
             if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
@@ -1919,27 +1939,20 @@ async fn send_updates(
                     writer.write_bytes_aligned(GAME_HEADER);
                     writer.write_byte_aligned(5);
                     writer.write_u32_aligned(game_id);
-                    writer.write_u32_aligned(game.game_step);
+                    writer.write_u32_aligned(game_step);
                     writer.write_bits(
                         1,
-                        match game.game_over {
+                        match game_over {
                             true => 1,
                             false => 0,
                         },
                     );
-                    writer.write_bits(8, game.red_score);
-                    writer.write_bits(8, game.blue_score);
-                    writer.write_bits(16, game.time);
+                    writer.write_bits(8, red_score);
+                    writer.write_bits(8, blue_score);
+                    writer.write_bits(16, time);
 
-                    writer.write_bits(
-                        16,
-                        if game.is_intermission_goal {
-                            game.time_break
-                        } else {
-                            0
-                        },
-                    );
-                    writer.write_bits(8, game.period);
+                    writer.write_bits(16, time_break);
+                    writer.write_bits(8, period);
                     let view = force_view.unwrap_or(data.view_player_index);
                     writer.write_bits(8, view as u32);
 
@@ -1950,7 +1963,7 @@ async fn send_updates(
 
                     // if baba's second version or above, send rules
                     if data.client_version.has_rules() {
-                        let num = match game.rules_state {
+                        let num = match rules_state {
                             HQMRulesState::Regular {
                                 offside_warning,
                                 icing_warning,
@@ -1970,7 +1983,7 @@ async fn send_updates(
                         writer.write_u32_aligned(num);
                     }
 
-                    write_objects(&mut writer, game, packets, data.known_packet);
+                    write_objects(&mut writer, packets, current_packet, data.known_packet);
 
                     let (start, remaining_messages) = if data.known_msgpos > data.messages.len() {
                         (data.messages.len(), 0)
