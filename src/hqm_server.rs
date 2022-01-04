@@ -1767,7 +1767,7 @@ fn write_objects(
     current_packet: u32,
     known_packet: u32,
 ) {
-    let current_packets = &packets[0].packets;
+    let current_packets = packets[0].packets.as_slice();
 
     let old_packets = {
         let diff = if known_packet == u32::MAX {
@@ -1777,8 +1777,8 @@ fn write_objects(
         };
         if let Some(diff) = diff {
             let index = diff as usize;
-            if index < packets.len() && index < 192 && index > 0 {
-                Some(&packets[index].packets)
+            if index < 192 && index > 0 {
+                packets.get(index).map(|x| x.packets.as_slice())
             } else {
                 None
             }
