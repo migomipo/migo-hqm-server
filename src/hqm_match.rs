@@ -55,6 +55,7 @@ pub struct HQMMatchBehaviour {
     preferred_positions: HashMap<usize, String>,
     team_switch_timer: HashMap<usize, u32>,
     started_as_goalie: Vec<usize>,
+    faceoff_game_step: u32
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -84,6 +85,7 @@ impl HQMMatchBehaviour {
             preferred_positions: HashMap::new(),
             team_switch_timer: Default::default(),
             started_as_goalie: vec![],
+            faceoff_game_step: 0
         }
     }
 
@@ -139,6 +141,8 @@ impl HQMMatchBehaviour {
         } else {
             HQMOffsideStatus::InNeutralZone
         };
+
+        self.faceoff_game_step = server.game.game_step;
     }
 
     fn call_goal(
@@ -270,6 +274,10 @@ impl HQMMatchBehaviour {
         } else {
             server.game.time_break = time_break;
         }
+
+        let gamestep = server.game.game_step;
+
+        server.add_replay_to_queue(self.faceoff_game_step.max(gamestep - 500), gamestep, None);
     }
 
     fn handle_events(

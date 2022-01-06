@@ -1401,6 +1401,7 @@ impl HQMServer {
 
             let tick = &self.game.saved_history[i];
 
+            let game_step = tick.game_step;
             let packets = tick.packets.clone();
 
             replay_element.from += 1;
@@ -1418,7 +1419,7 @@ impl HQMServer {
             self.game.saved_pings.push_front(Instant::now());
 
             self.game.packet = self.game.packet.wrapping_add(1);
-            (self.game.game_step, None)
+            (game_step, None)
         });
 
         send_updates(
@@ -1452,6 +1453,8 @@ impl HQMServer {
     ) {
         tokio::task::block_in_place(|| {
             self.remove_inactive_players(behaviour);
+
+            self.game.game_step = self.game.game_step.wrapping_add(1);
 
             behaviour.before_tick(self);
 
@@ -1498,7 +1501,7 @@ impl HQMServer {
 
             let packets = get_packets(&self.game.world.objects.objects);
 
-            self.game.game_step = self.game.game_step.wrapping_add(1);
+
 
             let new_replay_tick = ReplayTick {
                 game_step: self.game.game_step,
@@ -1670,17 +1673,23 @@ impl HQMServer {
         for message in messages {
             self.add_global_message(message, true);
         }
+        self.replay_queue.clear();
     }
 
     pub fn add_replay_to_queue(
         &mut self,
-        start_packet: u32,
-        end_packet: u32,
+        start_step: u32,
+        end_step: u32,
         force_view: Option<usize>,
     ) {
-        if start_packet > end_packet {
+        if start_step > end_step {
             panic!("start_packet must be less than or equal to end_packet")
         }
+        self.replay_queue.push_back(ReplayElement {
+            from: start_step,
+            to: end_step,
+            force_view
+        });
     }
 }
 
