@@ -1388,7 +1388,7 @@ impl HQMServer {
         &mut self,
         socket: &UdpSocket,
         write_buf: &mut [u8],
-        behaviour: &mut B
+        behaviour: &mut B,
     ) {
         let (game_step, force_view) = tokio::task::block_in_place(|| {
             self.remove_inactive_players(behaviour);
@@ -1397,7 +1397,7 @@ impl HQMServer {
 
             let from = replay_element.from;
 
-            let i = self.game.saved_history.len() - ((self.game.game_step - from + 1) as usize);
+            let i = (self.game.game_step - from) as usize;
 
             let tick = &self.game.saved_history[i];
 
@@ -1442,7 +1442,8 @@ impl HQMServer {
             socket,
             write_buf,
             force_view,
-        ).await;
+        )
+        .await;
     }
 
     async fn game_step<B: HQMServerBehaviour>(
@@ -1501,17 +1502,15 @@ impl HQMServer {
 
             let packets = get_packets(&self.game.world.objects.objects);
 
-
-
             let new_replay_tick = ReplayTick {
                 game_step: self.game.game_step,
                 packets: packets.clone(),
-                players: vec![]
+                players: vec![],
             };
             if self.game.saved_history.len() > 600 {
-                self.game.saved_history.pop_front();
+                self.game.saved_history.pop_back();
             }
-            self.game.saved_history.push_back(new_replay_tick);
+            self.game.saved_history.push_front(new_replay_tick);
 
             self.game
                 .saved_packets
@@ -1553,7 +1552,7 @@ impl HQMServer {
         }
     }
 
-    fn remove_inactive_players<B: HQMServerBehaviour>(&mut self, behaviour: & mut B) {
+    fn remove_inactive_players<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
         let mut chat_messages = vec![];
 
         let inactive_players: Vec<(usize, Rc<String>)> = self
@@ -1688,7 +1687,7 @@ impl HQMServer {
         self.replay_queue.push_back(ReplayElement {
             from: start_step,
             to: end_step,
-            force_view
+            force_view,
         });
     }
 }
