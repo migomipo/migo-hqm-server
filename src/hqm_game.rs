@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::hqm_server::{HQMPuckPacket, HQMSavedTick, HQMSkaterPacket};
+use crate::hqm_server::{HQMObjectPacket, HQMPuckPacket, HQMSkaterPacket, ReplayTick};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
@@ -254,8 +254,9 @@ pub struct HQMGame {
     pub(crate) replay_msg_pos: usize,
     pub(crate) replay_last_packet: u32,
     pub(crate) replay_messages: Vec<Rc<HQMMessage>>,
-    pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
+    pub(crate) saved_packets: VecDeque<Vec<HQMObjectPacket>>,
     pub(crate) saved_pings: VecDeque<Instant>,
+    pub(crate) saved_history: VecDeque<ReplayTick>,
     pub rules_state: HQMRulesState,
     pub world: HQMGameWorld,
     pub red_score: u32,
@@ -306,8 +307,9 @@ impl HQMGame {
             replay_msg_pos: 0,
             replay_last_packet: u32::MAX,
             replay_messages: vec![],
-            saved_ticks: VecDeque::with_capacity(256),
+            saved_packets: VecDeque::with_capacity(192),
             saved_pings: VecDeque::with_capacity(100),
+            saved_history: VecDeque::new(),
             rules_state: HQMRulesState::Regular {
                 offside_warning: false,
                 icing_warning: false,
