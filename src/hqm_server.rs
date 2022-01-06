@@ -1384,169 +1384,76 @@ impl HQMServer {
         return self.players.iter().position(|x| x.is_none());
     }
 
-    async fn replay_step<B: HQMServerBehaviour>(
-        &mut self,
-        socket: &UdpSocket,
-        write_buf: &mut [u8],
-        behaviour: &mut B,
-    ) {
-        let (game_step, force_view) = tokio::task::block_in_place(|| {
-            self.remove_inactive_players(behaviour);
+    fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B, write_buf: &mut [u8]) {
+        self.game.game_step = self.game.game_step.wrapping_add(1);
 
-            let replay_element = self.replay_queue.front_mut().unwrap();
+        behaviour.before_tick(self);
 
-            let from = replay_element.from;
-
-            let i = (self.game.game_step - from) as usize;
-
-            let tick = &self.game.saved_history[i];
-
-            let game_step = tick.game_step;
-            let packets = tick.packets.clone();
-
-            replay_element.from += 1;
-            if replay_element.from >= replay_element.to {
-                self.replay_queue.pop_front();
-            }
-
-            self.game
-                .saved_packets
-                .truncate(self.game.saved_packets.capacity() - 1);
-            self.game.saved_packets.push_front(packets);
-            self.game
-                .saved_pings
-                .truncate(self.game.saved_pings.capacity() - 1);
-            self.game.saved_pings.push_front(Instant::now());
-
-            self.game.packet = self.game.packet.wrapping_add(1);
-            (game_step, None)
-        });
-
-        send_updates(
-            self.game_id,
-            &self.game.saved_packets,
-            game_step,
-            self.game.game_over,
-            self.game.red_score,
-            self.game.blue_score,
-            self.game.time,
-            if self.game.is_intermission_goal {
-                self.game.time_break
-            } else {
-                0
-            },
-            self.game.period,
-            self.game.rules_state,
-            self.game.packet,
-            &self.players.players,
-            socket,
-            write_buf,
-            force_view,
-        )
-        .await;
-    }
-
-    async fn game_step<B: HQMServerBehaviour>(
-        &mut self,
-        socket: &UdpSocket,
-        write_buf: &mut [u8],
-        behaviour: &mut B,
-    ) {
-        tokio::task::block_in_place(|| {
-            self.remove_inactive_players(behaviour);
-
-            self.game.game_step = self.game.game_step.wrapping_add(1);
-
-            behaviour.before_tick(self);
-
-            let mut dual_control_updates = vec![];
-            for (player_index, player) in self.players.iter().enumerate() {
-                if let Some(player) = player {
-                    if let HQMServerPlayerData::DualControl { movement, stick } = &player.data {
-                        let mut current_input = player.input.clone();
-                        let movement = movement
-                            .and_then(|x| self.players.get(x))
-                            .map(|x| x.input.clone());
-                        let stick = stick
-                            .and_then(|x| self.players.get(x))
-                            .map(|x| x.input.clone());
-                        if let Some(movement) = movement {
-                            current_input.fwbw = movement.fwbw;
-                            current_input.keys = movement.keys & 0x13;
-                            current_input.turn = movement.turn;
-                            current_input.head_rot = movement.head_rot;
-                            current_input.body_rot = movement.body_rot;
-                        }
-                        if let Some(stick) = stick {
-                            current_input.stick = stick.stick;
-                            current_input.stick_angle = stick.stick_angle;
-                        }
-                        dual_control_updates.push((player_index, current_input))
+        let mut dual_control_updates = vec![];
+        for (player_index, player) in self.players.iter().enumerate() {
+            if let Some(player) = player {
+                if let HQMServerPlayerData::DualControl { movement, stick } = &player.data {
+                    let mut current_input = player.input.clone();
+                    let movement = movement
+                        .and_then(|x| self.players.get(x))
+                        .map(|x| x.input.clone());
+                    let stick = stick
+                        .and_then(|x| self.players.get(x))
+                        .map(|x| x.input.clone());
+                    if let Some(movement) = movement {
+                        current_input.fwbw = movement.fwbw;
+                        current_input.keys = movement.keys & 0x13;
+                        current_input.turn = movement.turn;
+                        current_input.head_rot = movement.head_rot;
+                        current_input.body_rot = movement.body_rot;
                     }
+                    if let Some(stick) = stick {
+                        current_input.stick = stick.stick;
+                        current_input.stick_angle = stick.stick_angle;
+                    }
+                    dual_control_updates.push((player_index, current_input))
                 }
             }
+        }
 
-            for (player_index, new_input) in dual_control_updates {
-                self.players
-                    .get_mut(player_index)
-                    .map(|x| x.input = new_input);
+        for (player_index, new_input) in dual_control_updates {
+            self.players
+                .get_mut(player_index)
+                .map(|x| x.input = new_input);
+        }
+
+        for skater in self.game.world.objects.get_skater_iter_mut() {
+            if let Some(player) = self.players.get(skater.connected_player_index) {
+                skater.skater.input = player.input.clone();
             }
+        }
 
-            for skater in self.game.world.objects.get_skater_iter_mut() {
-                if let Some(player) = self.players.get(skater.connected_player_index) {
-                    skater.skater.input = player.input.clone();
-                }
-            }
+        let events = self.game.world.simulate_step();
 
-            let events = self.game.world.simulate_step();
+        let packets = get_packets(&self.game.world.objects.objects);
 
-            let packets = get_packets(&self.game.world.objects.objects);
+        behaviour.after_tick(self, &events);
 
-            let new_replay_tick = ReplayTick {
-                game_step: self.game.game_step,
-                packets: packets.clone(),
-                players: vec![],
-            };
-            if self.game.saved_history.len() > 600 {
-                self.game.saved_history.pop_back();
-            }
-            self.game.saved_history.push_front(new_replay_tick);
+        let new_replay_tick = ReplayTick {
+            game_step: self.game.game_step,
+            packets: packets.clone(),
+            players: vec![],
+        };
+        if self.game.saved_history.len() > 600 {
+            self.game.saved_history.pop_back();
+        }
+        self.game.saved_history.push_front(new_replay_tick);
 
-            self.game
-                .saved_packets
-                .truncate(self.game.saved_packets.capacity() - 1);
-            self.game.saved_packets.push_front(packets);
-            self.game.packet = self.game.packet.wrapping_add(1);
-            self.game
-                .saved_pings
-                .truncate(self.game.saved_pings.capacity() - 1);
-            self.game.saved_pings.push_front(Instant::now());
+        self.game
+            .saved_packets
+            .truncate(self.game.saved_packets.capacity() - 1);
+        self.game.saved_packets.push_front(packets);
+        self.game.packet = self.game.packet.wrapping_add(1);
+        self.game
+            .saved_pings
+            .truncate(self.game.saved_pings.capacity() - 1);
+        self.game.saved_pings.push_front(Instant::now());
 
-            behaviour.after_tick(self, &events);
-        });
-
-        send_updates(
-            self.game_id,
-            &self.game.saved_packets,
-            self.game.game_step,
-            self.game.game_over,
-            self.game.red_score,
-            self.game.blue_score,
-            self.game.time,
-            if self.game.is_intermission_goal {
-                self.game.time_break
-            } else {
-                0
-            },
-            self.game.period,
-            self.game.rules_state,
-            self.game.packet,
-            &self.players.players,
-            socket,
-            write_buf,
-            None,
-        )
-        .await;
         if self.config.replays_enabled {
             write_replay(&mut self.game, write_buf);
         }
@@ -1596,11 +1503,70 @@ impl HQMServer {
     ) {
         if self.player_count() != 0 {
             self.game.active = true;
-            if !self.replay_queue.is_empty() {
-                self.replay_step(socket, write_buf, behaviour).await;
-            } else {
-                self.game_step(socket, write_buf, behaviour).await;
-            }
+            let (game_step, forced_view) = tokio::task::block_in_place(|| {
+                self.remove_inactive_players(behaviour);
+
+                if let Some(replay_element) = self.replay_queue.front_mut() {
+                    let from = replay_element.from;
+                    let saved_history = &self.game.saved_history;
+                    let tick = self
+                        .game
+                        .game_step
+                        .checked_sub(from)
+                        .and_then(|i| saved_history.get(i as usize));
+                    if let Some(tick) = tick {
+                        let game_step = tick.game_step;
+                        let packets = tick.packets.clone();
+
+                        replay_element.from += 1;
+                        if replay_element.from >= replay_element.to {
+                            self.replay_queue.pop_front();
+                        }
+
+                        self.game
+                            .saved_packets
+                            .truncate(self.game.saved_packets.capacity() - 1);
+                        self.game.saved_packets.push_front(packets);
+                        self.game
+                            .saved_pings
+                            .truncate(self.game.saved_pings.capacity() - 1);
+                        self.game.saved_pings.push_front(Instant::now());
+
+                        self.game.packet = self.game.packet.wrapping_add(1);
+                        (game_step, None)
+                    } else {
+                        self.replay_queue.pop_front();
+                        self.game_step(behaviour, write_buf);
+                        (self.game.game_step, None)
+                    }
+                } else {
+                    self.game_step(behaviour, write_buf);
+                    (self.game.game_step, None)
+                }
+            });
+
+            send_updates(
+                self.game_id,
+                &self.game.saved_packets,
+                game_step,
+                self.game.game_over,
+                self.game.red_score,
+                self.game.blue_score,
+                self.game.time,
+                if self.game.is_intermission_goal {
+                    self.game.time_break
+                } else {
+                    0
+                },
+                self.game.period,
+                self.game.rules_state,
+                self.game.packet,
+                &self.players.players,
+                socket,
+                write_buf,
+                forced_view,
+            )
+            .await;
         } else if self.game.active {
             info!("Game {} abandoned", self.game_id);
             let new_game = behaviour.create_game();
