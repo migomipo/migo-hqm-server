@@ -833,14 +833,18 @@ impl HQMServer {
                     }
                 }
                 HQMServerPlayerData::Bot {} => {}
-                HQMServerPlayerData::Replay {} => {
-                    return; // Replay bots can not be removed like that
-                }
+                HQMServerPlayerData::Replay {} => {}
             }
 
-            self.game.world.remove_player(player_index);
+            let update = HQMMessage::PlayerUpdate {
+                player_name,
+                object: None,
+                player_index,
+                in_server: false,
+            };
 
             self.add_global_message(update, true);
+            self.game.world.remove_player(player_index);
 
             self.players.remove_player(player_index as usize);
 
@@ -1107,6 +1111,7 @@ impl HQMServer {
                     *m = movement;
                     *s = stick;
                     player.player_name = player_name.clone();
+                    player.id = Uuid::new_v4();
                     if let Some(hand) = hand {
                         player.hand = hand;
                     }
@@ -1434,11 +1439,25 @@ impl HQMServer {
 
         behaviour.after_tick(self, &events);
 
+        let mut players = vec![];
+
+        for skater in self.game.world.objects.get_skater_iter() {
+            if let Some(player) = self.players.get(skater.connected_player_index) {
+                players.push(ReplayTickPlayer {
+                    uuid: player.id,
+                    name: player.player_name.clone(),
+                    team: skater.team,
+                    object_index: skater.object_index,
+                })
+            }
+        }
+
         let new_replay_tick = ReplayTick {
             game_step: self.game.game_step,
             packets: packets.clone(),
-            players: vec![],
+            players,
         };
+
         if self.game.saved_history.len() > 600 {
             self.game.saved_history.pop_back();
         }
