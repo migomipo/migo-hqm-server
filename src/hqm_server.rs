@@ -895,7 +895,8 @@ impl HQMServer {
                             player_index,
                             in_server: true,
                         },
-                        true, true
+                        true,
+                        true,
                     );
 
                     return true;
@@ -996,7 +997,8 @@ impl HQMServer {
                             player_index,
                             in_server: true,
                         },
-                        true, true
+                        true,
+                        true,
                     );
                 }
             } else {
@@ -1020,7 +1022,8 @@ impl HQMServer {
                             player_index,
                             in_server: true,
                         },
-                        true, true
+                        true,
+                        true,
                     );
                     self.remove_player_from_dual_control(player_index);
                     return Some(skater);
@@ -1169,7 +1172,8 @@ impl HQMServer {
                             player_index,
                             in_server: true,
                         },
-                        true, true
+                        true,
+                        true,
                     );
                     return true;
                 }
@@ -1532,6 +1536,8 @@ impl HQMServer {
                 if let Some(replay_element) = self.replay_queue.front_mut() {
                     let from = replay_element.from;
                     let saved_history = &self.game.saved_history;
+                    let forced_uuid = replay_element.force_view;
+                    let mut forced_view = None;
                     let tick = self
                         .game
                         .game_step
@@ -1547,13 +1553,14 @@ impl HQMServer {
                         }
 
                         let mut updates = vec![];
-                        for tick_player in tick.players.iter() {
-                            let player =
-                                self.players.iter()
-                                    .filter_map(|x| x)
-                                    .find(|x| x.id == tick_player.uuid);
-                            if player.is_some() {
 
+                        for tick_player in tick.players.iter() {
+                            let player = self
+                                .players
+                                .iter()
+                                .filter_map(|x| x)
+                                .find(|x| x.id == tick_player.uuid);
+                            if player.is_some() {
                             } else {
                                 let new_player_index = self.find_empty_player_slot();
                                 if let Some(new_player_index) = new_player_index {
@@ -1565,17 +1572,26 @@ impl HQMServer {
                                         is_muted: HQMMuteStatus::NotMuted,
                                         hand: HQMSkaterHand::Right,
                                         mass: 1.0,
-                                        input: Default::default()
+                                        input: Default::default(),
                                     };
                                     self.players.add_player(new_player_index, new_player);
                                     let update = HQMMessage::PlayerUpdate {
                                         player_name: tick_player.name.clone(),
                                         object: Some((tick_player.object_index, tick_player.team)),
                                         player_index: new_player_index,
-                                        in_server: true
+                                        in_server: true,
                                     };
                                     updates.push(update);
                                 };
+                            }
+                        }
+
+                        for (player_index, player) in self.players.iter().enumerate() {
+                            if let Some(player) = player {
+                                if forced_uuid == Some(player.id) {
+                                    forced_view = Some(player_index);
+                                    continue;
+                                }
                             }
                         }
 
@@ -1593,7 +1609,7 @@ impl HQMServer {
                         self.game.saved_pings.push_front(Instant::now());
 
                         self.game.packet = self.game.packet.wrapping_add(1);
-                        (game_step, None)
+                        (game_step, forced_view)
                     } else {
                         self.replay_queue.pop_front();
                         self.game_step(behaviour, write_buf);
@@ -1705,11 +1721,12 @@ impl HQMServer {
         &mut self,
         start_step: u32,
         end_step: u32,
-        force_view: Option<usize>,
+        force_view: Option<Uuid>,
     ) {
         if start_step > end_step {
             panic!("start_packet must be less than or equal to end_packet")
         }
+
         self.replay_queue.push_back(ReplayElement {
             from: start_step,
             to: end_step,
@@ -1734,7 +1751,7 @@ pub(crate) struct ReplayTickPlayer {
 pub(crate) struct ReplayElement {
     from: u32,
     to: u32,
-    force_view: Option<usize>,
+    force_view: Option<Uuid>,
 }
 
 pub async fn run_server<B: HQMServerBehaviour>(

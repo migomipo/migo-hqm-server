@@ -11,6 +11,7 @@ use std::f32::consts::PI;
 use std::rc::Rc;
 use std::time::Instant;
 
+#[derive(Debug)]
 pub struct HQMSkaterObjectRef<'a> {
     pub connected_player_index: usize,
     pub object_index: usize,
@@ -18,6 +19,7 @@ pub struct HQMSkaterObjectRef<'a> {
     pub skater: &'a HQMSkater,
 }
 
+#[derive(Debug)]
 pub struct HQMSkaterObjectRefMut<'a> {
     pub connected_player_index: usize,
     pub object_index: usize,

@@ -277,7 +277,15 @@ impl HQMMatchBehaviour {
 
         let gamestep = server.game.game_step;
 
-        server.add_replay_to_queue(self.faceoff_game_step.max(gamestep - 500), gamestep, None);
+        let force_uuid = goal_scorer_index
+            .and_then(|x| server.players.get(x))
+            .map(|x| x.id);
+
+        server.add_replay_to_queue(
+            self.faceoff_game_step.max(gamestep - 500),
+            gamestep,
+            force_uuid,
+        );
     }
 
     fn handle_events(
