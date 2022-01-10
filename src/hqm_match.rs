@@ -165,50 +165,57 @@ impl HQMMatchBehaviour {
         server.game.is_intermission_goal = true;
         self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
 
-        let (goal_scorer_index, assist_index, puck_speed_across_line, puck_speed_from_stick) =
-            if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
-                let mut goal_scorer_index = None;
-                let mut assist_index = None;
-                let mut goal_scorer_first_touch = 0;
-                let mut puck_speed_from_stick = None;
-                let puck_speed_across_line = this_puck.body.linear_velocity.norm();
+        let (
+            goal_scorer_index,
+            assist_index,
+            puck_speed_across_line,
+            puck_speed_from_stick,
+            last_touch,
+        ) = if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
+            let mut goal_scorer_index = None;
+            let mut assist_index = None;
+            let mut goal_scorer_first_touch = 0;
+            let mut puck_speed_from_stick = None;
+            let last_touch = this_puck.touches.get(0).map(|x| x.player_index);
+            let puck_speed_across_line = this_puck.body.linear_velocity.norm();
 
-                for touch in this_puck.touches.iter() {
-                    if goal_scorer_index.is_none() {
-                        if touch.team == team {
-                            goal_scorer_index = Some(touch.player_index);
+            for touch in this_puck.touches.iter() {
+                if goal_scorer_index.is_none() {
+                    if touch.team == team {
+                        goal_scorer_index = Some(touch.player_index);
+                        goal_scorer_first_touch = touch.first_time;
+                        puck_speed_from_stick = Some(touch.puck_speed);
+                    }
+                } else {
+                    if touch.team == team {
+                        if Some(touch.player_index) == goal_scorer_index {
                             goal_scorer_first_touch = touch.first_time;
-                            puck_speed_from_stick = Some(touch.puck_speed);
-                        }
-                    } else {
-                        if touch.team == team {
-                            if Some(touch.player_index) == goal_scorer_index {
-                                goal_scorer_first_touch = touch.first_time;
-                            } else {
-                                // This is the first player on the scoring team that touched it apart from the goal scorer
-                                // If more than 10 seconds passed between the goal scorer's first touch
-                                // and this last touch, it doesn't count as an assist
+                        } else {
+                            // This is the first player on the scoring team that touched it apart from the goal scorer
+                            // If more than 10 seconds passed between the goal scorer's first touch
+                            // and this last touch, it doesn't count as an assist
 
-                                let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
+                            let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
 
-                                if diff <= 1000 {
-                                    assist_index = Some(touch.player_index)
-                                }
-                                break;
+                            if diff <= 1000 {
+                                assist_index = Some(touch.player_index)
                             }
+                            break;
                         }
                     }
                 }
+            }
 
-                (
-                    goal_scorer_index,
-                    assist_index,
-                    puck_speed_across_line,
-                    puck_speed_from_stick,
-                )
-            } else {
-                return;
-            };
+            (
+                goal_scorer_index,
+                assist_index,
+                puck_speed_across_line,
+                puck_speed_from_stick,
+                last_touch,
+            )
+        } else {
+            return;
+        };
 
         let (new_score, opponent_score) = match team {
             HQMTeam::Red => (server.game.red_score, server.game.blue_score),
@@ -277,14 +284,12 @@ impl HQMMatchBehaviour {
 
         let gamestep = server.game.game_step;
 
-        let force_uuid = goal_scorer_index
-            .and_then(|x| server.players.get(x))
-            .map(|x| x.id);
+        let force_view = goal_scorer_index.or(last_touch);
 
         server.add_replay_to_queue(
             self.faceoff_game_step.max(gamestep - 500),
             gamestep,
-            force_uuid,
+            force_view,
         );
     }
 
