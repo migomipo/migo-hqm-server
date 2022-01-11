@@ -57,6 +57,8 @@ pub struct HQMMatchBehaviour {
     team_switch_timer: HashMap<usize, u32>,
     started_as_goalie: Vec<usize>,
     faceoff_game_step: u32,
+    step_where_period_ended: u32,
+    too_late_printed_this_period: bool,
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -87,6 +89,8 @@ impl HQMMatchBehaviour {
             team_switch_timer: Default::default(),
             started_as_goalie: vec![],
             faceoff_game_step: 0,
+            too_late_printed_this_period: false,
+            step_where_period_ended: 0,
         }
     }
 
@@ -296,6 +300,29 @@ impl HQMMatchBehaviour {
         }
     }
 
+    fn handle_events_end_of_period(
+        &mut self,
+        server: &mut HQMServer,
+        events: &[HQMSimulationEvent],
+    ) {
+        for event in events {
+            if let HQMSimulationEvent::PuckEnteredNet { .. } = event {
+                let time = server
+                    .game
+                    .game_step
+                    .saturating_sub(self.step_where_period_ended);
+                if time <= 300 && !self.too_late_printed_this_period {
+                    let seconds = time / 100;
+                    let centi = time % 100;
+                    self.too_late_printed_this_period = true;
+                    let s = format!("{}.{:02} seconds too late!", seconds, centi);
+
+                    server.add_server_chat_message(s);
+                }
+            }
+        }
+    }
+
     fn handle_events(
         &mut self,
         server: &mut HQMServer,
@@ -305,14 +332,6 @@ impl HQMMatchBehaviour {
         offside: HQMOffsideConfiguration,
         icing: HQMIcingConfiguration,
     ) {
-        if server.game.time_break > 0
-            || server.game.time == 0
-            || server.game.game_over
-            || server.game.period == 0
-        {
-            return;
-        }
-
         for event in events {
             match event {
                 HQMSimulationEvent::PuckEnteredNet { team, puck } => {
@@ -1090,6 +1109,8 @@ impl HQMMatchBehaviour {
             if server.game.time == 0 {
                 server.game.period += 1;
                 server.game.time_break = intermission_time;
+                self.step_where_period_ended = server.game.game_step;
+                self.too_late_printed_this_period = false;
                 self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
                 self.period_over(server);
             }
@@ -1179,7 +1200,16 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
     }
 
     fn after_tick(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
-        if !self.paused {
+        if server.game.time == 0 && server.game.period > 1 {
+            self.handle_events_end_of_period(server, events);
+        } else if server.game.time_break > 0
+            || server.game.time == 0
+            || server.game.game_over
+            || server.game.period == 0
+            || self.paused
+        {
+            // Nothing
+        } else {
             self.handle_events(
                 server,
                 events,
@@ -1189,26 +1219,29 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 self.config.icing,
             );
 
+            let rules_state = if let HQMOffsideStatus::Offside(_) = self.offside_status {
+                HQMRulesState::Offside
+            } else if let HQMIcingStatus::Icing(_) = self.icing_status {
+                HQMRulesState::Icing
+            } else {
+                let icing_warning = matches!(self.icing_status, HQMIcingStatus::Warning(_, _));
+                let offside_warning =
+                    matches!(self.offside_status, HQMOffsideStatus::Warning(_, _, _));
+                HQMRulesState::Regular {
+                    offside_warning,
+                    icing_warning,
+                }
+            };
+
+            server.game.rules_state = rules_state;
+        }
+        if !self.paused {
             self.update_clock(
                 server,
                 self.config.time_period * 100,
                 self.config.time_intermission * 100,
             );
         }
-        let rules_state = if let HQMOffsideStatus::Offside(_) = self.offside_status {
-            HQMRulesState::Offside
-        } else if let HQMIcingStatus::Icing(_) = self.icing_status {
-            HQMRulesState::Icing
-        } else {
-            let icing_warning = matches!(self.icing_status, HQMIcingStatus::Warning(_, _));
-            let offside_warning = matches!(self.offside_status, HQMOffsideStatus::Warning(_, _, _));
-            HQMRulesState::Regular {
-                offside_warning,
-                icing_warning,
-            }
-        };
-
-        server.game.rules_state = rules_state;
     }
 
     fn handle_command(
