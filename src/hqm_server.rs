@@ -26,10 +26,6 @@ use crate::hqm_simulate::HQMSimulationEvent;
 
 const GAME_HEADER: &[u8] = b"Hock";
 
-pub struct HQMSavedTick {
-    packets: Vec<HQMObjectPacket>,
-}
-
 struct HQMServerReceivedData {
     addr: SocketAddr,
     data: Bytes,
@@ -108,6 +104,7 @@ pub struct HQMServer {
     pub(crate) allow_join: bool,
     pub config: HQMServerConfiguration,
     pub game: HQMGame,
+    replay_queue: VecDeque<ReplayElement>,
     game_id: u32,
     pub is_muted: bool,
 }
@@ -189,8 +186,6 @@ impl HQMServer {
             if let Some(player) = player {
                 let is_actual_player = match player.data {
                     HQMServerPlayerData::NetworkPlayer { .. } => true,
-                    HQMServerPlayerData::Bot { .. } => true,
-                    HQMServerPlayerData::Replay { .. } => false,
                     HQMServerPlayerData::DualControl { .. } => false,
                 };
                 if is_actual_player {
@@ -770,7 +765,7 @@ impl HQMServer {
                 let player = self.players.get(player_index).unwrap();
                 player.player_name.clone()
             };
-            self.remove_player(player_index);
+            self.remove_player(player_index, true);
             info!("{} ({}) exited server", player_name, player_index);
             let msg = format!("{} exited", player_name);
             self.add_server_chat_message(msg);
@@ -798,7 +793,7 @@ impl HQMServer {
                     in_server: true,
                 };
 
-                self.add_global_message(update, true);
+                self.add_global_message(update, true, true);
 
                 let welcome = self.config.welcome.clone();
                 for welcome_msg in welcome {
@@ -811,14 +806,9 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn remove_player(&mut self, player_index: usize) {
+    pub(crate) fn remove_player(&mut self, player_index: usize, on_replay: bool) {
         if let Some(player) = self.players.get(player_index) {
-            let update = HQMMessage::PlayerUpdate {
-                player_name: player.player_name.clone(),
-                object: None,
-                player_index,
-                in_server: false,
-            };
+            let player_name = player.player_name.clone();
             let is_admin = player.is_admin;
 
             match &player.data {
@@ -835,15 +825,17 @@ impl HQMServer {
                         set_view_player_index(stick, &mut self.players, stick)
                     }
                 }
-                HQMServerPlayerData::Bot {} => {}
-                HQMServerPlayerData::Replay {} => {
-                    return; // Replay bots can not be removed like that
-                }
             }
 
-            self.game.world.remove_player(player_index);
+            let update = HQMMessage::PlayerUpdate {
+                player_name,
+                object: None,
+                player_index,
+                in_server: false,
+            };
 
-            self.add_global_message(update, true);
+            self.add_global_message(update, true, on_replay);
+            self.game.world.remove_player(player_index);
 
             self.players.remove_player(player_index as usize);
 
@@ -886,7 +878,7 @@ impl HQMServer {
     pub fn move_to_spectator(&mut self, player_index: usize) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
             if let HQMServerPlayerData::DualControl { .. } = player.data {
-                self.remove_player(player_index);
+                self.remove_player(player_index, true);
                 return true;
             } else {
                 if self.game.world.remove_player(player_index).is_some() {
@@ -899,6 +891,7 @@ impl HQMServer {
                             player_index,
                             in_server: true,
                         },
+                        true,
                         true,
                     );
 
@@ -1001,6 +994,7 @@ impl HQMServer {
                             in_server: true,
                         },
                         true,
+                        true,
                     );
                 }
             } else {
@@ -1024,6 +1018,7 @@ impl HQMServer {
                             player_index,
                             in_server: true,
                         },
+                        true,
                         true,
                     );
                     self.remove_player_from_dual_control(player_index);
@@ -1105,11 +1100,12 @@ impl HQMServer {
                 let old_stick = *s;
 
                 if movement.is_none() && stick.is_none() {
-                    self.remove_player(dual_control_player_index);
+                    self.remove_player(dual_control_player_index, true);
                 } else {
                     *m = movement;
                     *s = stick;
                     player.player_name = player_name.clone();
+                    player.id = Uuid::new_v4();
                     if let Some(hand) = hand {
                         player.hand = hand;
                     }
@@ -1119,7 +1115,7 @@ impl HQMServer {
                         player_index: dual_control_player_index,
                         in_server: true,
                     };
-                    self.add_global_message(msg, true);
+                    self.add_global_message(msg, true, true);
                     if let Some(old_movement) = old_movement {
                         set_view_player_index(old_movement, &mut self.players, old_movement);
                     }
@@ -1172,6 +1168,7 @@ impl HQMServer {
                             player_index,
                             in_server: true,
                         },
+                        true,
                         true,
                     );
                     return true;
@@ -1267,7 +1264,7 @@ impl HQMServer {
                 player_index: Some(sender_index),
                 message: Cow::Owned(message),
             };
-            self.add_global_message(chat, false);
+            self.add_global_message(chat, false, true);
         }
     }
 
@@ -1276,7 +1273,7 @@ impl HQMServer {
             player_index: None,
             message: Cow::Owned(message),
         };
-        self.add_global_message(chat, false);
+        self.add_global_message(chat, false, true);
     }
 
     pub fn add_server_chat_message_str(&mut self, message: &'static str) {
@@ -1284,7 +1281,7 @@ impl HQMServer {
             player_index: None,
             message: Cow::Borrowed(message),
         };
-        self.add_global_message(chat, false);
+        self.add_global_message(chat, false, true);
     }
 
     pub fn add_directed_chat_message(
@@ -1351,12 +1348,14 @@ impl HQMServer {
             goal_player_index,
             assist_player_index,
         };
-        self.add_global_message(message, true);
+        self.add_global_message(message, true, true);
     }
 
-    fn add_global_message(&mut self, message: HQMMessage, persistent: bool) {
+    fn add_global_message(&mut self, message: HQMMessage, persistent: bool, replay: bool) {
         let rc = Rc::new(message);
-        self.game.replay_messages.push(rc.clone());
+        if replay {
+            self.game.replay_messages.push(rc.clone());
+        }
         if persistent {
             self.game.persistent_messages.push(rc.clone());
         }
@@ -1387,6 +1386,135 @@ impl HQMServer {
         return self.players.iter().position(|x| x.is_none());
     }
 
+    fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B, write_buf: &mut [u8]) {
+        self.game.game_step = self.game.game_step.wrapping_add(1);
+
+        behaviour.before_tick(self);
+
+        let mut dual_control_updates = vec![];
+        for (player_index, player) in self.players.iter().enumerate() {
+            if let Some(player) = player {
+                if let HQMServerPlayerData::DualControl { movement, stick } = &player.data {
+                    let mut current_input = player.input.clone();
+                    let movement = movement
+                        .and_then(|x| self.players.get(x))
+                        .map(|x| x.input.clone());
+                    let stick = stick
+                        .and_then(|x| self.players.get(x))
+                        .map(|x| x.input.clone());
+                    if let Some(movement) = movement {
+                        current_input.fwbw = movement.fwbw;
+                        current_input.keys = movement.keys & 0x13;
+                        current_input.turn = movement.turn;
+                        current_input.head_rot = movement.head_rot;
+                        current_input.body_rot = movement.body_rot;
+                    }
+                    if let Some(stick) = stick {
+                        current_input.stick = stick.stick;
+                        current_input.stick_angle = stick.stick_angle;
+                    }
+                    dual_control_updates.push((player_index, current_input))
+                }
+            }
+        }
+
+        for (player_index, new_input) in dual_control_updates {
+            self.players
+                .get_mut(player_index)
+                .map(|x| x.input = new_input);
+        }
+
+        for skater in self.game.world.objects.get_skater_iter_mut() {
+            if let Some(player) = self.players.get(skater.connected_player_index) {
+                skater.skater.input = player.input.clone();
+            }
+        }
+
+        let events = self.game.world.simulate_step();
+
+        let packets = get_packets(&self.game.world.objects.objects);
+
+        behaviour.after_tick(self, &events);
+
+        if self.game.history_length > 0 {
+            let mut players = vec![];
+
+            for skater in self.game.world.objects.get_skater_iter() {
+                if let Some(player) = self.players.get(skater.connected_player_index) {
+                    players.push(ReplayTickPlayer {
+                        uuid: player.id,
+                        name: player.player_name.clone(),
+                        team: skater.team,
+                        object_index: skater.object_index,
+                    })
+                }
+            }
+
+            let new_replay_tick = ReplayTick {
+                game_step: self.game.game_step,
+                packets: packets.clone(),
+                players,
+            };
+
+            self.game
+                .saved_history
+                .truncate(self.game.history_length - 1);
+            self.game.saved_history.push_front(new_replay_tick);
+        } else {
+            self.game.saved_history.clear();
+        }
+
+        self.game
+            .saved_packets
+            .truncate(self.game.saved_packets.capacity() - 1);
+        self.game.saved_packets.push_front(packets);
+        self.game.packet = self.game.packet.wrapping_add(1);
+        self.game
+            .saved_pings
+            .truncate(self.game.saved_pings.capacity() - 1);
+        self.game.saved_pings.push_front(Instant::now());
+
+        if self.config.replays_enabled {
+            write_replay(&mut self.game, write_buf);
+        }
+    }
+
+    fn remove_inactive_players<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
+        let mut chat_messages = vec![];
+
+        let inactive_players: Vec<(usize, Rc<String>)> = self
+            .players
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(player_index, player)| {
+                if let Some(player) = player {
+                    if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
+                        data.inactivity += 1;
+                        if data.inactivity > 500 {
+                            Some((player_index, player.player_name.clone()))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for (player_index, player_name) in inactive_players {
+            behaviour.before_player_exit(self, player_index);
+            self.remove_player(player_index, true);
+            info!("{} ({}) timed out", player_name, player_index);
+            let chat_msg = format!("{} timed out", player_name);
+            chat_messages.push(chat_msg);
+        }
+        for message in chat_messages {
+            self.add_server_chat_message(message);
+        }
+    }
+
     async fn tick<B: HQMServerBehaviour>(
         &mut self,
         socket: &UdpSocket,
@@ -1395,112 +1523,76 @@ impl HQMServer {
     ) {
         if self.player_count() != 0 {
             self.game.active = true;
-            tokio::task::block_in_place(|| {
-                let mut chat_messages = vec![];
+            let (game_step, forced_view) = tokio::task::block_in_place(|| {
+                self.remove_inactive_players(behaviour);
 
-                let inactive_players: Vec<(usize, Rc<String>)> = self
-                    .players
-                    .iter_mut()
-                    .enumerate()
-                    .filter_map(|(player_index, player)| {
-                        if let Some(player) = player {
-                            if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
-                                data.inactivity += 1;
-                                if data.inactivity > 500 {
-                                    Some((player_index, player.player_name.clone()))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
+                if let Some(replay_element) = self.replay_queue.front_mut() {
+                    let from = replay_element.from;
+                    let saved_history = &self.game.saved_history;
+
+                    let forced_view = replay_element.force_view;
+                    let i = self.game.game_step.checked_sub(from);
+                    if let Some(i) = i {
+                        let tick = if let Some(tick) = saved_history.get(i as usize) {
+                            replay_element.from += 1;
+                            tick
                         } else {
-                            None
+                            let new_from = self.game.game_step - (saved_history.len() as u32 - 1);
+                            replay_element.from = new_from + 1;
+                            &saved_history[saved_history.len() - 1]
+                        };
+
+                        let game_step = tick.game_step;
+                        let packets = tick.packets.clone();
+
+                        if replay_element.from >= replay_element.to {
+                            self.replay_queue.pop_front();
                         }
-                    })
-                    .collect();
-                for (player_index, player_name) in inactive_players {
-                    behaviour.before_player_exit(self, player_index);
-                    self.remove_player(player_index);
-                    info!("{} ({}) timed out", player_name, player_index);
-                    let chat_msg = format!("{} timed out", player_name);
-                    chat_messages.push(chat_msg);
-                }
-                for message in chat_messages {
-                    self.add_server_chat_message(message);
-                }
 
-                behaviour.before_tick(self);
+                        self.game
+                            .saved_packets
+                            .truncate(self.game.saved_packets.capacity() - 1);
+                        self.game.saved_packets.push_front(packets);
+                        self.game
+                            .saved_pings
+                            .truncate(self.game.saved_pings.capacity() - 1);
+                        self.game.saved_pings.push_front(Instant::now());
 
-                let mut dual_control_updates = vec![];
-                for (player_index, player) in self.players.iter().enumerate() {
-                    if let Some(player) = player {
-                        if let HQMServerPlayerData::DualControl { movement, stick } = &player.data {
-                            let mut current_input = player.input.clone();
-                            let movement = movement
-                                .and_then(|x| self.players.get(x))
-                                .map(|x| x.input.clone());
-                            let stick = stick
-                                .and_then(|x| self.players.get(x))
-                                .map(|x| x.input.clone());
-                            if let Some(movement) = movement {
-                                current_input.fwbw = movement.fwbw;
-                                current_input.keys = movement.keys & 0x13;
-                                current_input.turn = movement.turn;
-                                current_input.head_rot = movement.head_rot;
-                                current_input.body_rot = movement.body_rot;
-                            }
-                            if let Some(stick) = stick {
-                                current_input.stick = stick.stick;
-                                current_input.stick_angle = stick.stick_angle;
-                            }
-                            dual_control_updates.push((player_index, current_input))
-                        }
+                        self.game.packet = self.game.packet.wrapping_add(1);
+                        (game_step, forced_view)
+                    } else {
+                        self.replay_queue.pop_front();
+                        self.game_step(behaviour, write_buf);
+                        (self.game.game_step, None)
                     }
+                } else {
+                    self.game_step(behaviour, write_buf);
+                    (self.game.game_step, None)
                 }
-
-                for (player_index, new_input) in dual_control_updates {
-                    self.players
-                        .get_mut(player_index)
-                        .map(|x| x.input = new_input);
-                }
-
-                for skater in self.game.world.objects.get_skater_iter_mut() {
-                    if let Some(player) = self.players.get(skater.connected_player_index) {
-                        skater.skater.input = player.input.clone();
-                    }
-                }
-
-                let events = self.game.world.simulate_step();
-
-                let packets = get_packets(&self.game.world.objects.objects);
-
-                self.game
-                    .saved_ticks
-                    .truncate(self.game.saved_ticks.capacity() - 1);
-                self.game.saved_ticks.push_front(HQMSavedTick { packets });
-                self.game
-                    .saved_pings
-                    .truncate(self.game.saved_pings.capacity() - 1);
-                self.game.saved_pings.push_front(Instant::now());
-
-                self.game.packet = self.game.packet.wrapping_add(1);
-                self.game.game_step = self.game.game_step.wrapping_add(1);
-
-                behaviour.after_tick(self, &events);
             });
 
             send_updates(
                 self.game_id,
-                &self.game,
+                &self.game.saved_packets,
+                game_step,
+                self.game.game_over,
+                self.game.red_score,
+                self.game.blue_score,
+                self.game.time,
+                if self.game.is_intermission_goal {
+                    self.game.time_break
+                } else {
+                    0
+                },
+                self.game.period,
+                self.game.rules_state,
+                self.game.packet,
                 &self.players.players,
                 socket,
                 write_buf,
+                forced_view,
             )
             .await;
-            if self.config.replays_enabled {
-                write_replay(&mut self.game, write_buf);
-            }
         } else if self.game.active {
             info!("Game {} abandoned", self.game_id);
             let new_game = behaviour.create_game();
@@ -1570,9 +1662,46 @@ impl HQMServer {
             }
         }
         for message in messages {
-            self.add_global_message(message, true);
+            self.add_global_message(message, true, true);
         }
+        self.replay_queue.clear();
     }
+
+    pub fn add_replay_to_queue(
+        &mut self,
+        start_step: u32,
+        end_step: u32,
+        force_view: Option<usize>,
+    ) {
+        if start_step > end_step {
+            panic!("start_packet must be less than or equal to end_packet")
+        }
+
+        self.replay_queue.push_back(ReplayElement {
+            from: start_step,
+            to: end_step,
+            force_view,
+        });
+    }
+}
+
+pub(crate) struct ReplayTick {
+    game_step: u32,
+    packets: Vec<HQMObjectPacket>,
+    players: Vec<ReplayTickPlayer>,
+}
+
+pub(crate) struct ReplayTickPlayer {
+    uuid: Uuid,
+    name: Rc<String>,
+    team: HQMTeam,
+    object_index: usize,
+}
+
+pub(crate) struct ReplayElement {
+    from: u32,
+    to: u32,
+    force_view: Option<usize>,
 }
 
 pub async fn run_server<B: HQMServerBehaviour>(
@@ -1597,6 +1726,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
         is_muted: false,
         config,
         game_id: 1,
+        replay_queue: VecDeque::new(),
     };
     info!("Server started, new game {} started", 1);
 
@@ -1749,22 +1879,22 @@ fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage) {
 
 fn write_objects(
     writer: &mut HQMMessageWriter,
-    game: &HQMGame,
-    packets: &VecDeque<HQMSavedTick>,
+    packets: &VecDeque<Vec<HQMObjectPacket>>,
+    current_packet: u32,
     known_packet: u32,
 ) {
-    let current_packets = &packets[0].packets;
+    let current_packets = packets[0].as_slice();
 
     let old_packets = {
         let diff = if known_packet == u32::MAX {
             None
         } else {
-            game.packet.checked_sub(known_packet)
+            current_packet.checked_sub(known_packet)
         };
         if let Some(diff) = diff {
             let index = diff as usize;
-            if index < packets.len() && index < 192 && index > 0 {
-                Some(&packets[index].packets)
+            if index < 192 && index > 0 {
+                packets.get(index).map(Vec::as_slice)
             } else {
                 None
             }
@@ -1773,7 +1903,7 @@ fn write_objects(
         }
     };
 
-    writer.write_u32_aligned(game.packet);
+    writer.write_u32_aligned(current_packet);
     writer.write_u32_aligned(known_packet);
 
     for i in 0..32 {
@@ -1873,9 +2003,9 @@ fn write_replay(game: &mut HQMGame, write_buf: &mut [u8]) {
     );
     writer.write_bits(8, game.period);
 
-    let packets = &game.saved_ticks;
+    let packets = &game.saved_packets;
 
-    write_objects(&mut writer, game, packets, game.replay_last_packet);
+    write_objects(&mut writer, packets, game.packet, game.replay_last_packet);
     game.replay_last_packet = game.packet;
 
     let remaining_messages = game.replay_messages.len() - game.replay_msg_pos;
@@ -1897,13 +2027,21 @@ fn write_replay(game: &mut HQMGame, write_buf: &mut [u8]) {
 
 async fn send_updates(
     game_id: u32,
-    game: &HQMGame,
+    packets: &VecDeque<Vec<HQMObjectPacket>>,
+    game_step: u32,
+    game_over: bool,
+    red_score: u32,
+    blue_score: u32,
+    time: u32,
+    time_break: u32,
+    period: u32,
+    rules_state: HQMRulesState,
+    current_packet: u32,
     players: &[Option<HQMServerPlayer>],
     socket: &UdpSocket,
     write_buf: &mut [u8],
+    force_view: Option<usize>,
 ) {
-    let packets = &game.saved_ticks;
-
     for player in players.iter() {
         if let Some(player) = player {
             if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
@@ -1917,28 +2055,22 @@ async fn send_updates(
                     writer.write_bytes_aligned(GAME_HEADER);
                     writer.write_byte_aligned(5);
                     writer.write_u32_aligned(game_id);
-                    writer.write_u32_aligned(game.game_step);
+                    writer.write_u32_aligned(game_step);
                     writer.write_bits(
                         1,
-                        match game.game_over {
+                        match game_over {
                             true => 1,
                             false => 0,
                         },
                     );
-                    writer.write_bits(8, game.red_score);
-                    writer.write_bits(8, game.blue_score);
-                    writer.write_bits(16, game.time);
+                    writer.write_bits(8, red_score);
+                    writer.write_bits(8, blue_score);
+                    writer.write_bits(16, time);
 
-                    writer.write_bits(
-                        16,
-                        if game.is_intermission_goal {
-                            game.time_break
-                        } else {
-                            0
-                        },
-                    );
-                    writer.write_bits(8, game.period);
-                    writer.write_bits(8, data.view_player_index as u32);
+                    writer.write_bits(16, time_break);
+                    writer.write_bits(8, period);
+                    let view = force_view.unwrap_or(data.view_player_index);
+                    writer.write_bits(8, view as u32);
 
                     // if using a non-cryptic version, send ping
                     if data.client_version.has_ping() {
@@ -1947,7 +2079,7 @@ async fn send_updates(
 
                     // if baba's second version or above, send rules
                     if data.client_version.has_rules() {
-                        let num = match game.rules_state {
+                        let num = match rules_state {
                             HQMRulesState::Regular {
                                 offside_warning,
                                 icing_warning,
@@ -1967,7 +2099,7 @@ async fn send_updates(
                         writer.write_u32_aligned(num);
                     }
 
-                    write_objects(&mut writer, game, packets, data.known_packet);
+                    write_objects(&mut writer, packets, current_packet, data.known_packet);
 
                     let (start, remaining_messages) = if data.known_msgpos > data.messages.len() {
                         (data.messages.len(), 0)
@@ -2128,8 +2260,6 @@ pub enum HQMServerPlayerData {
     NetworkPlayer {
         data: HQMNetworkPlayerData,
     },
-    Bot {},
-    Replay {},
     DualControl {
         movement: Option<usize>,
         stick: Option<usize>,
@@ -2237,14 +2367,14 @@ pub trait HQMServerBehaviour {
     fn get_number_of_players(&self) -> u32;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum HQMObjectPacket {
     None,
     Puck(HQMPuckPacket),
     Skater(HQMSkaterPacket),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HQMSkaterPacket {
     pub pos: (u32, u32, u32),
     pub rot: (u32, u32),
@@ -2254,7 +2384,7 @@ pub struct HQMSkaterPacket {
     pub body_rot: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HQMPuckPacket {
     pub pos: (u32, u32, u32),
     pub rot: (u32, u32),

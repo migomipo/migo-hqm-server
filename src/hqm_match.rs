@@ -28,6 +28,7 @@ pub struct HQMMatchConfiguration {
     pub cheats_enabled: bool,
     pub use_mph: bool,
     pub dual_control: bool,
+    pub goal_replay: bool,
 
     pub spawn_point: HQMSpawnPoint,
 }
@@ -55,6 +56,10 @@ pub struct HQMMatchBehaviour {
     preferred_positions: HashMap<usize, String>,
     team_switch_timer: HashMap<usize, u32>,
     started_as_goalie: Vec<usize>,
+    faceoff_game_step: u32,
+    step_where_period_ended: u32,
+    too_late_printed_this_period: bool,
+    start_next_replay: Option<(u32, u32, Option<usize>)>,
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -84,6 +89,10 @@ impl HQMMatchBehaviour {
             preferred_positions: HashMap::new(),
             team_switch_timer: Default::default(),
             started_as_goalie: vec![],
+            faceoff_game_step: 0,
+            too_late_printed_this_period: false,
+            step_where_period_ended: 0,
+            start_next_replay: None,
         }
     }
 
@@ -139,6 +148,8 @@ impl HQMMatchBehaviour {
         } else {
             HQMOffsideStatus::InNeutralZone
         };
+
+        self.faceoff_game_step = server.game.game_step;
     }
 
     fn call_goal(
@@ -161,50 +172,57 @@ impl HQMMatchBehaviour {
         server.game.is_intermission_goal = true;
         self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
 
-        let (goal_scorer_index, assist_index, puck_speed_across_line, puck_speed_from_stick) =
-            if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
-                let mut goal_scorer_index = None;
-                let mut assist_index = None;
-                let mut goal_scorer_first_touch = 0;
-                let mut puck_speed_from_stick = None;
-                let puck_speed_across_line = this_puck.body.linear_velocity.norm();
+        let (
+            goal_scorer_index,
+            assist_index,
+            puck_speed_across_line,
+            puck_speed_from_stick,
+            last_touch,
+        ) = if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
+            let mut goal_scorer_index = None;
+            let mut assist_index = None;
+            let mut goal_scorer_first_touch = 0;
+            let mut puck_speed_from_stick = None;
+            let last_touch = this_puck.touches.get(0).map(|x| x.player_index);
+            let puck_speed_across_line = this_puck.body.linear_velocity.norm();
 
-                for touch in this_puck.touches.iter() {
-                    if goal_scorer_index.is_none() {
-                        if touch.team == team {
-                            goal_scorer_index = Some(touch.player_index);
+            for touch in this_puck.touches.iter() {
+                if goal_scorer_index.is_none() {
+                    if touch.team == team {
+                        goal_scorer_index = Some(touch.player_index);
+                        goal_scorer_first_touch = touch.first_time;
+                        puck_speed_from_stick = Some(touch.puck_speed);
+                    }
+                } else {
+                    if touch.team == team {
+                        if Some(touch.player_index) == goal_scorer_index {
                             goal_scorer_first_touch = touch.first_time;
-                            puck_speed_from_stick = Some(touch.puck_speed);
-                        }
-                    } else {
-                        if touch.team == team {
-                            if Some(touch.player_index) == goal_scorer_index {
-                                goal_scorer_first_touch = touch.first_time;
-                            } else {
-                                // This is the first player on the scoring team that touched it apart from the goal scorer
-                                // If more than 10 seconds passed between the goal scorer's first touch
-                                // and this last touch, it doesn't count as an assist
+                        } else {
+                            // This is the first player on the scoring team that touched it apart from the goal scorer
+                            // If more than 10 seconds passed between the goal scorer's first touch
+                            // and this last touch, it doesn't count as an assist
 
-                                let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
+                            let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
 
-                                if diff <= 1000 {
-                                    assist_index = Some(touch.player_index)
-                                }
-                                break;
+                            if diff <= 1000 {
+                                assist_index = Some(touch.player_index)
                             }
+                            break;
                         }
                     }
                 }
+            }
 
-                (
-                    goal_scorer_index,
-                    assist_index,
-                    puck_speed_across_line,
-                    puck_speed_from_stick,
-                )
-            } else {
-                return;
-            };
+            (
+                goal_scorer_index,
+                assist_index,
+                puck_speed_across_line,
+                puck_speed_from_stick,
+                last_touch,
+            )
+        } else {
+            return;
+        };
 
         let (new_score, opponent_score) = match team {
             HQMTeam::Red => (server.game.red_score, server.game.blue_score),
@@ -270,6 +288,41 @@ impl HQMMatchBehaviour {
         } else {
             server.game.time_break = time_break;
         }
+
+        let gamestep = server.game.game_step;
+
+        let force_view = goal_scorer_index.or(last_touch);
+
+        if self.config.goal_replay {
+            self.start_next_replay = Some((
+                self.faceoff_game_step.max(gamestep - 600),
+                gamestep + 200,
+                force_view,
+            ));
+        }
+    }
+
+    fn handle_events_end_of_period(
+        &mut self,
+        server: &mut HQMServer,
+        events: &[HQMSimulationEvent],
+    ) {
+        for event in events {
+            if let HQMSimulationEvent::PuckEnteredNet { .. } = event {
+                let time = server
+                    .game
+                    .game_step
+                    .saturating_sub(self.step_where_period_ended);
+                if time <= 300 && !self.too_late_printed_this_period {
+                    let seconds = time / 100;
+                    let centi = time % 100;
+                    self.too_late_printed_this_period = true;
+                    let s = format!("{}.{:02} seconds too late!", seconds, centi);
+
+                    server.add_server_chat_message(s);
+                }
+            }
+        }
     }
 
     fn handle_events(
@@ -281,14 +334,6 @@ impl HQMMatchBehaviour {
         offside: HQMOffsideConfiguration,
         icing: HQMIcingConfiguration,
     ) {
-        if server.game.time_break > 0
-            || server.game.time == 0
-            || server.game.game_over
-            || server.game.period == 0
-        {
-            return;
-        }
-
         for event in events {
             match event {
                 HQMSimulationEvent::PuckEnteredNet { team, puck } => {
@@ -1066,6 +1111,8 @@ impl HQMMatchBehaviour {
             if server.game.time == 0 {
                 server.game.period += 1;
                 server.game.time_break = intermission_time;
+                self.step_where_period_ended = server.game.game_step;
+                self.too_late_printed_this_period = false;
                 self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
                 self.period_over(server);
             }
@@ -1155,7 +1202,16 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
     }
 
     fn after_tick(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
-        if !self.paused {
+        if server.game.time == 0 && server.game.period > 1 {
+            self.handle_events_end_of_period(server, events);
+        } else if server.game.time_break > 0
+            || server.game.time == 0
+            || server.game.game_over
+            || server.game.period == 0
+            || self.paused
+        {
+            // Nothing
+        } else {
             self.handle_events(
                 server,
                 events,
@@ -1165,26 +1221,37 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 self.config.icing,
             );
 
+            let rules_state = if let HQMOffsideStatus::Offside(_) = self.offside_status {
+                HQMRulesState::Offside
+            } else if let HQMIcingStatus::Icing(_) = self.icing_status {
+                HQMRulesState::Icing
+            } else {
+                let icing_warning = matches!(self.icing_status, HQMIcingStatus::Warning(_, _));
+                let offside_warning =
+                    matches!(self.offside_status, HQMOffsideStatus::Warning(_, _, _));
+                HQMRulesState::Regular {
+                    offside_warning,
+                    icing_warning,
+                }
+            };
+
+            server.game.rules_state = rules_state;
+        }
+        if !self.paused {
             self.update_clock(
                 server,
                 self.config.time_period * 100,
                 self.config.time_intermission * 100,
             );
         }
-        let rules_state = if let HQMOffsideStatus::Offside(_) = self.offside_status {
-            HQMRulesState::Offside
-        } else if let HQMIcingStatus::Icing(_) = self.icing_status {
-            HQMRulesState::Icing
-        } else {
-            let icing_warning = matches!(self.icing_status, HQMIcingStatus::Warning(_, _));
-            let offside_warning = matches!(self.offside_status, HQMOffsideStatus::Warning(_, _, _));
-            HQMRulesState::Regular {
-                offside_warning,
-                icing_warning,
-            }
-        };
 
-        server.game.rules_state = rules_state;
+        if let Some((start_replay, end_replay, force_view)) = self.start_next_replay {
+            if end_replay <= server.game.game_step {
+                server.add_replay_to_queue(start_replay, end_replay, force_view);
+                server.add_server_chat_message_str("Goal replay");
+                self.start_next_replay = None;
+            }
+        }
     }
 
     fn handle_command(
@@ -1348,6 +1415,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
             self.config.physics_config.clone(),
             self.config.blue_line_location,
         );
+        game.history_length = if self.config.goal_replay { 850 } else { 0 };
         let puck_line_start = game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {

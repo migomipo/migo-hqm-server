@@ -4,13 +4,14 @@ use std::borrow::Cow;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::hqm_server::{HQMPuckPacket, HQMSavedTick, HQMSkaterPacket};
+use crate::hqm_server::{HQMObjectPacket, HQMPuckPacket, HQMSkaterPacket, ReplayTick};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
 use std::rc::Rc;
 use std::time::Instant;
 
+#[derive(Debug)]
 pub struct HQMSkaterObjectRef<'a> {
     pub connected_player_index: usize,
     pub object_index: usize,
@@ -18,6 +19,7 @@ pub struct HQMSkaterObjectRef<'a> {
     pub skater: &'a HQMSkater,
 }
 
+#[derive(Debug)]
 pub struct HQMSkaterObjectRefMut<'a> {
     pub connected_player_index: usize,
     pub object_index: usize,
@@ -254,8 +256,9 @@ pub struct HQMGame {
     pub(crate) replay_msg_pos: usize,
     pub(crate) replay_last_packet: u32,
     pub(crate) replay_messages: Vec<Rc<HQMMessage>>,
-    pub(crate) saved_ticks: VecDeque<HQMSavedTick>,
+    pub(crate) saved_packets: VecDeque<Vec<HQMObjectPacket>>,
     pub(crate) saved_pings: VecDeque<Instant>,
+    pub(crate) saved_history: VecDeque<ReplayTick>,
     pub rules_state: HQMRulesState,
     pub world: HQMGameWorld,
     pub red_score: u32,
@@ -270,6 +273,8 @@ pub struct HQMGame {
     pub(crate) packet: u32,
 
     pub(crate) active: bool,
+
+    pub history_length: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -306,8 +311,9 @@ impl HQMGame {
             replay_msg_pos: 0,
             replay_last_packet: u32::MAX,
             replay_messages: vec![],
-            saved_ticks: VecDeque::with_capacity(256),
+            saved_packets: VecDeque::with_capacity(192),
             saved_pings: VecDeque::with_capacity(100),
+            saved_history: VecDeque::new(),
             rules_state: HQMRulesState::Regular {
                 offside_warning: false,
                 icing_warning: false,
@@ -330,6 +336,7 @@ impl HQMGame {
             game_step: u32::MAX,
             packet: u32::MAX,
             active: false,
+            history_length: 0,
         }
     }
 }

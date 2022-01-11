@@ -251,6 +251,10 @@ async fn main() -> std::io::Result<()> {
                     s.eq_ignore_ascii_case("true")
                 });
 
+                let goal_replay = get_optional(game_section, "goal_replay", false, |s| {
+                    s.eq_ignore_ascii_case("true")
+                });
+
                 let match_config = HQMMatchConfiguration {
                     time_period: rules_time_period,
                     time_warmup: rules_time_warmup,
@@ -264,6 +268,7 @@ async fn main() -> std::io::Result<()> {
                     cheats_enabled,
                     use_mph,
                     dual_control,
+                    goal_replay,
                     spawn_point,
                     physics_config,
                     team_max: server_team_max,
