@@ -44,7 +44,8 @@ first                  | (Match mode only) First-to-goals rule setting. If 0, fi
 attempts               | (Russian 1v1 or shootout mode only) How many attempts each team will get. Default is 5 for shootout mode and 10 for Russian 1v1 mode.
 blue_line_location     | (Match or Russian 1v1 only) Distance between the end boards and the edge of the blue line closest to the neutral zone in meters. Default is 22.86, as in official IIHF rules.
 use_mph                | (Match mode only) If true, print puck speeds in miles per hour.
-dual_control           | Weird dual control mode.
+dual_control           | Dual control mode.
+goal_replay            | (Match mode) Show goal replays after scored goals.
 
 ### Physics
 Property                  | Explanation
@@ -78,6 +79,7 @@ Commands               | Explanation
 /righty                | Makes player right-handed. If done during play, it will only be applied after play has stopped.
 /rules                 | Shows current offside/icing rule settings.
 /admin *PASSWORD*      | Logs in as administrator, if the password is correct.
+/swap                  | Swaps the roles for the current player in dual control mode.
 
 ### Administrators only
 
