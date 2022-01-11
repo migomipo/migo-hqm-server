@@ -1527,16 +1527,20 @@ impl HQMServer {
                     let saved_history = &self.game.saved_history;
 
                     let forced_view = replay_element.force_view;
-                    let tick = self
-                        .game
-                        .game_step
-                        .checked_sub(from)
-                        .and_then(|i| saved_history.get(i as usize));
-                    if let Some(tick) = tick {
+                    let i = self.game.game_step.checked_sub(from);
+                    if let Some(i) = i {
+                        let tick = if let Some(tick) = saved_history.get(i as usize) {
+                            replay_element.from += 1;
+                            tick
+                        } else {
+                            let new_from = self.game.game_step - (saved_history.len() as u32 - 1);
+                            replay_element.from = new_from + 1;
+                            &saved_history[saved_history.len() - 1]
+                        };
+
                         let game_step = tick.game_step;
                         let packets = tick.packets.clone();
 
-                        replay_element.from += 1;
                         if replay_element.from >= replay_element.to {
                             self.replay_queue.pop_front();
                         }
