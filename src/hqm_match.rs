@@ -28,6 +28,7 @@ pub struct HQMMatchConfiguration {
     pub cheats_enabled: bool,
     pub use_mph: bool,
     pub dual_control: bool,
+    pub goal_replay: bool,
 
     pub spawn_point: HQMSpawnPoint,
 }
@@ -286,11 +287,13 @@ impl HQMMatchBehaviour {
 
         let force_view = goal_scorer_index.or(last_touch);
 
-        server.add_replay_to_queue(
-            self.faceoff_game_step.max(gamestep - 500),
-            gamestep,
-            force_view,
-        );
+        if self.config.goal_replay {
+            server.add_replay_to_queue(
+                self.faceoff_game_step.max(gamestep - 500),
+                gamestep,
+                force_view,
+            );
+        }
     }
 
     fn handle_events(
@@ -1369,6 +1372,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
             self.config.physics_config.clone(),
             self.config.blue_line_location,
         );
+        game.history_length = if self.config.goal_replay { 650 } else { 0 };
         let puck_line_start = game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {

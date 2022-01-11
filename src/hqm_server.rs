@@ -1436,29 +1436,33 @@ impl HQMServer {
 
         behaviour.after_tick(self, &events);
 
-        let mut players = vec![];
+        if self.game.history_length > 0 {
+            let mut players = vec![];
 
-        for skater in self.game.world.objects.get_skater_iter() {
-            if let Some(player) = self.players.get(skater.connected_player_index) {
-                players.push(ReplayTickPlayer {
-                    uuid: player.id,
-                    name: player.player_name.clone(),
-                    team: skater.team,
-                    object_index: skater.object_index,
-                })
+            for skater in self.game.world.objects.get_skater_iter() {
+                if let Some(player) = self.players.get(skater.connected_player_index) {
+                    players.push(ReplayTickPlayer {
+                        uuid: player.id,
+                        name: player.player_name.clone(),
+                        team: skater.team,
+                        object_index: skater.object_index,
+                    })
+                }
             }
-        }
 
-        let new_replay_tick = ReplayTick {
-            game_step: self.game.game_step,
-            packets: packets.clone(),
-            players,
-        };
+            let new_replay_tick = ReplayTick {
+                game_step: self.game.game_step,
+                packets: packets.clone(),
+                players,
+            };
 
-        if self.game.saved_history.len() > 600 {
-            self.game.saved_history.pop_back();
+            self.game
+                .saved_history
+                .truncate(self.game.history_length - 1);
+            self.game.saved_history.push_front(new_replay_tick);
+        } else {
+            self.game.saved_history.clear();
         }
-        self.game.saved_history.push_front(new_replay_tick);
 
         self.game
             .saved_packets

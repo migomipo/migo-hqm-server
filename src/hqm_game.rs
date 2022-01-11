@@ -273,6 +273,8 @@ pub struct HQMGame {
     pub(crate) packet: u32,
 
     pub(crate) active: bool,
+
+    pub history_length: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -334,6 +336,7 @@ impl HQMGame {
             game_step: u32::MAX,
             packet: u32::MAX,
             active: false,
+            history_length: 0,
         }
     }
 }
