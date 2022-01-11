@@ -59,6 +59,7 @@ pub struct HQMMatchBehaviour {
     faceoff_game_step: u32,
     step_where_period_ended: u32,
     too_late_printed_this_period: bool,
+    start_next_replay: Option<(u32, u32, Option<usize>)>,
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -91,6 +92,7 @@ impl HQMMatchBehaviour {
             faceoff_game_step: 0,
             too_late_printed_this_period: false,
             step_where_period_ended: 0,
+            start_next_replay: None,
         }
     }
 
@@ -292,11 +294,11 @@ impl HQMMatchBehaviour {
         let force_view = goal_scorer_index.or(last_touch);
 
         if self.config.goal_replay {
-            server.add_replay_to_queue(
-                self.faceoff_game_step.max(gamestep - 500),
-                gamestep,
+            self.start_next_replay = Some((
+                self.faceoff_game_step.max(gamestep - 600),
+                gamestep + 200,
                 force_view,
-            );
+            ));
         }
     }
 
@@ -1242,6 +1244,14 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 self.config.time_intermission * 100,
             );
         }
+
+        if let Some((start_replay, end_replay, force_view)) = self.start_next_replay {
+            if end_replay <= server.game.game_step {
+                server.add_replay_to_queue(start_replay, end_replay, force_view);
+                server.add_server_chat_message_str("Goal replay");
+                self.start_next_replay = None;
+            }
+        }
     }
 
     fn handle_command(
@@ -1405,7 +1415,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
             self.config.physics_config.clone(),
             self.config.blue_line_location,
         );
-        game.history_length = if self.config.goal_replay { 650 } else { 0 };
+        game.history_length = if self.config.goal_replay { 850 } else { 0 };
         let puck_line_start = game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {
