@@ -864,10 +864,15 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_first_to_rule(&mut self, server: &mut HQMServer, player_index: usize, size: &str) {
+    fn set_first_to_rule(&mut self, server: &mut HQMServer, player_index: usize, num: &str) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
-                if let Ok(new_num) = size.parse::<u32>() {
+                let num = if num == "off" {
+                    Some(0)
+                } else {
+                    num.parse::<u32>().ok()
+                };
+                if let Some(new_num) = num {
                     self.config.first_to = new_num;
 
                     if new_num > 0 {
@@ -895,10 +900,15 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_mercy_rule(&mut self, server: &mut HQMServer, player_index: usize, size: &str) {
+    fn set_mercy_rule(&mut self, server: &mut HQMServer, player_index: usize, num: &str) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
-                if let Ok(new_num) = size.parse::<u32>() {
+                let num = if num == "off" {
+                    Some(0)
+                } else {
+                    num.parse::<u32>().ok()
+                };
+                if let Some(new_num) = num {
                     self.config.mercy = new_num;
 
                     if new_num > 0 {
