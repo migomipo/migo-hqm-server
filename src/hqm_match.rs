@@ -848,11 +848,13 @@ impl HQMMatchBehaviour {
                 match setting {
                     "on" => {
                         self.config.goal_replay = true;
+                        server.game.history_length = 850;
                         let msg = format!("Goal replays enabled by {}", player.player_name);
                         server.add_server_chat_message(msg);
                     }
                     "off" => {
                         self.config.goal_replay = false;
+                        server.game.history_length = 0;
                         let msg = format!("Goal replays disabled by {}", player.player_name);
                         server.add_server_chat_message(msg);
                     }
