@@ -842,6 +842,28 @@ impl HQMMatchBehaviour {
         }
     }
 
+    fn set_goal_replay(&mut self, server: &mut HQMServer, player_index: usize, setting: &str) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                match setting {
+                    "on" => {
+                        self.config.goal_replay = true;
+                        let msg = format!("Goal replays enabled by {}", player.player_name);
+                        server.add_server_chat_message(msg);
+                    }
+                    "off" => {
+                        self.config.goal_replay = false;
+                        let msg = format!("Goal replays disabled by {}", player.player_name);
+                        server.add_server_chat_message(msg);
+                    }
+                    _ => {}
+                }
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
     fn set_first_to_rule(&mut self, server: &mut HQMServer, player_index: usize, size: &str) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
@@ -1341,6 +1363,11 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                         "replay" => {
                             if let Some(arg) = args.get(1) {
                                 server.set_replay(player_index, arg);
+                            }
+                        }
+                        "goalreplay" => {
+                            if let Some(arg) = args.get(1) {
+                                self.set_goal_replay(player_index, arg);
                             }
                         }
                         _ => {}
