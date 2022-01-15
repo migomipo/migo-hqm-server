@@ -1377,7 +1377,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                         }
                         "goalreplay" => {
                             if let Some(arg) = args.get(1) {
-                                self.set_goal_replay(player_index, arg);
+                                self.set_goal_replay(server, player_index, arg);
                             }
                         }
                         _ => {}
