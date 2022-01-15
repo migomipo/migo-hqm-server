@@ -107,8 +107,8 @@ Commands                 | Explanation
 /set offside *S*         | Sets offside rule. Allowed values are "off", "on" (delayed offside) and "imm" or "immediate" (immediate offside, no offside warnings).
 /set teamsize *N*        | Sets team size.
 /set replay *on/off*     | Enables/disables server-side replays.
-/set mercy *N*           | Sets mercy rule setting. If 0, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least X goals.
-/set first *N*           | Sets first-to-goals rule setting. If 0, first-to-goals rule will be disabled. Otherwise, games will automatically end if a team scores and and reaches at least X goals scored.
+/set mercy *N/off*       | Sets mercy rule setting. If 0 or off, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least N goals.
+/set first *N/off*       | Sets first-to-goals rule setting. If 0, first-to-goals rule will be disabled. Otherwise, games will automatically end if a team scores and and reaches at least N goals scored.
 /set goalreplay *on/off* | Enables/disabled goal replays.
 /kickall *S*             | Kicks all players with a player name equal to *S* (case-insensitive). % can be used as wildcards at the start and end of *S* to match players with similar names. For example, migo%, %mipo and %gomi% all match MigoMipo.
 /banall *S*              | Same as /kickall, but also IP-bans.
