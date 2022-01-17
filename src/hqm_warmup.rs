@@ -32,7 +32,7 @@ impl HQMPermanentWarmup {
         let mut joining_blue = vec![];
         for (player_index, player) in server.players.iter().enumerate() {
             if let Some(player) = player {
-                let has_skater = server.game.world.objects.has_skater(player_index)
+                let has_skater = player.object.is_some()
                     || server.get_dual_control_player(player_index).is_some();
                 if has_skater && player.input.spectate() {
                     spectating_players.push(player_index);
@@ -74,10 +74,9 @@ impl HQMPermanentWarmup {
                 if let Some(player) = player {
                     if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                         if movement.is_none() || stick.is_none() {
-                            if let Some(skater) =
-                                server.game.world.objects.get_skater_object_for_player(i)
+                            if let Some((_, dual_control_team)) = player.object
                             {
-                                if skater.team == team {
+                                if dual_control_team == team {
                                     return Some((i, movement, stick));
                                 }
                             }

@@ -3,7 +3,7 @@ use tracing::info;
 
 use migo_hqm_server::hqm_game::{
     HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRulesState,
-    HQMSkaterHand, HQMSkaterObjectRef, HQMTeam,
+    HQMSkaterHand, HQMTeam,
 };
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerList, HQMSpawnPoint,
@@ -352,15 +352,11 @@ impl HQMMatchBehaviour {
                 HQMSimulationEvent::PuckTouch { player, puck, .. } => {
                     let (player, puck) = (*player, *puck);
                     // Get connected player index from skater
-                    if let Some(HQMSkaterObjectRef {
-                        connected_player_index: this_connected_player_index,
-                        team: touching_team,
-                        ..
-                    }) = server.game.world.objects.get_skater(player)
+                    if let Some((player_index, touching_team, _)) = server.players.get_from_object_index(player)
                     {
                         if let Some(puck) = server.game.world.objects.get_puck_mut(puck) {
                             puck.add_touch(
-                                this_connected_player_index,
+                                player_index,
                                 touching_team,
                                 server.game.time,
                             );
@@ -369,7 +365,7 @@ impl HQMMatchBehaviour {
 
                             if let HQMOffsideStatus::Warning(team, p, i) = &self.offside_status {
                                 if *team == touching_team {
-                                    let pass_origin = if this_connected_player_index == *i {
+                                    let pass_origin = if player_index == *i {
                                         puck.body.pos.clone()
                                     } else {
                                         p.clone()
@@ -387,7 +383,7 @@ impl HQMMatchBehaviour {
                                 if touching_team != *team {
                                     if self
                                         .started_as_goalie
-                                        .contains(&this_connected_player_index)
+                                        .contains(&player_index)
                                     {
                                         self.icing_status = HQMIcingStatus::No;
                                         server.add_server_chat_message_str("Icing waved off");
@@ -441,7 +437,7 @@ impl HQMMatchBehaviour {
                             if let Some(touch) = puck.touches.front() {
                                 if team == touch.team
                                     && has_players_in_offensive_zone(
-                                        &server.game.world,
+                                        &server,
                                         team,
                                         Some(touch.player_index),
                                     )
@@ -483,7 +479,7 @@ impl HQMMatchBehaviour {
             }
         }
         if let HQMOffsideStatus::Warning(team, _, _) = self.offside_status {
-            if !has_players_in_offensive_zone(&server.game.world, team, None) {
+            if !has_players_in_offensive_zone(server, team, None) {
                 self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
                 server.add_server_chat_message_str("Offside waved off");
             }
@@ -534,7 +530,7 @@ impl HQMMatchBehaviour {
                     .get_mut(&player_index)
                     .map(|x| *x = x.saturating_sub(1));
                 if player.input.join_red() || player.input.join_blue() {
-                    let has_skater = server.game.world.objects.has_skater(player_index)
+                    let has_skater = player.object.is_some()
                         || server.get_dual_control_player(player_index).is_some();
                     if !has_skater
                         && self
@@ -549,7 +545,7 @@ impl HQMMatchBehaviour {
                         }
                     }
                 } else if player.input.spectate() {
-                    let has_skater = server.game.world.objects.has_skater(player_index)
+                    let has_skater = player.object.is_some()
                         || server.get_dual_control_player(player_index).is_some();
                     if has_skater {
                         self.team_switch_timer.insert(player_index, 500);
@@ -570,11 +566,15 @@ impl HQMMatchBehaviour {
             let (red_player_count, blue_player_count) = {
                 let mut red_player_count = 0usize;
                 let mut blue_player_count = 0usize;
-                for HQMSkaterObjectRef { team, .. } in server.game.world.objects.get_skater_iter() {
-                    if team == HQMTeam::Red {
-                        red_player_count += 1;
-                    } else if team == HQMTeam::Blue {
-                        blue_player_count += 1;
+                for player in server.players.iter() {
+                    if let Some(player) = player {
+                        if let Some((_, team)) = player.object {
+                            if team == HQMTeam::Red {
+                                red_player_count += 1;
+                            } else if team == HQMTeam::Blue {
+                                blue_player_count += 1;
+                            }
+                        }
                     }
                 }
                 (red_player_count, blue_player_count)
@@ -1172,10 +1172,8 @@ fn get_faceoff_positions(
     let mut blue_players = vec![];
     for (player_index, player) in players.iter().enumerate() {
         if let Some(player) = player {
-            let team = world
-                .objects
-                .get_skater_object_for_player(player_index)
-                .map(|x| x.team);
+
+            let team = player.object.map(|x| x.1);
             let i = match &player.data {
                 HQMServerPlayerData::DualControl { movement, stick } => {
                     movement.or(*stick).unwrap_or(player_index)
@@ -1199,30 +1197,30 @@ fn get_faceoff_positions(
 }
 
 fn has_players_in_offensive_zone(
-    world: &HQMGameWorld,
+    server: &HQMServer,
     team: HQMTeam,
     ignore_player: Option<usize>,
 ) -> bool {
     let line = match team {
-        HQMTeam::Red => &world.rink.red_lines_and_net.offensive_line,
-        HQMTeam::Blue => &world.rink.blue_lines_and_net.offensive_line,
+        HQMTeam::Red => &server.game.world.rink.red_lines_and_net.offensive_line,
+        HQMTeam::Blue => &server.game.world.rink.blue_lines_and_net.offensive_line,
     };
 
-    for HQMSkaterObjectRef {
-        connected_player_index: player_index,
-        team: skater_team,
-        skater,
-        ..
-    } in world.objects.get_skater_iter()
-    {
-        if skater_team == team && ignore_player != Some(player_index) {
-            let feet_pos =
-                &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
-            let dot = (&feet_pos - &line.point).dot(&line.normal);
-            let leading_edge = -(line.width / 2.0);
-            if dot < leading_edge {
-                // Player is offside
-                return true;
+    for (player_index, player) in server.players.iter().enumerate() {
+        if let Some(player) = player {
+            if let Some((object_index, skater_team)) = player.object {
+                if skater_team == team && ignore_player != Some(player_index) {
+                    if let Some(skater) = server.game.world.objects.get_skater(object_index) {
+                        let feet_pos =
+                            &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
+                        let dot = (&feet_pos - &line.point).dot(&line.normal);
+                        let leading_edge = -(line.width / 2.0);
+                        if dot < leading_edge {
+                            // Player is offside
+                            return true;
+                        }
+                    }
+                }
             }
         }
     }
@@ -1566,9 +1564,9 @@ fn find_empty_dual_control(
         if let Some(player) = player {
             if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                 if movement.is_none() || stick.is_none() {
-                    if let Some(skater) = server.game.world.objects.get_skater_object_for_player(i)
+                    if let Some((_, dual_control_team)) = player.object
                     {
-                        if skater.team == team {
+                        if dual_control_team == team {
                             return Some((i, movement, stick));
                         }
                     }

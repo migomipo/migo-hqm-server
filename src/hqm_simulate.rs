@@ -37,7 +37,7 @@ impl HQMGameWorld {
         let mut pucks = Vec::new();
         for (i, o) in self.objects.objects.iter_mut().enumerate() {
             match o {
-                HQMGameObject::Player(_, _, player) => players.push((i, player)),
+                HQMGameObject::Player(player) => players.push((i, player)),
                 HQMGameObject::Puck(puck) => pucks.push((i, puck)),
                 _ => {}
             }

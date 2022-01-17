@@ -1,4 +1,4 @@
-use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMSkaterObjectRef, HQMTeam};
+use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMSpawnPoint,
 };
@@ -83,17 +83,13 @@ impl HQMShootoutBehaviour {
         let mut blue_players = vec![];
 
         for (player_index, player) in server.players.iter().enumerate() {
-            if player.is_some() {
-                let team = server
-                    .game
-                    .world
-                    .objects
-                    .get_skater_object_for_player(player_index)
-                    .map(|x| x.team);
-                if team == Some(HQMTeam::Red) {
-                    red_players.push(player_index);
-                } else if team == Some(HQMTeam::Blue) {
-                    blue_players.push(player_index);
+            if let Some(player) = player {
+                if let Some((_, team)) = player.object {
+                    if team == HQMTeam::Red {
+                        red_players.push(player_index);
+                    } else if team == HQMTeam::Blue {
+                        blue_players.push(player_index);
+                    }
                 }
             }
         }
@@ -174,7 +170,7 @@ impl HQMShootoutBehaviour {
                     .get_mut(&player_index)
                     .map(|x| *x = x.saturating_sub(1));
                 if player.input.join_red() || player.input.join_blue() {
-                    let has_skater = server.game.world.objects.has_skater(player_index)
+                    let has_skater = player.object.is_some()
                         || server.get_dual_control_player(player_index).is_some();
                     if !has_skater
                         && self
@@ -189,7 +185,7 @@ impl HQMShootoutBehaviour {
                         }
                     }
                 } else if player.input.spectate() {
-                    let has_skater = server.game.world.objects.has_skater(player_index)
+                    let has_skater = player.object.is_some()
                         || server.get_dual_control_player(player_index).is_some();
                     if has_skater {
                         self.team_switch_timer.insert(player_index, 500);
@@ -210,11 +206,15 @@ impl HQMShootoutBehaviour {
             let (red_player_count, blue_player_count) = {
                 let mut red_player_count = 0usize;
                 let mut blue_player_count = 0usize;
-                for HQMSkaterObjectRef { team, .. } in server.game.world.objects.get_skater_iter() {
-                    if team == HQMTeam::Red {
-                        red_player_count += 1;
-                    } else if team == HQMTeam::Blue {
-                        blue_player_count += 1;
+                for player in server.players.iter() {
+                    if let Some(player) = player {
+                        if let Some((_, team)) = player.object {
+                            if team == HQMTeam::Red {
+                                red_player_count += 1;
+                            } else if team == HQMTeam::Blue {
+                                blue_player_count += 1;
+                            }
+                        }
                     }
                 }
                 (red_player_count, blue_player_count)
@@ -426,15 +426,11 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                 }
                 HQMSimulationEvent::PuckTouch { player, puck, .. } => {
                     let (player, puck) = (*player, *puck);
-                    if let Some(HQMSkaterObjectRef {
-                        connected_player_index: this_connected_player_index,
-                        team: touching_team,
-                        ..
-                    }) = server.game.world.objects.get_skater(player)
+                    if let Some((player_index, touching_team, _)) = server.players.get_from_object_index(player)
                     {
                         if let Some(puck) = server.game.world.objects.get_puck_mut(puck) {
                             puck.add_touch(
-                                this_connected_player_index,
+                                player_index,
                                 touching_team,
                                 server.game.time,
                             );
@@ -485,13 +481,15 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                 let (red_player_count, blue_player_count) = {
                     let mut red_player_count = 0usize;
                     let mut blue_player_count = 0usize;
-                    for HQMSkaterObjectRef { team, .. } in
-                        server.game.world.objects.get_skater_iter()
-                    {
-                        if team == HQMTeam::Red {
-                            red_player_count += 1;
-                        } else if team == HQMTeam::Blue {
-                            blue_player_count += 1;
+                    for player in server.players.iter() {
+                        if let Some(player) = player {
+                            if let Some((_, team)) = player.object {
+                                if team == HQMTeam::Red {
+                                    red_player_count += 1;
+                                } else if team == HQMTeam::Blue {
+                                    blue_player_count += 1;
+                                }
+                            }
                         }
                     }
                     (red_player_count, blue_player_count)
@@ -602,9 +600,9 @@ fn find_empty_dual_control(
         if let Some(player) = player {
             if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                 if movement.is_none() || stick.is_none() {
-                    if let Some(skater) = server.game.world.objects.get_skater_object_for_player(i)
+                    if let Some((_, dual_control_team)) = player.object
                     {
-                        if skater.team == team {
+                        if dual_control_team == team {
                             return Some((i, movement, stick));
                         }
                     }
