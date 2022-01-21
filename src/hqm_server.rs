@@ -89,12 +89,15 @@ impl HQMServerPlayerList {
         }
     }
 
-    pub fn get_from_object_index(&mut self, object_index: usize) -> Option<(usize, HQMTeam, &HQMServerPlayer)> {
+    pub fn get_from_object_index(
+        &mut self,
+        object_index: usize,
+    ) -> Option<(usize, HQMTeam, &HQMServerPlayer)> {
         for (player_index, player) in self.players.iter().enumerate() {
             if let Some(player) = player {
                 if let Some((o, team)) = player.object {
                     if o == object_index {
-                        return Some((player_index, team, player))
+                        return Some((player_index, team, player));
                     }
                 }
             }
@@ -366,12 +369,7 @@ impl HQMServer {
                 msg_player_index: usize,
                 hand: HQMSkaterHand,
             ) {
-                if let Some(skater) = server
-                    .game
-                    .world
-                    .objects
-                    .get_skater_mut(object_index)
-                {
+                if let Some(skater) = server.game.world.objects.get_skater_mut(object_index) {
                     if server.game.period != 0 {
                         server.add_directed_server_chat_message_str(
                             "Stick hand will change after next intermission",
@@ -606,7 +604,8 @@ impl HQMServer {
         if view_player_index < self.players.len() {
             if let Some(view_player) = self.players.get(view_player_index) {
                 let view_player_name = view_player.player_name.clone();
-                if view_player.object.is_some() || self.get_dual_control_player(player_index).is_some()
+                if view_player.object.is_some()
+                    || self.get_dual_control_player(player_index).is_some()
                 {
                     self.add_directed_server_chat_message_str(
                         "You must be a spectator to change view",
@@ -847,7 +846,6 @@ impl HQMServer {
 
             self.add_global_message(update, true, on_replay);
 
-
             self.players.remove_player(player_index as usize);
 
             if is_admin {
@@ -942,12 +940,11 @@ impl HQMServer {
         let player_index = self.find_empty_player_slot();
         match player_index {
             Some(player_index) => {
-                if let Some(skater) = self.game.world.create_player_object(
-                    pos,
-                    rot,
-                    HQMSkaterHand::Right,
-                    1.0,
-                ) {
+                if let Some(skater) =
+                    self.game
+                        .world
+                        .create_player_object(pos, rot, HQMSkaterHand::Right, 1.0)
+                {
                     let new_player = HQMServerPlayer {
                         player_name: Rc::new("?/?".to_owned()),
                         object: Some((skater, team)),
@@ -989,15 +986,14 @@ impl HQMServer {
                     let object = Some((object_index, team));
                     player.object = object;
                     let update = player.get_update_message(player_index);
-                    self.add_global_message(update, true, true, );
+                    self.add_global_message(update, true, true);
                 }
             } else {
-                if let Some(skater) = self.game.world.create_player_object(
-                    pos,
-                    rot,
-                    player.hand,
-                    player.mass,
-                ) {
+                if let Some(skater) =
+                    self.game
+                        .world
+                        .create_player_object(pos, rot, player.hand, player.mass)
+                {
                     if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
                         data.view_player_index = player_index;
                     }
@@ -1005,7 +1001,7 @@ impl HQMServer {
                     let object = Some((skater, team));
                     player.object = object;
                     let update = player.get_update_message(player_index);
-                    self.add_global_message(update, true, true, );
+                    self.add_global_message(update, true, true);
                     self.remove_player_from_dual_control(player_index);
                     return Some(skater);
                 }
@@ -1132,12 +1128,11 @@ impl HQMServer {
 
     pub fn swap_team(&mut self, player_index: usize, team: HQMTeam) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
-
             if let Some((object_index, _)) = player.object {
                 let object = Some((object_index, team));
                 player.object = object;
                 let update = player.get_update_message(player_index);
-                self.add_global_message(update, true, true, );
+                self.add_global_message(update, true, true);
                 return true;
             }
         }
@@ -1148,7 +1143,9 @@ impl HQMServer {
         if let Some(player) = self.players.get(sender_index) {
             let team = if let Some((_, team)) = player.object {
                 Some(team)
-            } else if let Some((dual_control_player_index, _, _)) = self.get_dual_control_player(sender_index) {
+            } else if let Some((dual_control_player_index, _, _)) =
+                self.get_dual_control_player(sender_index)
+            {
                 if let Some(dual_control_player) = self.players.get(dual_control_player_index) {
                     if let Some((_, team)) = dual_control_player.object {
                         Some(team)
@@ -1190,7 +1187,7 @@ impl HQMServer {
                         if let Some((_, player_team)) = player.object {
                             if player_team == team {
                                 if let HQMServerPlayerData::DualControl { movement, stick } =
-                                player.data
+                                    player.data
                                 {
                                     movement.map(|i| matching_indices.push(i));
                                     stick.map(|i| matching_indices.push(i));
@@ -1405,7 +1402,7 @@ impl HQMServer {
                             uuid: player.id,
                             name: player.player_name.clone(),
                             team,
-                            object_index
+                            object_index,
                         })
                     }
                 }
@@ -1540,11 +1537,7 @@ impl HQMServer {
                 self.game.red_score,
                 self.game.blue_score,
                 self.game.time,
-                if self.game.is_intermission_goal {
-                    self.game.time_break
-                } else {
-                    0
-                },
+                self.game.goal_message_timer,
                 self.game.period,
                 self.game.rules_state,
                 self.game.packet,
@@ -1613,8 +1606,6 @@ impl HQMServer {
                     };
                     messages.push(update);
                     *p = None;
-
-
                 }
             }
         }
@@ -1950,14 +1941,7 @@ fn write_replay(game: &mut HQMGame, write_buf: &mut [u8]) {
     writer.write_bits(8, game.blue_score);
     writer.write_bits(16, game.time);
 
-    writer.write_bits(
-        16,
-        if game.is_intermission_goal {
-            game.time_break
-        } else {
-            0
-        },
-    );
+    writer.write_bits(16, game.goal_message_timer);
     writer.write_bits(8, game.period);
 
     let packets = &game.saved_packets;
@@ -1990,7 +1974,7 @@ async fn send_updates(
     red_score: u32,
     blue_score: u32,
     time: u32,
-    time_break: u32,
+    goal_message_time: u32,
     period: u32,
     rules_state: HQMRulesState,
     current_packet: u32,
@@ -2024,7 +2008,7 @@ async fn send_updates(
                     writer.write_bits(8, blue_score);
                     writer.write_bits(16, time);
 
-                    writer.write_bits(16, time_break);
+                    writer.write_bits(16, goal_message_time);
                     writer.write_bits(8, period);
                     let view = force_view.unwrap_or(data.view_player_index);
                     writer.write_bits(8, view as u32);
@@ -2288,7 +2272,7 @@ impl HQMServerPlayer {
             player_name: self.player_name.clone(),
             object: self.object,
             player_index,
-            in_server: true
+            in_server: true,
         }
     }
 

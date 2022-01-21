@@ -23,30 +23,24 @@ pub struct HQMGameWorldObjectList {
 }
 
 impl HQMGameWorldObjectList {
-
-
     pub fn get_skater_iter(&self) -> impl Iterator<Item = &HQMSkater> {
-        self.objects
-            .iter()
-            .filter_map(|obj| {
-                if let HQMGameObject::Player(skater) = obj {
-                    Some(skater)
-                } else {
-                    None
-                }
-            })
+        self.objects.iter().filter_map(|obj| {
+            if let HQMGameObject::Player(skater) = obj {
+                Some(skater)
+            } else {
+                None
+            }
+        })
     }
 
-    pub fn get_skater_iter_mut(&mut self) -> impl Iterator<Item = & mut HQMSkater> {
-        self.objects
-            .iter_mut()
-            .filter_map(|obj| {
-                if let HQMGameObject::Player(skater) = obj {
-                    Some(skater)
-                } else {
-                    None
-                }
-            })
+    pub fn get_skater_iter_mut(&mut self) -> impl Iterator<Item = &mut HQMSkater> {
+        self.objects.iter_mut().filter_map(|obj| {
+            if let HQMGameObject::Player(skater) = obj {
+                Some(skater)
+            } else {
+                None
+            }
+        })
     }
 
     pub fn get_puck(&self, object_index: usize) -> Option<&HQMPuck> {
@@ -66,17 +60,15 @@ impl HQMGameWorldObjectList {
     }
 
     pub fn get_skater(&self, object_index: usize) -> Option<&HQMSkater> {
-        if let HQMGameObject::Player(skater) = &self.objects[object_index]
-        {
+        if let HQMGameObject::Player(skater) = &self.objects[object_index] {
             Some(skater)
         } else {
             None
         }
     }
 
-    pub fn get_skater_mut(&mut self, object_index: usize) -> Option<& mut HQMSkater> {
-        if let HQMGameObject::Player(skater) = & mut self.objects[object_index]
-        {
+    pub fn get_skater_mut(&mut self, object_index: usize) -> Option<&mut HQMSkater> {
+        if let HQMGameObject::Player(skater) = &mut self.objects[object_index] {
             Some(skater)
         } else {
             None
@@ -85,7 +77,6 @@ impl HQMGameWorldObjectList {
 }
 
 impl HQMGameWorld {
-
     pub(crate) fn create_player_object(
         &mut self,
         start: Point3<f32>,
@@ -133,7 +124,16 @@ impl HQMGameWorld {
     }
 
     pub(crate) fn remove_player(&mut self, i: usize) -> bool {
-        if let r @ HQMGameObject::Player(_) = & mut self.objects.objects[i] {
+        if let r @ HQMGameObject::Player(_) = &mut self.objects.objects[i] {
+            *r = HQMGameObject::None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn remove_puck(&mut self, i: usize) -> bool {
+        if let r @ HQMGameObject::Puck(_) = &mut self.objects.objects[i] {
             *r = HQMGameObject::None;
             true
         } else {
@@ -159,8 +159,7 @@ pub struct HQMGame {
     pub blue_score: u32,
     pub period: u32,
     pub time: u32,
-    pub time_break: u32,
-    pub is_intermission_goal: bool,
+    pub goal_message_timer: u32,
 
     pub game_step: u32,
     pub game_over: bool,
@@ -224,8 +223,7 @@ impl HQMGame {
             blue_score: 0,
             period: 0,
             time: 30000,
-            is_intermission_goal: false,
-            time_break: 0,
+            goal_message_timer: 0,
             game_over: false,
             game_step: u32::MAX,
             packet: u32::MAX,

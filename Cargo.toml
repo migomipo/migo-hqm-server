@@ -17,6 +17,7 @@ tracing-appender = "0.1.2"
 chrono = "0.4"
 num-integer = "0.1.43"
 uuid = { version = "0.8", features = ["v4"] }
+rand = "0.8.4"
 
 [profile.dev]
 opt-level = 2

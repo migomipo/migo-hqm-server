@@ -13,7 +13,7 @@ use tracing::info;
 enum HQMShootoutAttemptState {
     Attack { progress: f32 }, // Puck has been touched by attacker, but not touched by goalie, hit post or moved backwards
     NoMoreAttack { final_progress: f32 }, // Puck has moved backwards, hit the post or the goalie, but may still enter the net
-    Over,                                 // Attempt is over
+    Over { timer: u32, goal_scored: bool }, // Attempt is over
 }
 
 enum HQMShootoutStatus {
@@ -23,7 +23,10 @@ enum HQMShootoutStatus {
         round: u32,
         team: HQMTeam,
     },
-    GameOver,
+    GameOver {
+        timer: u32,
+        goal_scored: bool,
+    },
 }
 
 pub struct HQMShootoutBehaviour {
@@ -62,7 +65,7 @@ impl HQMShootoutBehaviour {
                     *round
                 },
             ),
-            HQMShootoutStatus::GameOver => panic!(),
+            HQMShootoutStatus::GameOver { .. } => panic!(),
         };
 
         let remaining_attempts = self.attempts.saturating_sub(next_round);
@@ -95,7 +98,6 @@ impl HQMShootoutBehaviour {
         }
         server.game.time = 2000;
         server.game.period = 1;
-        server.game.is_intermission_goal = false;
         server.game.world.clear_pucks();
 
         let length = server.game.world.rink.length;
@@ -327,8 +329,6 @@ impl HQMShootoutBehaviour {
 
     fn end_attempt(&mut self, server: &mut HQMServer, goal_scored: bool) {
         if let HQMShootoutStatus::Game { state, team, round } = &mut self.status {
-            server.game.is_intermission_goal = goal_scored;
-            server.game.time_break = 300;
             if goal_scored {
                 match team {
                     HQMTeam::Red => {
@@ -366,10 +366,15 @@ impl HQMShootoutBehaviour {
             };
             if game_over {
                 server.game.game_over = true;
-                server.game.time_break = 500;
-                self.status = HQMShootoutStatus::GameOver;
+                self.status = HQMShootoutStatus::GameOver {
+                    timer: 500,
+                    goal_scored,
+                };
             } else {
-                *state = HQMShootoutAttemptState::Over;
+                *state = HQMShootoutAttemptState::Over {
+                    timer: 500,
+                    goal_scored,
+                };
             }
         }
     }
@@ -407,7 +412,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                         ..
                     } = &mut self.status
                     {
-                        if let HQMShootoutAttemptState::Over = *state {
+                        if let HQMShootoutAttemptState::Over { .. } = *state {
                             // Ignore
                         } else {
                             let is_goal = *scoring_team == *attacking_team;
@@ -417,7 +422,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                 }
                 HQMSimulationEvent::PuckPassedGoalLine { .. } => {
                     if let HQMShootoutStatus::Game { state, .. } = &mut self.status {
-                        if let HQMShootoutAttemptState::Over = *state {
+                        if let HQMShootoutAttemptState::Over { .. } = *state {
                             // Ignore
                         } else {
                             self.end_attempt(server, false);
@@ -426,14 +431,11 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                 }
                 HQMSimulationEvent::PuckTouch { player, puck, .. } => {
                     let (player, puck) = (*player, *puck);
-                    if let Some((player_index, touching_team, _)) = server.players.get_from_object_index(player)
+                    if let Some((player_index, touching_team, _)) =
+                        server.players.get_from_object_index(player)
                     {
                         if let Some(puck) = server.game.world.objects.get_puck_mut(puck) {
-                            puck.add_touch(
-                                player_index,
-                                touching_team,
-                                server.game.time,
-                            );
+                            puck.add_touch(player_index, touching_team, server.game.time);
 
                             if let HQMShootoutStatus::Game {
                                 state,
@@ -504,9 +506,10 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                 }
             }
             HQMShootoutStatus::Game { state, team, .. } => {
-                if let HQMShootoutAttemptState::Over = state {
-                    server.game.time_break = server.game.time_break.saturating_sub(1);
-                    if server.game.time_break == 0 {
+                if let HQMShootoutAttemptState::Over { timer, goal_scored } = state {
+                    *timer = timer.saturating_sub(1);
+                    server.game.goal_message_timer = if *goal_scored { *timer } else { 0 };
+                    if *timer == 0 {
                         self.start_next_attempt(server);
                     }
                 } else {
@@ -546,9 +549,10 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                     }
                 }
             }
-            HQMShootoutStatus::GameOver => {
-                server.game.time_break = server.game.time_break.saturating_sub(1);
-                if server.game.time_break == 0 {
+            HQMShootoutStatus::GameOver { timer, goal_scored } => {
+                *timer = timer.saturating_sub(1);
+                server.game.goal_message_timer = if *goal_scored { *timer } else { 0 };
+                if *timer == 0 {
                     let new_game = self.create_game();
                     server.new_game(new_game);
                 }
@@ -600,8 +604,7 @@ fn find_empty_dual_control(
         if let Some(player) = player {
             if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                 if movement.is_none() || stick.is_none() {
-                    if let Some((_, dual_control_team)) = player.object
-                    {
+                    if let Some((_, dual_control_team)) = player.object {
                         if dual_control_team == team {
                             return Some((i, movement, stick));
                         }

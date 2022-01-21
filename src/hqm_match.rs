@@ -50,6 +50,8 @@ pub enum HQMOffsideConfiguration {
 pub struct HQMMatchBehaviour {
     pub config: HQMMatchConfiguration,
     pub paused: bool,
+    pause_timer: u32,
+    is_pause_goal: bool,
     next_faceoff_spot: HQMRinkFaceoffSpot,
     icing_status: HQMIcingStatus,
     offside_status: HQMOffsideStatus,
@@ -83,6 +85,8 @@ impl HQMMatchBehaviour {
         HQMMatchBehaviour {
             config,
             paused: false,
+            pause_timer: 0,
+            is_pause_goal: false,
             next_faceoff_spot: HQMRinkFaceoffSpot::Center,
             icing_status: HQMIcingStatus::No,
             offside_status: HQMOffsideStatus::InNeutralZone,
@@ -169,7 +173,6 @@ impl HQMMatchBehaviour {
             }
         };
 
-        server.game.is_intermission_goal = true;
         self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
 
         let (
@@ -284,10 +287,11 @@ impl HQMMatchBehaviour {
         }
 
         if server.game.game_over {
-            server.game.time_break = time_gameover;
+            self.pause_timer = time_gameover;
         } else {
-            server.game.time_break = time_break;
+            self.pause_timer = time_break;
         }
+        self.is_pause_goal = true;
 
         let gamestep = server.game.game_step;
 
@@ -352,14 +356,11 @@ impl HQMMatchBehaviour {
                 HQMSimulationEvent::PuckTouch { player, puck, .. } => {
                     let (player, puck) = (*player, *puck);
                     // Get connected player index from skater
-                    if let Some((player_index, touching_team, _)) = server.players.get_from_object_index(player)
+                    if let Some((player_index, touching_team, _)) =
+                        server.players.get_from_object_index(player)
                     {
                         if let Some(puck) = server.game.world.objects.get_puck_mut(puck) {
-                            puck.add_touch(
-                                player_index,
-                                touching_team,
-                                server.game.time,
-                            );
+                            puck.add_touch(player_index, touching_team, server.game.time);
 
                             let other_team = touching_team.get_other_team();
 
@@ -381,10 +382,7 @@ impl HQMMatchBehaviour {
                             }
                             if let HQMIcingStatus::Warning(team, p) = &self.icing_status {
                                 if touching_team != *team {
-                                    if self
-                                        .started_as_goalie
-                                        .contains(&player_index)
-                                    {
+                                    if self.started_as_goalie.contains(&player_index) {
                                         self.icing_status = HQMIcingStatus::No;
                                         server.add_server_chat_message_str("Icing waved off");
                                     } else {
@@ -498,7 +496,7 @@ impl HQMMatchBehaviour {
             .world
             .rink
             .get_offside_faceoff_spot(pass_origin, team);
-        server.game.time_break = time_break;
+        self.pause_timer = time_break;
         self.offside_status = HQMOffsideStatus::Offside(team);
         server.add_server_chat_message_str("Offside");
     }
@@ -515,7 +513,7 @@ impl HQMMatchBehaviour {
             .world
             .rink
             .get_icing_faceoff_spot(pass_origin, team);
-        server.game.time_break = time_break;
+        self.pause_timer = time_break;
         self.icing_status = HQMIcingStatus::Icing(team);
         server.add_server_chat_message_str("Icing");
     }
@@ -942,7 +940,7 @@ impl HQMMatchBehaviour {
         if !server.game.game_over {
             if let Some(player) = server.players.get(player_index) {
                 if player.is_admin {
-                    server.game.time_break = 5 * 100;
+                    self.pause_timer = 5 * 100;
                     self.paused = false; // Unpause if it's paused as well
 
                     let msg = format!("Faceoff initiated by {}", player.player_name);
@@ -994,10 +992,10 @@ impl HQMMatchBehaviour {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 self.paused = true;
-                if server.game.time_break > 0 && server.game.time_break < self.config.time_break {
+                if self.pause_timer > 0 && self.pause_timer < self.config.time_break {
                     // If we're currently in a break, with very little time left,
                     // we reset the timer
-                    server.game.time_break = self.config.time_break;
+                    self.pause_timer = self.pause_timer;
                 }
                 info!("{} ({}) paused game", player.player_name, player_index);
                 let msg = format!("Game paused by {}", player.player_name);
@@ -1126,31 +1124,39 @@ impl HQMMatchBehaviour {
     }
 
     fn update_clock(&mut self, server: &mut HQMServer, period_length: u32, intermission_time: u32) {
-        if server.game.time_break > 0 {
-            server.game.time_break -= 1;
-            if server.game.time_break == 0 {
-                server.game.is_intermission_goal = false;
-                if server.game.game_over {
-                    server.new_game(self.create_game());
-                } else {
-                    if server.game.time == 0 {
-                        server.game.time = period_length;
-                    }
+        if !self.paused {
+            if self.pause_timer > 0 {
+                self.pause_timer -= 1;
+                if self.pause_timer == 0 {
+                    self.is_pause_goal = false;
+                    if server.game.game_over {
+                        server.new_game(self.create_game());
+                    } else {
+                        if server.game.time == 0 {
+                            server.game.time = period_length;
+                        }
 
-                    self.do_faceoff(server);
+                        self.do_faceoff(server);
+                    }
+                }
+            } else {
+                server.game.time = server.game.time.saturating_sub(1);
+                if server.game.time == 0 {
+                    server.game.period += 1;
+                    self.pause_timer = intermission_time;
+                    self.is_pause_goal = false;
+                    self.step_where_period_ended = server.game.game_step;
+                    self.too_late_printed_this_period = false;
+                    self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
+                    self.period_over(server);
                 }
             }
-        } else {
-            server.game.time = server.game.time.saturating_sub(1);
-            if server.game.time == 0 {
-                server.game.period += 1;
-                server.game.time_break = intermission_time;
-                self.step_where_period_ended = server.game.game_step;
-                self.too_late_printed_this_period = false;
-                self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
-                self.period_over(server);
-            }
         }
+        server.game.goal_message_timer = if self.is_pause_goal {
+            self.pause_timer
+        } else {
+            0
+        };
     }
 
     fn period_over(&mut self, server: &mut HQMServer) {
@@ -1172,7 +1178,6 @@ fn get_faceoff_positions(
     let mut blue_players = vec![];
     for (player_index, player) in players.iter().enumerate() {
         if let Some(player) = player {
-
             let team = player.object.map(|x| x.1);
             let i = match &player.data {
                 HQMServerPlayerData::DualControl { movement, stick } => {
@@ -1211,8 +1216,8 @@ fn has_players_in_offensive_zone(
             if let Some((object_index, skater_team)) = player.object {
                 if skater_team == team && ignore_player != Some(player_index) {
                     if let Some(skater) = server.game.world.objects.get_skater(object_index) {
-                        let feet_pos =
-                            &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
+                        let feet_pos = &skater.body.pos
+                            - (&skater.body.rot * Vector3::y().scale(skater.height));
                         let dot = (&feet_pos - &line.point).dot(&line.normal);
                         let leading_edge = -(line.width / 2.0);
                         if dot < leading_edge {
@@ -1236,7 +1241,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
     fn after_tick(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
         if server.game.time == 0 && server.game.period > 1 {
             self.handle_events_end_of_period(server, events);
-        } else if server.game.time_break > 0
+        } else if self.pause_timer > 0
             || server.game.time == 0
             || server.game.game_over
             || server.game.period == 0
@@ -1269,13 +1274,12 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
 
             server.game.rules_state = rules_state;
         }
-        if !self.paused {
-            self.update_clock(
-                server,
-                self.config.time_period * 100,
-                self.config.time_intermission * 100,
-            );
-        }
+
+        self.update_clock(
+            server,
+            self.config.time_period * 100,
+            self.config.time_intermission * 100,
+        );
 
         if let Some((start_replay, end_replay, force_view)) = self.start_next_replay {
             if end_replay <= server.game.game_step {
@@ -1564,8 +1568,7 @@ fn find_empty_dual_control(
         if let Some(player) = player {
             if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                 if movement.is_none() || stick.is_none() {
-                    if let Some((_, dual_control_team)) = player.object
-                    {
+                    if let Some((_, dual_control_team)) = player.object {
                         if dual_control_team == team {
                             return Some((i, movement, stick));
                         }

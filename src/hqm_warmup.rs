@@ -74,8 +74,7 @@ impl HQMPermanentWarmup {
                 if let Some(player) = player {
                     if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                         if movement.is_none() || stick.is_none() {
-                            if let Some((_, dual_control_team)) = player.object
-                            {
+                            if let Some((_, dual_control_team)) = player.object {
                                 if dual_control_team == team {
                                     return Some((i, movement, stick));
                                 }

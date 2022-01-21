@@ -2,9 +2,7 @@ use nalgebra::{Point3, Rotation3};
 use std::collections::HashMap;
 use tracing::info;
 
-use migo_hqm_server::hqm_game::{
-    HQMGame, HQMPhysicsConfiguration, HQMTeam,
-};
+use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
 use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMServerPlayerData};
 use migo_hqm_server::hqm_simulate;
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
@@ -18,7 +16,9 @@ enum HQMRussianStatus {
         round: u32,
         goal_scored: bool,
     },
-    GameOver,
+    GameOver {
+        timer: u32,
+    },
 }
 
 pub(crate) struct HQMRussianBehaviour {
@@ -288,7 +288,7 @@ impl HQMRussianBehaviour {
                     }
                 }
             }
-            HQMRussianStatus::GameOver => {}
+            HQMRussianStatus::GameOver { .. } => {}
         }
     }
 
@@ -347,9 +347,8 @@ impl HQMRussianBehaviour {
                 false
             };
             if game_over {
-                self.status = HQMRussianStatus::GameOver;
+                self.status = HQMRussianStatus::GameOver { timer: 500 };
                 game.game_over = true;
-                game.time_break = 500;
             }
         }
     }
@@ -388,7 +387,8 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                         } else if team == HQMTeam::Blue {
                             blue_player_count += 1;
                         }
-                        if let Some(skater) = server.game.world.objects.get_skater_mut(object_index) {
+                        if let Some(skater) = server.game.world.objects.get_skater_mut(object_index)
+                        {
                             let line = if team == HQMTeam::Red {
                                 red_player_count += 1;
                                 &server.game.world.rink.red_lines_and_net.defensive_line
@@ -404,8 +404,8 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                                 let radius = collision_ball.radius;
                                 let overlap = (p - pos).dot(normal) + radius;
                                 if overlap > 0.0 {
-                                    let mut new =
-                                        normal.scale(overlap * 0.03125) - collision_ball.velocity.scale(0.25);
+                                    let mut new = normal.scale(overlap * 0.03125)
+                                        - collision_ball.velocity.scale(0.25);
                                     if new.dot(&normal) > 0.0 {
                                         hqm_simulate::limit_friction(&mut new, &normal, 0.01);
 
@@ -414,7 +414,6 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                                 }
                             }
                         }
-
                     }
                 }
             }
@@ -431,9 +430,9 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
             } else {
                 server.game.time = 1000;
             }
-        } else if let HQMRussianStatus::GameOver = self.status {
-            server.game.time_break = server.game.time_break.saturating_sub(1);
-            if server.game.time_break == 0 {
+        } else if let HQMRussianStatus::GameOver { timer } = &mut self.status {
+            *timer = timer.saturating_sub(1);
+            if *timer == 0 {
                 let new_game = self.create_game();
                 server.new_game(new_game);
             }
@@ -444,9 +443,8 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
         } = self.status
         {
             if goal_scored {
-                server.game.time_break = server.game.time_break.saturating_sub(1);
-                if server.game.time_break == 0 {
-                    server.game.is_intermission_goal = false;
+                server.game.goal_message_timer = server.game.goal_message_timer.saturating_sub(1);
+                if server.game.goal_message_timer == 0 {
                     self.place_puck_for_team(server, in_zone);
                     server.game.time = 2000;
                     self.status = HQMRussianStatus::Game {
@@ -473,20 +471,16 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                                 round,
                                 goal_scored: true,
                             };
-                            server.game.time_break = 300;
-                            server.game.is_intermission_goal = true;
+                            server.game.goal_message_timer = 300;
                             server.add_goal_message(*team, None, None);
                             self.check_ending(&mut server.game);
                         }
                         HQMSimulationEvent::PuckTouch { puck, player, .. } => {
-                            if let Some((player_index, touching_team, _)) = server.players.get_from_object_index(*player)
+                            if let Some((player_index, touching_team, _)) =
+                                server.players.get_from_object_index(*player)
                             {
                                 if let Some(puck) = server.game.world.objects.get_puck_mut(*puck) {
-                                    puck.add_touch(
-                                        player_index,
-                                        touching_team,
-                                        server.game.time,
-                                    );
+                                    puck.add_touch(player_index, touching_team, server.game.time);
                                 }
                                 self.fix_status(server, touching_team);
                             }
@@ -563,8 +557,7 @@ fn find_empty_dual_control(
         if let Some(player) = player {
             if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                 if movement.is_none() || stick.is_none() {
-                    if let Some((_, dual_control_team)) = player.object
-                    {
+                    if let Some((_, dual_control_team)) = player.object {
                         if dual_control_team == team {
                             return Some((i, movement, stick));
                         }
