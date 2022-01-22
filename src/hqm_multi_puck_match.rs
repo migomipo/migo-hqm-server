@@ -1,7 +1,7 @@
 use nalgebra::{Point3, Rotation3};
 use tracing::info;
 
-use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMSkaterHand, HQMTeam};
+use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMSpawnPoint,
 };
@@ -10,7 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
 use std::rc::Rc;
 
-pub struct HQMPucksInNetConfiguration {
+pub struct HQMMultiPuckMatchConfiguration {
     pub team_max: usize,
     pub time_period: u32,
     pub time_warmup: u32,
@@ -24,17 +24,17 @@ pub struct HQMPucksInNetConfiguration {
     pub spawn_point: HQMSpawnPoint,
 }
 
-pub struct HQMPucksInNetBehaviour {
-    pub config: HQMPucksInNetConfiguration,
+pub struct HQMMultiPuckMatchBehaviour {
+    pub config: HQMMultiPuckMatchConfiguration,
     pub paused: bool,
     pause_timer: u32,
     puck_respawns: VecDeque<u32>,
     team_switch_timer: HashMap<usize, u32>,
 }
 
-impl HQMPucksInNetBehaviour {
-    pub fn new(config: HQMPucksInNetConfiguration) -> Self {
-        HQMPucksInNetBehaviour {
+impl HQMMultiPuckMatchBehaviour {
+    pub fn new(config: HQMMultiPuckMatchConfiguration) -> Self {
+        HQMMultiPuckMatchBehaviour {
             config,
             paused: false,
             pause_timer: 0,
@@ -674,7 +674,7 @@ impl HQMPucksInNetBehaviour {
     }
 }
 
-impl HQMServerBehaviour for HQMPucksInNetBehaviour {
+impl HQMServerBehaviour for HQMMultiPuckMatchBehaviour {
     fn before_tick(&mut self, server: &mut HQMServer) {
         self.update_players(server);
     }

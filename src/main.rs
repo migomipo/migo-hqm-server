@@ -6,7 +6,7 @@ use ini::Ini;
 use std::env;
 
 mod hqm_match;
-mod hqm_pucks_in_net;
+mod hqm_multi_puck_match;
 mod hqm_russian;
 mod hqm_shootout;
 mod hqm_warmup;
@@ -14,7 +14,7 @@ mod hqm_warmup;
 use crate::hqm_match::{
     HQMIcingConfiguration, HQMMatchBehaviour, HQMMatchConfiguration, HQMOffsideConfiguration,
 };
-use crate::hqm_pucks_in_net::{HQMPucksInNetBehaviour, HQMPucksInNetConfiguration};
+use crate::hqm_multi_puck_match::{HQMMultiPuckMatchBehaviour, HQMMultiPuckMatchConfiguration};
 use crate::hqm_russian::HQMRussianBehaviour;
 use crate::hqm_shootout::HQMShootoutBehaviour;
 use crate::hqm_warmup::HQMPermanentWarmup;
@@ -30,7 +30,7 @@ enum HQMServerMode {
     PermanentWarmup,
     Russian,
     Shootout,
-    PucksInNet,
+    MultiPuckMatch,
 }
 
 #[tokio::main]
@@ -84,7 +84,7 @@ async fn main() -> std::io::Result<()> {
                 "match" => HQMServerMode::Match,
                 "russian" => HQMServerMode::Russian,
                 "shootout" => HQMServerMode::Shootout,
-                "pucksinnet" => HQMServerMode::PucksInNet,
+                "multipuckmatch" => HQMServerMode::MultiPuckMatch,
                 _ => HQMServerMode::Match,
             });
 
@@ -345,7 +345,7 @@ async fn main() -> std::io::Result<()> {
                 )
                 .await
             }
-            HQMServerMode::PucksInNet => {
+            HQMServerMode::MultiPuckMatch => {
                 let periods =
                     get_optional(game_section, "periods", 1, |x| x.parse::<u32>().unwrap());
 
@@ -371,7 +371,7 @@ async fn main() -> std::io::Result<()> {
                         _ => HQMSpawnPoint::Center,
                     });
 
-                let match_config = HQMPucksInNetConfiguration {
+                let match_config = HQMMultiPuckMatchConfiguration {
                     time_period: rules_time_period,
                     time_warmup: rules_time_warmup,
                     time_intermission: rule_time_intermission,
@@ -389,7 +389,7 @@ async fn main() -> std::io::Result<()> {
                     server_port,
                     server_public,
                     config,
-                    HQMPucksInNetBehaviour::new(match_config),
+                    HQMMultiPuckMatchBehaviour::new(match_config),
                 )
                 .await
             }

@@ -2,8 +2,7 @@ use nalgebra::{Point3, Rotation3, Vector3};
 use tracing::info;
 
 use migo_hqm_server::hqm_game::{
-    HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRulesState,
-    HQMSkaterHand, HQMTeam,
+    HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRulesState, HQMTeam,
 };
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerList, HQMSpawnPoint,
