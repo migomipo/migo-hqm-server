@@ -201,6 +201,9 @@ async fn main() -> std::io::Result<()> {
 
         return match mode {
             HQMServerMode::Match => {
+                let periods =
+                    get_optional(game_section, "periods", 3, |x| x.parse::<u32>().unwrap());
+
                 let rules_time_period = get_optional(game_section, "time_period", 300, |x| {
                     x.parse::<u32>().unwrap()
                 });
@@ -277,6 +280,7 @@ async fn main() -> std::io::Result<()> {
                     physics_config,
                     team_max: server_team_max,
                     blue_line_location,
+                    periods,
                 };
 
                 hqm_server::run_server(
@@ -342,6 +346,9 @@ async fn main() -> std::io::Result<()> {
                 .await
             }
             HQMServerMode::PucksInNet => {
+                let periods =
+                    get_optional(game_section, "periods", 1, |x| x.parse::<u32>().unwrap());
+
                 let rules_time_period = get_optional(game_section, "time_period", 300, |x| {
                     x.parse::<u32>().unwrap()
                 });
@@ -368,6 +375,7 @@ async fn main() -> std::io::Result<()> {
                     time_period: rules_time_period,
                     time_warmup: rules_time_warmup,
                     time_intermission: rule_time_intermission,
+                    periods,
                     mercy,
                     first_to,
                     dual_control,

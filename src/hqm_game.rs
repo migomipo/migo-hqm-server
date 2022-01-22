@@ -23,7 +23,6 @@ pub struct HQMGameWorldObjectList {
 }
 
 impl HQMGameWorldObjectList {
-
     pub fn get_puck(&self, object_index: usize) -> Option<&HQMPuck> {
         if let HQMGameObject::Puck(puck) = &self.objects[object_index] {
             Some(puck)

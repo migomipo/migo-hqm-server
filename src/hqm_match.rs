@@ -20,6 +20,7 @@ pub struct HQMMatchConfiguration {
     pub time_intermission: u32,
     pub mercy: u32,
     pub first_to: u32,
+    pub periods: u32,
     pub offside: HQMOffsideConfiguration,
     pub icing: HQMIcingConfiguration,
     pub warmup_pucks: usize,
@@ -156,14 +157,10 @@ impl HQMMatchBehaviour {
         self.faceoff_game_step = server.game.game_step;
     }
 
-    fn call_goal(
-        &mut self,
-        server: &mut HQMServer,
-        team: HQMTeam,
-        puck: usize,
-        time_break: u32,
-        time_gameover: u32,
-    ) {
+    fn call_goal(&mut self, server: &mut HQMServer, team: HQMTeam, puck: usize) {
+        let time_break = self.config.time_break * 100;
+        let time_gameover = self.config.time_intermission * 100;
+
         match team {
             HQMTeam::Red => {
                 server.game.red_score += 1;
@@ -232,7 +229,8 @@ impl HQMMatchBehaviour {
             HQMTeam::Blue => (server.game.blue_score, server.game.red_score),
         };
 
-        let game_over = if server.game.period > 3 && server.game.red_score != server.game.blue_score
+        let game_over = if server.game.period > self.config.periods
+            && server.game.red_score != server.game.blue_score
         {
             true
         } else if self.config.mercy > 0
@@ -329,15 +327,9 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn handle_events(
-        &mut self,
-        server: &mut HQMServer,
-        events: &[HQMSimulationEvent],
-        time_break: u32,
-        time_intermission: u32,
-        offside: HQMOffsideConfiguration,
-        icing: HQMIcingConfiguration,
-    ) {
+    fn handle_events(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
+        let offside = self.config.offside;
+        let icing = self.config.icing;
         for event in events {
             match event {
                 HQMSimulationEvent::PuckEnteredNet { team, puck } => {
@@ -345,11 +337,11 @@ impl HQMMatchBehaviour {
                     match &self.offside_status {
                         HQMOffsideStatus::Warning(offside_team, p, _) if *offside_team == team => {
                             let copy = p.clone();
-                            self.call_offside(server, team, &copy, time_break);
+                            self.call_offside(server, team, &copy);
                         }
                         HQMOffsideStatus::Offside(_) => {}
                         _ => {
-                            self.call_goal(server, team, puck, time_break, time_intermission);
+                            self.call_goal(server, team, puck);
                         }
                     }
                 }
@@ -371,12 +363,7 @@ impl HQMMatchBehaviour {
                                     } else {
                                         p.clone()
                                     };
-                                    self.call_offside(
-                                        server,
-                                        touching_team,
-                                        &pass_origin,
-                                        time_break,
-                                    );
+                                    self.call_offside(server, touching_team, &pass_origin);
                                 }
                                 continue;
                             }
@@ -387,7 +374,7 @@ impl HQMMatchBehaviour {
                                         server.add_server_chat_message_str("Icing waved off");
                                     } else {
                                         let copy = p.clone();
-                                        self.call_icing(server, other_team, &copy, time_break);
+                                        self.call_icing(server, other_team, &copy);
                                     }
                                 } else {
                                     self.icing_status = HQMIcingStatus::No;
@@ -421,7 +408,7 @@ impl HQMMatchBehaviour {
                                 }
                                 HQMIcingConfiguration::NoTouch => {
                                     let copy = p.clone();
-                                    self.call_icing(server, team, &copy, time_break);
+                                    self.call_icing(server, team, &copy);
                                 }
                                 HQMIcingConfiguration::Off => {}
                             }
@@ -451,7 +438,7 @@ impl HQMMatchBehaviour {
                                         }
                                         HQMOffsideConfiguration::Immediate => {
                                             let copy = touch.puck_pos.clone();
-                                            self.call_offside(server, team, &copy, time_break);
+                                            self.call_offside(server, team, &copy);
                                         }
                                         HQMOffsideConfiguration::Off => {
                                             self.offside_status =
@@ -484,13 +471,9 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn call_offside(
-        &mut self,
-        server: &mut HQMServer,
-        team: HQMTeam,
-        pass_origin: &Point3<f32>,
-        time_break: u32,
-    ) {
+    fn call_offside(&mut self, server: &mut HQMServer, team: HQMTeam, pass_origin: &Point3<f32>) {
+        let time_break = self.config.time_break * 100;
+
         self.next_faceoff_spot = server
             .game
             .world
@@ -501,13 +484,9 @@ impl HQMMatchBehaviour {
         server.add_server_chat_message_str("Offside");
     }
 
-    fn call_icing(
-        &mut self,
-        server: &mut HQMServer,
-        team: HQMTeam,
-        pass_origin: &Point3<f32>,
-        time_break: u32,
-    ) {
+    fn call_icing(&mut self, server: &mut HQMServer, team: HQMTeam, pass_origin: &Point3<f32>) {
+        let time_break = self.config.time_break * 100;
+
         self.next_faceoff_spot = server
             .game
             .world
@@ -1095,6 +1074,26 @@ impl HQMMatchBehaviour {
         }
     }
 
+    fn set_period_num(&mut self, server: &mut HQMServer, input_period: u32, player_index: usize) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                self.config.periods = input_period;
+
+                info!(
+                    "{} ({}) set number of periods to {}",
+                    player.player_name, player_index, input_period
+                );
+                let msg = format!(
+                    "Number of periods set to {} by {}",
+                    input_period, player.player_name
+                );
+                server.add_server_chat_message(msg);
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
     fn set_preferred_faceoff_position(
         &mut self,
         server: &mut HQMServer,
@@ -1123,7 +1122,10 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn update_clock(&mut self, server: &mut HQMServer, period_length: u32, intermission_time: u32) {
+    fn update_clock(&mut self, server: &mut HQMServer) {
+        let period_length = self.config.time_period * 100;
+        let intermission_time = self.config.time_intermission * 100;
+
         if !self.paused {
             if self.pause_timer > 0 {
                 self.pause_timer -= 1;
@@ -1148,7 +1150,9 @@ impl HQMMatchBehaviour {
                     self.step_where_period_ended = server.game.game_step;
                     self.too_late_printed_this_period = false;
                     self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
-                    if server.game.period > 3 && server.game.red_score != server.game.blue_score {
+                    if server.game.period > self.config.periods
+                        && server.game.red_score != server.game.blue_score
+                    {
                         server.game.game_over = true;
                     }
                 }
@@ -1245,14 +1249,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         {
             // Nothing
         } else {
-            self.handle_events(
-                server,
-                events,
-                self.config.time_break * 100,
-                self.config.time_intermission * 100,
-                self.config.offside,
-                self.config.icing,
-            );
+            self.handle_events(server, events);
 
             let rules_state = if let HQMOffsideStatus::Offside(_) = self.offside_status {
                 HQMRulesState::Offside
@@ -1271,11 +1268,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
             server.game.rules_state = rules_state;
         }
 
-        self.update_clock(
-            server,
-            self.config.time_period * 100,
-            self.config.time_intermission * 100,
-        );
+        self.update_clock(server);
 
         if let Some((start_replay, end_replay, force_view)) = self.start_next_replay {
             if end_replay <= server.game.game_step {
@@ -1311,6 +1304,11 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                         "period" => {
                             if let Ok(input_period) = args[1].parse::<u32>() {
                                 Self::set_period(server, input_period, player_index);
+                            }
+                        }
+                        "periodnum" => {
+                            if let Ok(input_period) = args[1].parse::<u32>() {
+                                self.set_period_num(server, input_period, player_index);
                             }
                         }
                         "clock" => {

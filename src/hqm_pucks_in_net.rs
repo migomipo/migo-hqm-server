@@ -15,6 +15,7 @@ pub struct HQMPucksInNetConfiguration {
     pub time_period: u32,
     pub time_warmup: u32,
     pub time_intermission: u32,
+    pub periods: u32,
     pub mercy: u32,
     pub first_to: u32,
     pub pucks: usize,
@@ -47,14 +48,11 @@ impl HQMPucksInNetBehaviour {
         let redline = server.game.world.rink.length / 2.0;
         server.game.world.clear_pucks();
 
-        let puck_line_start = server.game.world.rink.width / 2.0 - 0.4 * ((self.config.pucks - 1) as f32);
+        let puck_line_start =
+            server.game.world.rink.width / 2.0 - 0.4 * ((self.config.pucks - 1) as f32);
 
         for i in 0..self.config.pucks {
-            let pos = Point3::new(
-                puck_line_start + 0.8 * (i as f32),
-                1.5,
-                redline,
-            );
+            let pos = Point3::new(puck_line_start + 0.8 * (i as f32), 1.5, redline);
             let rot = Rotation3::identity();
             server.game.world.create_puck_object(pos, rot);
         }
@@ -601,7 +599,47 @@ impl HQMPucksInNetBehaviour {
         }
     }
 
-    fn update_clock(&mut self, server: &mut HQMServer, period_length: u32, intermission_time: u32) {
+    fn set_period(server: &mut HQMServer, input_period: u32, player_index: usize) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                server.game.period = input_period;
+
+                info!(
+                    "{} ({}) set period to {}",
+                    player.player_name, player_index, input_period
+                );
+                let msg = format!("Period set by {}", player.player_name);
+                server.add_server_chat_message(msg);
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    fn set_period_num(&mut self, server: &mut HQMServer, input_period: u32, player_index: usize) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                self.config.periods = input_period;
+
+                info!(
+                    "{} ({}) set number of periods to {}",
+                    player.player_name, player_index, input_period
+                );
+                let msg = format!(
+                    "Number of periods set to {} by {}",
+                    input_period, player.player_name
+                );
+                server.add_server_chat_message(msg);
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    fn update_clock(&mut self, server: &mut HQMServer) {
+        let period_length = self.config.time_period * 100;
+        let intermission_time = self.config.time_intermission * 100;
+
         if !self.paused {
             if self.pause_timer > 0 {
                 self.pause_timer -= 1;
@@ -619,7 +657,7 @@ impl HQMPucksInNetBehaviour {
             } else {
                 server.game.time = server.game.time.saturating_sub(1);
                 if server.game.time == 0 {
-                    if server.game.period == 0 {
+                    if server.game.period < self.config.periods {
                         server.game.period += 1;
                         self.pause_timer = intermission_time;
                     } else {
@@ -655,7 +693,6 @@ impl HQMServerBehaviour for HQMPucksInNetBehaviour {
             let center = server.game.world.rink.width / 2.0;
             let redline = server.game.world.rink.length / 2.0;
             for t in self.puck_respawns.iter_mut() {
-
                 *t -= 1;
                 if *t == 0 {
                     let mut offset = 0.0;
@@ -687,11 +724,7 @@ impl HQMServerBehaviour for HQMPucksInNetBehaviour {
             self.puck_respawns.retain(|x| *x > 0);
         }
 
-        self.update_clock(
-            server,
-            self.config.time_period * 100,
-            self.config.time_intermission * 100,
-        );
+        self.update_clock(server);
     }
 
     fn handle_command(
@@ -714,6 +747,16 @@ impl HQMServerBehaviour for HQMPucksInNetBehaviour {
                         "bluescore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
                                 Self::set_score(server, HQMTeam::Blue, input_score, player_index);
+                            }
+                        }
+                        "period" => {
+                            if let Ok(input_period) = args[1].parse::<u32>() {
+                                Self::set_period(server, input_period, player_index);
+                            }
+                        }
+                        "periodnum" => {
+                            if let Ok(input_period) = args[1].parse::<u32>() {
+                                self.set_period_num(server, input_period, player_index);
                             }
                         }
                         "clock" => {
