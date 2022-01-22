@@ -673,18 +673,19 @@ impl HQMPucksInNetBehaviour {
             } else {
                 server.game.time = server.game.time.saturating_sub(1);
                 if server.game.time == 0 {
-                    server.game.period += 1;
-                    self.pause_timer = intermission_time;
-                    self.period_over(server);
+                    if server.game.period == 0 {
+                        server.game.period += 1;
+                        self.pause_timer = intermission_time;
+                    } else {
+                        server.game.time = 1;
+                        if server.game.red_score != server.game.blue_score {
+                            server.game.game_over = true;
+                            self.pause_timer = intermission_time;
+                        }
+                    }
                 }
             }
             server.game.goal_message_timer = server.game.goal_message_timer.saturating_sub(1);
-        }
-    }
-
-    fn period_over(&mut self, server: &mut HQMServer) {
-        if server.game.period > 1 && server.game.red_score != server.game.blue_score {
-            server.game.game_over = true;
         }
     }
 }

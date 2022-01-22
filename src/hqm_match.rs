@@ -1148,7 +1148,9 @@ impl HQMMatchBehaviour {
                     self.step_where_period_ended = server.game.game_step;
                     self.too_late_printed_this_period = false;
                     self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
-                    self.period_over(server);
+                    if server.game.period > 3 && server.game.red_score != server.game.blue_score {
+                        server.game.game_over = true;
+                    }
                 }
             }
         }
@@ -1157,12 +1159,6 @@ impl HQMMatchBehaviour {
         } else {
             0
         };
-    }
-
-    fn period_over(&mut self, server: &mut HQMServer) {
-        if server.game.period > 3 && server.game.red_score != server.game.blue_score {
-            server.game.game_over = true;
-        }
     }
 }
 
