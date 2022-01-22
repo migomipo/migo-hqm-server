@@ -13,7 +13,7 @@ use std::time::Instant;
 
 pub struct HQMGameWorld {
     pub objects: HQMGameWorldObjectList,
-    puck_slots: usize,
+    pub puck_slots: usize,
     pub rink: HQMRink,
     pub physics_config: HQMPhysicsConfiguration,
 }
@@ -23,25 +23,6 @@ pub struct HQMGameWorldObjectList {
 }
 
 impl HQMGameWorldObjectList {
-    pub fn get_skater_iter(&self) -> impl Iterator<Item = &HQMSkater> {
-        self.objects.iter().filter_map(|obj| {
-            if let HQMGameObject::Player(skater) = obj {
-                Some(skater)
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn get_skater_iter_mut(&mut self) -> impl Iterator<Item = &mut HQMSkater> {
-        self.objects.iter_mut().filter_map(|obj| {
-            if let HQMGameObject::Player(skater) = obj {
-                Some(skater)
-            } else {
-                None
-            }
-        })
-    }
 
     pub fn get_puck(&self, object_index: usize) -> Option<&HQMPuck> {
         if let HQMGameObject::Puck(puck) = &self.objects[object_index] {

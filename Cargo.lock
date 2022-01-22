@@ -389,7 +389,6 @@ dependencies = [
  "chrono",
  "nalgebra",
  "num-integer",
- "rand",
  "reqwest",
  "rust-ini",
  "tokio",

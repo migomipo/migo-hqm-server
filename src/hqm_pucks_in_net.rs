@@ -46,13 +46,19 @@ impl HQMPucksInNetBehaviour {
         let center = server.game.world.rink.width / 2.0;
         let redline = server.game.world.rink.length / 2.0;
         server.game.world.clear_pucks();
-        for _ in 0..self.config.pucks {
-            let x = center + (rand::random::<f32>() - 0.5) * 10.0;
-            let z = redline + (rand::random::<f32>() - 0.5) * 10.0;
-            let pos = Point3::new(x, 1.5, z);
+
+        let puck_line_start = server.game.world.rink.width / 2.0 - 0.4 * ((self.config.pucks - 1) as f32);
+
+        for i in 0..self.config.pucks {
+            let pos = Point3::new(
+                puck_line_start + 0.8 * (i as f32),
+                1.5,
+                redline,
+            );
             let rot = Rotation3::identity();
             server.game.world.create_puck_object(pos, rot);
         }
+
         let mut red_players = vec![];
         let mut blue_players = vec![];
         for (player_index, player) in server.players.iter().enumerate() {
@@ -649,11 +655,31 @@ impl HQMServerBehaviour for HQMPucksInNetBehaviour {
             let center = server.game.world.rink.width / 2.0;
             let redline = server.game.world.rink.length / 2.0;
             for t in self.puck_respawns.iter_mut() {
+
                 *t -= 1;
                 if *t == 0 {
-                    let x = center + (rand::random::<f32>() - 0.5) * 10.0;
-                    let z = redline + (rand::random::<f32>() - 0.5) * 10.0;
-                    let pos = Point3::new(x, 1.5, z);
+                    let mut offset = 0.0;
+                    let x = 'findx: loop {
+                        let x = center + offset;
+                        for puck_index in 0..server.game.world.puck_slots {
+                            if let Some(puck) = server.game.world.objects.get_puck(puck_index) {
+                                let puck_x = puck.body.pos[0];
+                                let puck_z = puck.body.pos[2];
+                                if (puck_x - x).abs() < 0.1 && (puck_z - redline).abs() < 0.1 {
+                                    // Try new position
+                                    if offset <= 0.0 {
+                                        offset = offset.abs() + 1.0;
+                                    } else {
+                                        offset = -offset;
+                                    }
+                                    continue 'findx;
+                                }
+                            }
+                        }
+                        break x;
+                    };
+
+                    let pos = Point3::new(x, 1.5, redline);
                     let rot = Rotation3::identity();
                     server.game.world.create_puck_object(pos, rot);
                 }
