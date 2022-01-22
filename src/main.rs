@@ -348,9 +348,6 @@ async fn main() -> std::io::Result<()> {
                 let rules_time_warmup = get_optional(game_section, "time_warmup", 300, |x| {
                     x.parse::<u32>().unwrap()
                 });
-                let rule_time_break = get_optional(game_section, "time_break", 10, |x| {
-                    x.parse::<u32>().unwrap()
-                });
                 let rule_time_intermission =
                     get_optional(game_section, "time_intermission", 20, |x| {
                         x.parse::<u32>().unwrap()
@@ -367,18 +364,12 @@ async fn main() -> std::io::Result<()> {
                         _ => HQMSpawnPoint::Center,
                     });
 
-                let use_mph = get_optional(game_section, "use_mph", false, |s| {
-                    s.eq_ignore_ascii_case("true")
-                });
-
                 let match_config = HQMPucksInNetConfiguration {
                     time_period: rules_time_period,
                     time_warmup: rules_time_warmup,
-                    time_break: rule_time_break,
                     time_intermission: rule_time_intermission,
                     mercy,
                     first_to,
-                    use_mph,
                     dual_control,
                     spawn_point,
                     physics_config,

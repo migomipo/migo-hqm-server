@@ -14,13 +14,11 @@ pub struct HQMPucksInNetConfiguration {
     pub team_max: usize,
     pub time_period: u32,
     pub time_warmup: u32,
-    pub time_break: u32,
     pub time_intermission: u32,
     pub mercy: u32,
     pub first_to: u32,
     pub pucks: usize,
     pub physics_config: HQMPhysicsConfiguration,
-    pub use_mph: bool,
     pub dual_control: bool,
     pub spawn_point: HQMSpawnPoint,
 }
@@ -96,20 +94,17 @@ impl HQMPucksInNetBehaviour {
             }
         };
 
-        let (goal_scorer_index, assist_index, puck_speed_across_line, puck_speed_from_stick) =
+        let (goal_scorer_index, assist_index) =
             if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
                 let mut goal_scorer_index = None;
                 let mut assist_index = None;
                 let mut goal_scorer_first_touch = 0;
-                let mut puck_speed_from_stick = None;
-                let puck_speed_across_line = this_puck.body.linear_velocity.norm();
 
                 for touch in this_puck.touches.iter() {
                     if goal_scorer_index.is_none() {
                         if touch.team == team {
                             goal_scorer_index = Some(touch.player_index);
                             goal_scorer_first_touch = touch.first_time;
-                            puck_speed_from_stick = Some(touch.puck_speed);
                         }
                     } else {
                         if touch.team == team {
@@ -131,12 +126,7 @@ impl HQMPucksInNetBehaviour {
                     }
                 }
 
-                (
-                    goal_scorer_index,
-                    assist_index,
-                    puck_speed_across_line,
-                    puck_speed_from_stick,
-                )
+                (goal_scorer_index, assist_index)
             } else {
                 return;
             };
@@ -161,32 +151,6 @@ impl HQMPucksInNetBehaviour {
 
         server.game.goal_message_timer = 200;
         server.add_goal_message(team, goal_scorer_index, assist_index);
-
-        fn convert(puck_speed: f32, use_mph: bool) -> (f32, &'static str) {
-            if use_mph {
-                (puck_speed * 100f32 * 2.23693, "mph")
-            } else {
-                (puck_speed * 100f32 * 3.6, "km/h")
-            }
-        }
-
-        let (puck_speed_across_line, puck_speed_unit) =
-            convert(puck_speed_across_line, self.config.use_mph);
-
-        let str1 = format!(
-            "Goal scored, {:.1} {} across line",
-            puck_speed_across_line, puck_speed_unit
-        );
-
-        let str2 = if let Some(puck_speed_from_stick) = puck_speed_from_stick {
-            let (puck_speed, puck_speed_unit) = convert(puck_speed_from_stick, self.config.use_mph);
-            format!(", {:.1} {} from stick", puck_speed, puck_speed_unit)
-        } else {
-            "".to_owned()
-        };
-        let s = format!("{}{}", str1, str2);
-
-        server.add_server_chat_message(s);
 
         if game_over {
             server.game.game_over = true;
@@ -550,13 +514,6 @@ impl HQMPucksInNetBehaviour {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 self.paused = true;
-                if server.game.goal_message_timer > 0
-                    && server.game.goal_message_timer < self.config.time_break
-                {
-                    // If we're currently in a break, with very little time left,
-                    // we reset the timer
-                    server.game.goal_message_timer = self.config.time_break;
-                }
                 info!("{} ({}) paused game", player.player_name, player_index);
                 let msg = format!("Game paused by {}", player.player_name);
                 server.add_server_chat_message(msg);
