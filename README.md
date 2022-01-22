@@ -18,7 +18,7 @@ Property               | Explanation
 -----------------------| -------------
 name                   | Name of the server that will be visible in the server list
 port                   | Port number, must be a number between 0 and 65535. 27585 is the default, and most servers are in the 27585-27599 range.
-mode                   | Game mode. Currently supported values are "match" (play matches), "warmup" (warmup mode forever), "russian" (Russian 1v1/2v2) and "shootout" (shootout mode).
+mode                   | Game mode. Currently supported values are "match" (play matches), "warmup" (warmup mode forever), "russian" (Russian 1v1/2v2), "shootout" (shootout mode) and "pucksinnet" (pucks-in-net match mode).
 public                 | If true, the server will notify the master server so that clients can find this server easily in the server list.
 log_name               | (optional) Log name prefix. Log files will end up in a "log" folder in the current working directory, and be named *log_name*-*date*. Default log name prefix is the server name + ".log".
 team_max               | Number of players allowed in each team.
@@ -39,6 +39,8 @@ time_period            | (Match mode only) Period length in seconds.
 time_warmup            | (Match mode only) Warmup length in seconds.
 time_intermission      | (Match mode only) Intermission length in seconds.
 warmup_pucks           | Number of pucks in warmup. Only 32 objects (pucks+players) are allowed on the ice at the time, so at warmup there can never be more players than (32 minus number of pucks) on the ice.
+pucks                  | Number of pucks in pucks-in-net match mode. Only 32 objects (pucks+players) are allowed on the ice at the time, so at warmup there can never be more players than (32 minus number of pucks) on the ice.
+periods                | (Match mode only) Number of regular periods. Default is 3 for regular match mode and 1 for pucks-in-net mode.
 mercy                  | (Match mode only) Mercy rule setting. If 0, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least X goals.
 first                  | (Match mode only) First-to-goals rule setting. If 0, first-to-goals rule will be disabled. Otherwise, games will automatically end if a team scores and and reaches at least X goals scored.
 attempts               | (Russian 1v1 or shootout mode only) How many attempts each team will get. Default is 5 for shootout mode and 10 for Russian 1v1 mode.
@@ -101,6 +103,7 @@ Commands                 | Explanation
 /faceoff                 | Calls center-ice faceoff.
 /set clock *M*:*S*       | Sets game clock.
 /set period *N*          | Sets period. OT1 is 4, OT2 is 5, etc. 0 is warmup.
+/set periodnum *N*       | Sets number of periods.
 /set redscore *N*        | Sets red score.
 /set bluescore *N*       | Sets blue score.
 /set icing *S*           | Sets icing rule. Allowed values are "off", "on" (touch icing" and "notouch" (no-touch icing)

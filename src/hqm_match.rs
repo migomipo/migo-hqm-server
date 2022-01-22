@@ -1334,15 +1334,6 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                                 }
                             }
                         }
-                        "hand" => match args[1] {
-                            "left" => {
-                                server.set_hand(HQMSkaterHand::Left, player_index);
-                            }
-                            "right" => {
-                                server.set_hand(HQMSkaterHand::Right, player_index);
-                            }
-                            _ => {}
-                        },
                         "icing" => {
                             if let Some(arg) = args.get(1) {
                                 self.set_icing_rule(server, player_index, arg);
