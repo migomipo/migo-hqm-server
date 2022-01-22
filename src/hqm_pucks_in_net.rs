@@ -595,23 +595,6 @@ impl HQMPucksInNetBehaviour {
         }
     }
 
-    fn set_period(server: &mut HQMServer, input_period: u32, player_index: usize) {
-        if let Some(player) = server.players.get(player_index) {
-            if player.is_admin {
-                server.game.period = input_period;
-
-                info!(
-                    "{} ({}) set period to {}",
-                    player.player_name, player_index, input_period
-                );
-                let msg = format!("Period set by {}", player.player_name);
-                server.add_server_chat_message(msg);
-            } else {
-                server.admin_deny_message(player_index);
-            }
-        }
-    }
-
     fn update_clock(&mut self, server: &mut HQMServer, period_length: u32, intermission_time: u32) {
         if !self.paused {
             if self.pause_timer > 0 {
@@ -705,11 +688,6 @@ impl HQMServerBehaviour for HQMPucksInNetBehaviour {
                         "bluescore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
                                 Self::set_score(server, HQMTeam::Blue, input_score, player_index);
-                            }
-                        }
-                        "period" => {
-                            if let Ok(input_period) = args[1].parse::<u32>() {
-                                Self::set_period(server, input_period, player_index);
                             }
                         }
                         "clock" => {
