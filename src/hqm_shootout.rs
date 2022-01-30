@@ -429,29 +429,25 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                         }
                     }
                 }
-                HQMSimulationEvent::PuckTouch { player, puck, .. } => {
-                    let (player, puck) = (*player, *puck);
-                    if let Some((player_index, touching_team, _)) =
+                HQMSimulationEvent::PuckTouch { player, .. } => {
+                    let player = *player;
+                    if let Some((_, touching_team, _)) =
                         server.players.get_from_object_index(player)
                     {
-                        if let Some(puck) = server.game.world.objects.get_puck_mut(puck) {
-                            puck.add_touch(player_index, touching_team, server.game.time);
-
-                            if let HQMShootoutStatus::Game {
-                                state,
-                                team: attacking_team,
-                                ..
-                            } = &mut self.status
-                            {
-                                if touching_team == *attacking_team {
-                                    if let HQMShootoutAttemptState::NoMoreAttack { .. } = *state {
-                                        self.end_attempt(server, false);
-                                    }
-                                } else {
-                                    if let HQMShootoutAttemptState::Attack { progress } = *state {
-                                        *state = HQMShootoutAttemptState::NoMoreAttack {
-                                            final_progress: progress,
-                                        }
+                        if let HQMShootoutStatus::Game {
+                            state,
+                            team: attacking_team,
+                            ..
+                        } = &mut self.status
+                        {
+                            if touching_team == *attacking_team {
+                                if let HQMShootoutAttemptState::NoMoreAttack { .. } = *state {
+                                    self.end_attempt(server, false);
+                                }
+                            } else {
+                                if let HQMShootoutAttemptState::Attack { progress } = *state {
+                                    *state = HQMShootoutAttemptState::NoMoreAttack {
+                                        final_progress: progress,
                                     }
                                 }
                             }

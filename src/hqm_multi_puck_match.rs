@@ -1,11 +1,12 @@
 use nalgebra::{Point3, Rotation3};
 use tracing::info;
 
-use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
+use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMPuck, HQMTeam};
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMSpawnPoint,
 };
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
 use std::rc::Rc;
@@ -24,12 +25,23 @@ pub struct HQMMultiPuckMatchConfiguration {
     pub spawn_point: HQMSpawnPoint,
 }
 
+#[derive(Debug, Clone)]
+pub struct HQMPuckTouch {
+    pub player_index: usize,
+    pub team: HQMTeam,
+    pub puck_pos: Point3<f32>,
+    pub puck_speed: f32,
+    pub first_time: u32,
+    pub last_time: u32,
+}
+
 pub struct HQMMultiPuckMatchBehaviour {
     pub config: HQMMultiPuckMatchConfiguration,
     pub paused: bool,
     pause_timer: u32,
     puck_respawns: VecDeque<u32>,
     team_switch_timer: HashMap<usize, u32>,
+    puck_touches: HashMap<usize, VecDeque<HQMPuckTouch>>,
 }
 
 impl HQMMultiPuckMatchBehaviour {
@@ -40,6 +52,7 @@ impl HQMMultiPuckMatchBehaviour {
             pause_timer: 0,
             puck_respawns: VecDeque::new(),
             team_switch_timer: Default::default(),
+            puck_touches: Default::default(),
         }
     }
 
@@ -88,7 +101,7 @@ impl HQMMultiPuckMatchBehaviour {
         }
     }
 
-    fn call_goal(&mut self, server: &mut HQMServer, team: HQMTeam, puck: usize) {
+    fn call_goal(&mut self, server: &mut HQMServer, team: HQMTeam, puck_index: usize) {
         match team {
             HQMTeam::Red => {
                 server.game.red_score += 1;
@@ -98,44 +111,40 @@ impl HQMMultiPuckMatchBehaviour {
             }
         };
 
-        let (goal_scorer_index, assist_index) =
-            if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
-                let mut goal_scorer_index = None;
-                let mut assist_index = None;
-                let mut goal_scorer_first_touch = 0;
+        let mut goal_scorer_index = None;
+        let mut assist_index = None;
+        let mut goal_scorer_first_touch = 0;
 
-                for touch in this_puck.touches.iter() {
-                    if goal_scorer_index.is_none() {
-                        if touch.team == team {
-                            goal_scorer_index = Some(touch.player_index);
+        if let Some(touches) = self.puck_touches.get(&puck_index) {
+            for touch in touches.iter() {
+                if goal_scorer_index.is_none() {
+                    if touch.team == team {
+                        goal_scorer_index = Some(touch.player_index);
+                        goal_scorer_first_touch = touch.first_time;
+                    }
+                } else {
+                    if touch.team == team {
+                        if Some(touch.player_index) == goal_scorer_index {
                             goal_scorer_first_touch = touch.first_time;
-                        }
-                    } else {
-                        if touch.team == team {
-                            if Some(touch.player_index) == goal_scorer_index {
-                                goal_scorer_first_touch = touch.first_time;
-                            } else {
-                                // This is the first player on the scoring team that touched it apart from the goal scorer
-                                // If more than 10 seconds passed between the goal scorer's first touch
-                                // and this last touch, it doesn't count as an assist
+                        } else {
+                            // This is the first player on the scoring team that touched it apart from the goal scorer
+                            // If more than 10 seconds passed between the goal scorer's first touch
+                            // and this last touch, it doesn't count as an assist
 
-                                let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
+                            let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
 
-                                if diff <= 1000 {
-                                    assist_index = Some(touch.player_index)
-                                }
-                                break;
+                            if diff <= 1000 {
+                                assist_index = Some(touch.player_index)
                             }
+                            break;
                         }
                     }
                 }
+            }
+        }
 
-                (goal_scorer_index, assist_index)
-            } else {
-                return;
-            };
-
-        server.game.world.remove_puck(puck);
+        server.game.world.remove_puck(puck_index);
+        self.puck_touches.remove(&puck_index);
         self.puck_respawns.push_back(200);
 
         let (new_score, opponent_score) = match team {
@@ -173,13 +182,19 @@ impl HQMMultiPuckMatchBehaviour {
                     self.call_goal(server, team, puck);
                 }
                 HQMSimulationEvent::PuckTouch { player, puck, .. } => {
-                    let (player, puck) = (*player, *puck);
+                    let (player, puck_index) = (*player, *puck);
                     // Get connected player index from skater
                     if let Some((player_index, touching_team, _)) =
                         server.players.get_from_object_index(player)
                     {
-                        if let Some(puck) = server.game.world.objects.get_puck_mut(puck) {
-                            puck.add_touch(player_index, touching_team, server.game.time);
+                        if let Some(puck) = server.game.world.objects.get_puck_mut(puck_index) {
+                            add_touch(
+                                puck,
+                                self.puck_touches.entry(puck_index),
+                                player_index,
+                                touching_team,
+                                server.game.time,
+                            );
                         }
                     }
                 }
@@ -878,4 +893,39 @@ fn find_empty_dual_control(
         }
     }
     None
+}
+
+pub fn add_touch(
+    puck: &HQMPuck,
+    entry: Entry<usize, VecDeque<HQMPuckTouch>>,
+    player_index: usize,
+    team: HQMTeam,
+    time: u32,
+) {
+    let puck_pos = puck.body.pos.clone();
+    let puck_speed = puck.body.linear_velocity.norm();
+
+    let touches = entry.or_insert_with(|| VecDeque::new());
+    let most_recent_touch = touches.front_mut();
+
+    match most_recent_touch {
+        Some(most_recent_touch)
+            if most_recent_touch.player_index == player_index && most_recent_touch.team == team =>
+        {
+            most_recent_touch.puck_pos = puck_pos;
+            most_recent_touch.last_time = time;
+            most_recent_touch.puck_speed = puck_speed;
+        }
+        _ => {
+            touches.truncate(15);
+            touches.push_front(HQMPuckTouch {
+                player_index,
+                team,
+                puck_pos,
+                puck_speed,
+                first_time: time,
+                last_time: time,
+            });
+        }
+    }
 }

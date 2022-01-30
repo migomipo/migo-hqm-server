@@ -2,13 +2,15 @@ use nalgebra::{Point3, Rotation3, Vector3};
 use tracing::info;
 
 use migo_hqm_server::hqm_game::{
-    HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRulesState, HQMTeam,
+    HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot, HQMRulesState,
+    HQMTeam,
 };
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerList, HQMSpawnPoint,
 };
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 pub struct HQMMatchConfiguration {
@@ -47,6 +49,16 @@ pub enum HQMOffsideConfiguration {
     Immediate,
 }
 
+#[derive(Debug, Clone)]
+pub struct HQMPuckTouch {
+    pub player_index: usize,
+    pub team: HQMTeam,
+    pub puck_pos: Point3<f32>,
+    pub puck_speed: f32,
+    pub first_time: u32,
+    pub last_time: u32,
+}
+
 pub struct HQMMatchBehaviour {
     pub config: HQMMatchConfiguration,
     pub paused: bool,
@@ -62,6 +74,7 @@ pub struct HQMMatchBehaviour {
     step_where_period_ended: u32,
     too_late_printed_this_period: bool,
     start_next_replay: Option<(u32, u32, Option<usize>)>,
+    puck_touches: HashMap<usize, VecDeque<HQMPuckTouch>>,
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -97,6 +110,7 @@ impl HQMMatchBehaviour {
             too_late_printed_this_period: false,
             step_where_period_ended: 0,
             start_next_replay: None,
+            puck_touches: Default::default(),
         }
     }
 
@@ -108,6 +122,7 @@ impl HQMMatchBehaviour {
         );
 
         server.game.world.clear_pucks();
+        self.puck_touches.clear();
 
         let next_faceoff_spot = server
             .game
@@ -156,7 +171,7 @@ impl HQMMatchBehaviour {
         self.faceoff_game_step = server.game.game_step;
     }
 
-    fn call_goal(&mut self, server: &mut HQMServer, team: HQMTeam, puck: usize) {
+    fn call_goal(&mut self, server: &mut HQMServer, team: HQMTeam, puck_index: usize) {
         let time_break = self.config.time_break * 100;
         let time_gameover = self.config.time_intermission * 100;
 
@@ -177,36 +192,39 @@ impl HQMMatchBehaviour {
             puck_speed_across_line,
             puck_speed_from_stick,
             last_touch,
-        ) = if let Some(this_puck) = &mut server.game.world.objects.get_puck_mut(puck) {
+        ) = if let Some(this_puck) = server.game.world.objects.get_puck_mut(puck_index) {
             let mut goal_scorer_index = None;
             let mut assist_index = None;
             let mut goal_scorer_first_touch = 0;
             let mut puck_speed_from_stick = None;
-            let last_touch = this_puck.touches.get(0).map(|x| x.player_index);
+            let mut last_touch = None;
             let puck_speed_across_line = this_puck.body.linear_velocity.norm();
+            if let Some(touches) = self.puck_touches.get(&puck_index) {
+                last_touch = touches.front().map(|x| x.player_index);
 
-            for touch in this_puck.touches.iter() {
-                if goal_scorer_index.is_none() {
-                    if touch.team == team {
-                        goal_scorer_index = Some(touch.player_index);
-                        goal_scorer_first_touch = touch.first_time;
-                        puck_speed_from_stick = Some(touch.puck_speed);
-                    }
-                } else {
-                    if touch.team == team {
-                        if Some(touch.player_index) == goal_scorer_index {
+                for touch in touches.iter() {
+                    if goal_scorer_index.is_none() {
+                        if touch.team == team {
+                            goal_scorer_index = Some(touch.player_index);
                             goal_scorer_first_touch = touch.first_time;
-                        } else {
-                            // This is the first player on the scoring team that touched it apart from the goal scorer
-                            // If more than 10 seconds passed between the goal scorer's first touch
-                            // and this last touch, it doesn't count as an assist
+                            puck_speed_from_stick = Some(touch.puck_speed);
+                        }
+                    } else {
+                        if touch.team == team {
+                            if Some(touch.player_index) == goal_scorer_index {
+                                goal_scorer_first_touch = touch.first_time;
+                            } else {
+                                // This is the first player on the scoring team that touched it apart from the goal scorer
+                                // If more than 10 seconds passed between the goal scorer's first touch
+                                // and this last touch, it doesn't count as an assist
 
-                            let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
+                                let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
 
-                            if diff <= 1000 {
-                                assist_index = Some(touch.player_index)
+                                if diff <= 1000 {
+                                    assist_index = Some(touch.player_index)
+                                }
+                                break;
                             }
-                            break;
                         }
                     }
                 }
@@ -345,13 +363,19 @@ impl HQMMatchBehaviour {
                     }
                 }
                 HQMSimulationEvent::PuckTouch { player, puck, .. } => {
-                    let (player, puck) = (*player, *puck);
+                    let (player, puck_index) = (*player, *puck);
                     // Get connected player index from skater
                     if let Some((player_index, touching_team, _)) =
                         server.players.get_from_object_index(player)
                     {
-                        if let Some(puck) = server.game.world.objects.get_puck_mut(puck) {
-                            puck.add_touch(player_index, touching_team, server.game.time);
+                        if let Some(puck) = server.game.world.objects.get_puck_mut(puck_index) {
+                            add_touch(
+                                puck,
+                                self.puck_touches.entry(puck_index),
+                                player_index,
+                                touching_team,
+                                server.game.time,
+                            );
 
                             let other_team = touching_team.get_other_team();
 
@@ -386,13 +410,12 @@ impl HQMMatchBehaviour {
                     }
                 }
                 HQMSimulationEvent::PuckEnteredOtherHalf { team, puck } => {
-                    let (team, puck) = (*team, *puck);
-                    if let Some(puck) = server.game.world.objects.get_puck(puck) {
-                        if let Some(touch) = puck.touches.front() {
-                            if team == touch.team && self.icing_status == HQMIcingStatus::No {
-                                self.icing_status =
-                                    HQMIcingStatus::NotTouched(team, touch.puck_pos.clone());
-                            }
+                    let (team, puck_index) = (*team, *puck);
+                    if let Some(touch) = self.puck_touches.get(&puck_index).and_then(|x| x.front())
+                    {
+                        if team == touch.team && self.icing_status == HQMIcingStatus::No {
+                            self.icing_status =
+                                HQMIcingStatus::NotTouched(team, touch.puck_pos.clone());
                         }
                     }
                 }
@@ -415,41 +438,41 @@ impl HQMMatchBehaviour {
                     }
                 }
                 HQMSimulationEvent::PuckEnteredOffensiveZone { team, puck } => {
-                    let (team, puck) = (*team, *puck);
+                    let (team, puck_index) = (*team, *puck);
                     if self.offside_status == HQMOffsideStatus::InNeutralZone {
-                        if let Some(puck) = server.game.world.objects.get_puck(puck) {
-                            if let Some(touch) = puck.touches.front() {
-                                if team == touch.team
-                                    && has_players_in_offensive_zone(
-                                        &server,
-                                        team,
-                                        Some(touch.player_index),
-                                    )
-                                {
-                                    match offside {
-                                        HQMOffsideConfiguration::Delayed => {
-                                            self.offside_status = HQMOffsideStatus::Warning(
-                                                team,
-                                                touch.puck_pos.clone(),
-                                                touch.player_index,
-                                            );
-                                            server.add_server_chat_message_str("Offside warning");
-                                        }
-                                        HQMOffsideConfiguration::Immediate => {
-                                            let copy = touch.puck_pos.clone();
-                                            self.call_offside(server, team, &copy);
-                                        }
-                                        HQMOffsideConfiguration::Off => {
-                                            self.offside_status =
-                                                HQMOffsideStatus::InOffensiveZone(team);
-                                        }
+                        if let Some(touch) =
+                            self.puck_touches.get(&puck_index).and_then(|x| x.front())
+                        {
+                            if team == touch.team
+                                && has_players_in_offensive_zone(
+                                    &server,
+                                    team,
+                                    Some(touch.player_index),
+                                )
+                            {
+                                match offside {
+                                    HQMOffsideConfiguration::Delayed => {
+                                        self.offside_status = HQMOffsideStatus::Warning(
+                                            team,
+                                            touch.puck_pos.clone(),
+                                            touch.player_index,
+                                        );
+                                        server.add_server_chat_message_str("Offside warning");
                                     }
-                                } else {
-                                    self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+                                    HQMOffsideConfiguration::Immediate => {
+                                        let copy = touch.puck_pos.clone();
+                                        self.call_offside(server, team, &copy);
+                                    }
+                                    HQMOffsideConfiguration::Off => {
+                                        self.offside_status =
+                                            HQMOffsideStatus::InOffensiveZone(team);
+                                    }
                                 }
                             } else {
                                 self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
                             }
+                        } else {
+                            self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
                         }
                     }
                 }
@@ -1677,5 +1700,40 @@ mod tests {
         );
         assert_eq!(res1[&0].1, "C");
         assert_eq!(res1[&1].1, "LW");
+    }
+}
+
+pub fn add_touch(
+    puck: &HQMPuck,
+    entry: Entry<usize, VecDeque<HQMPuckTouch>>,
+    player_index: usize,
+    team: HQMTeam,
+    time: u32,
+) {
+    let puck_pos = puck.body.pos.clone();
+    let puck_speed = puck.body.linear_velocity.norm();
+
+    let touches = entry.or_insert_with(|| VecDeque::new());
+    let most_recent_touch = touches.front_mut();
+
+    match most_recent_touch {
+        Some(most_recent_touch)
+            if most_recent_touch.player_index == player_index && most_recent_touch.team == team =>
+        {
+            most_recent_touch.puck_pos = puck_pos;
+            most_recent_touch.last_time = time;
+            most_recent_touch.puck_speed = puck_speed;
+        }
+        _ => {
+            touches.truncate(15);
+            touches.push_front(HQMPuckTouch {
+                player_index,
+                team,
+                puck_pos,
+                puck_speed,
+                first_time: time,
+                last_time: time,
+            });
+        }
     }
 }

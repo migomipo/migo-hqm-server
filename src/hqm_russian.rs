@@ -475,13 +475,10 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                             server.add_goal_message(*team, None, None);
                             self.check_ending(&mut server.game);
                         }
-                        HQMSimulationEvent::PuckTouch { puck, player, .. } => {
-                            if let Some((player_index, touching_team, _)) =
+                        HQMSimulationEvent::PuckTouch { player, .. } => {
+                            if let Some((_, touching_team, _)) =
                                 server.players.get_from_object_index(*player)
                             {
-                                if let Some(puck) = server.game.world.objects.get_puck_mut(*puck) {
-                                    puck.add_touch(player_index, touching_team, server.game.time);
-                                }
                                 self.fix_status(server, touching_team);
                             }
                         }
