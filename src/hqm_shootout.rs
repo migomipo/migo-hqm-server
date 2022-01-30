@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::rc::Rc;
 
+use crate::hqm_behaviour_extra::HQMDualControlSetting;
 use tracing::info;
 
 enum HQMShootoutAttemptState {
@@ -35,11 +36,15 @@ pub struct HQMShootoutBehaviour {
     physics_config: HQMPhysicsConfiguration,
     team_switch_timer: HashMap<usize, u32>,
     team_max: usize,
-    pub dual_control: bool,
+    pub dual_control: HQMDualControlSetting,
 }
 
 impl HQMShootoutBehaviour {
-    pub fn new(attempts: u32, physics_config: HQMPhysicsConfiguration, dual_control: bool) -> Self {
+    pub fn new(
+        attempts: u32,
+        physics_config: HQMPhysicsConfiguration,
+        dual_control: HQMDualControlSetting,
+    ) -> Self {
         HQMShootoutBehaviour {
             attempts,
             status: HQMShootoutStatus::Pause,
@@ -180,10 +185,21 @@ impl HQMShootoutBehaviour {
                             .get(&player_index)
                             .map_or(true, |x| *x == 0)
                     {
+                        let dual_control = self.dual_control == HQMDualControlSetting::Yes
+                            || (self.dual_control == HQMDualControlSetting::Combined
+                                && player.input.shift());
                         if player.input.join_red() {
-                            joining_red.push((player_index, player.player_name.clone()));
+                            joining_red.push((
+                                player_index,
+                                player.player_name.clone(),
+                                dual_control,
+                            ));
                         } else if player.input.join_blue() {
-                            joining_blue.push((player_index, player.player_name.clone()));
+                            joining_blue.push((
+                                player_index,
+                                player.player_name.clone(),
+                                dual_control,
+                            ));
                         }
                     }
                 } else if player.input.spectate() {
@@ -198,11 +214,8 @@ impl HQMShootoutBehaviour {
         }
         for (player_index, player_name) in spectating_players {
             info!("{} ({}) is spectating", player_name, player_index);
-            if self.dual_control {
-                server.remove_player_from_dual_control(player_index);
-            } else {
-                server.move_to_spectator(player_index);
-            }
+            server.remove_player_from_dual_control(player_index);
+            server.move_to_spectator(player_index);
         }
         if !joining_red.is_empty() || !joining_blue.is_empty() {
             let (red_player_count, blue_player_count) = {
@@ -224,105 +237,111 @@ impl HQMShootoutBehaviour {
             let mut new_red_player_count = red_player_count;
             let mut new_blue_player_count = blue_player_count;
 
-            fn add_players(
-                joining: Vec<(usize, Rc<String>)>,
+            fn add_player(
+                player_index: usize,
+                player_name: Rc<String>,
                 server: &mut HQMServer,
                 team: HQMTeam,
                 player_count: &mut usize,
                 team_max: usize,
             ) {
-                for (player_index, player_name) in joining {
-                    if *player_count >= team_max {
-                        break;
-                    }
+                if *player_count >= team_max {
+                    return;
+                }
 
-                    if server
-                        .spawn_skater_at_spawnpoint(player_index, team, HQMSpawnPoint::Bench)
-                        .is_some()
-                    {
-                        info!(
-                            "{} ({}) has joined team {:?}",
-                            player_name, player_index, team
-                        );
-                        *player_count += 1
-                    }
+                if server
+                    .spawn_skater_at_spawnpoint(player_index, team, HQMSpawnPoint::Bench)
+                    .is_some()
+                {
+                    info!(
+                        "{} ({}) has joined team {:?}",
+                        player_name, player_index, team
+                    );
+                    *player_count += 1
                 }
             }
-            fn add_players_dual_control(
-                joining: Vec<(usize, Rc<String>)>,
+            fn add_player_dual_control(
+                player_index: usize,
+                player_name: Rc<String>,
                 server: &mut HQMServer,
                 team: HQMTeam,
                 player_count: &mut usize,
                 team_max: usize,
             ) {
-                let mut current_empty = find_empty_dual_control(server, team);
-                for (player_index, player_name) in joining {
-                    match current_empty {
-                        Some((index, movement @ Some(_), None)) => {
-                            server.update_dual_control(index, movement, Some(player_index));
-                            current_empty = find_empty_dual_control(server, team);
-                        }
-                        Some((index, None, stick @ Some(_))) => {
-                            server.update_dual_control(index, Some(player_index), stick);
-                            current_empty = find_empty_dual_control(server, team);
-                        }
-                        _ => {
-                            if *player_count >= team_max {
-                                break;
-                            }
+                let current_empty = find_empty_dual_control(server, team);
 
-                            if let Some((dual_control_player_index, _)) = server
-                                .spawn_dual_control_skater_at_spawnpoint(
-                                    team,
-                                    HQMSpawnPoint::Bench,
-                                    Some(player_index),
-                                    None,
-                                )
-                            {
-                                info!(
-                                    "{} ({}) has joined team {:?}",
-                                    player_name, player_index, team
-                                );
-                                *player_count += 1;
+                match current_empty {
+                    Some((index, movement @ Some(_), None)) => {
+                        server.update_dual_control(index, movement, Some(player_index));
+                    }
+                    Some((index, None, stick @ Some(_))) => {
+                        server.update_dual_control(index, Some(player_index), stick);
+                    }
+                    _ => {
+                        if *player_count >= team_max {
+                            return;
+                        }
 
-                                current_empty =
-                                    Some((dual_control_player_index, Some(player_index), None));
-                            }
+                        if server
+                            .spawn_dual_control_skater_at_spawnpoint(
+                                team,
+                                HQMSpawnPoint::Bench,
+                                Some(player_index),
+                                None,
+                            )
+                            .is_some()
+                        {
+                            info!(
+                                "{} ({}) has joined team {:?}",
+                                player_name, player_index, team
+                            );
+                            *player_count += 1;
                         }
                     }
                 }
             }
 
-            if self.dual_control {
-                add_players_dual_control(
-                    joining_red,
-                    server,
-                    HQMTeam::Red,
-                    &mut new_red_player_count,
-                    self.team_max,
-                );
-                add_players_dual_control(
-                    joining_blue,
-                    server,
-                    HQMTeam::Blue,
-                    &mut new_blue_player_count,
-                    self.team_max,
-                );
-            } else {
-                add_players(
-                    joining_red,
-                    server,
-                    HQMTeam::Red,
-                    &mut new_red_player_count,
-                    self.team_max,
-                );
-                add_players(
-                    joining_blue,
-                    server,
-                    HQMTeam::Blue,
-                    &mut new_blue_player_count,
-                    self.team_max,
-                );
+            for (player_index, player_name, dual_control) in joining_red {
+                if dual_control {
+                    add_player_dual_control(
+                        player_index,
+                        player_name,
+                        server,
+                        HQMTeam::Red,
+                        &mut new_red_player_count,
+                        self.team_max,
+                    );
+                } else {
+                    add_player(
+                        player_index,
+                        player_name,
+                        server,
+                        HQMTeam::Red,
+                        &mut new_red_player_count,
+                        self.team_max,
+                    );
+                }
+            }
+            for (player_index, player_name, dual_control) in joining_blue {
+                if dual_control {
+                    add_player_dual_control(
+                        player_index,
+                        player_name,
+                        server,
+                        HQMTeam::Blue,
+                        &mut new_blue_player_count,
+                        self.team_max,
+                    );
+                } else {
+                    add_player(
+                        player_index,
+                        player_name,
+                        server,
+                        HQMTeam::Blue,
+                        &mut new_blue_player_count,
+                        self.team_max,
+                    );
+                }
             }
         }
     }

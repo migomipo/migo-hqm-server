@@ -1,6 +1,9 @@
 use nalgebra::{Point3, Rotation3, Vector3};
 use tracing::info;
 
+use crate::hqm_behaviour_extra::{
+    HQMDualControlSetting, HQMIcingConfiguration, HQMOffsideConfiguration,
+};
 use migo_hqm_server::hqm_game::{
     HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot, HQMRulesState,
     HQMTeam,
@@ -29,24 +32,10 @@ pub struct HQMMatchConfiguration {
     pub blue_line_location: f32,
     pub cheats_enabled: bool,
     pub use_mph: bool,
-    pub dual_control: bool,
+    pub dual_control: HQMDualControlSetting,
     pub goal_replay: bool,
 
     pub spawn_point: HQMSpawnPoint,
-}
-
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMIcingConfiguration {
-    Off,
-    Touch,
-    NoTouch,
-}
-
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMOffsideConfiguration {
-    Off,
-    Delayed,
-    Immediate,
 }
 
 #[derive(Debug, Clone)]
@@ -537,10 +526,21 @@ impl HQMMatchBehaviour {
                             .get(&player_index)
                             .map_or(true, |x| *x == 0)
                     {
+                        let dual_control = self.config.dual_control == HQMDualControlSetting::Yes
+                            || (self.config.dual_control == HQMDualControlSetting::Combined
+                                && player.input.shift());
                         if player.input.join_red() {
-                            joining_red.push((player_index, player.player_name.clone()));
+                            joining_red.push((
+                                player_index,
+                                player.player_name.clone(),
+                                dual_control,
+                            ));
                         } else if player.input.join_blue() {
-                            joining_blue.push((player_index, player.player_name.clone()));
+                            joining_blue.push((
+                                player_index,
+                                player.player_name.clone(),
+                                dual_control,
+                            ));
                         }
                     }
                 } else if player.input.spectate() {
@@ -555,11 +555,8 @@ impl HQMMatchBehaviour {
         }
         for (player_index, player_name) in spectating_players {
             info!("{} ({}) is spectating", player_name, player_index);
-            if self.config.dual_control {
-                server.remove_player_from_dual_control(player_index);
-            } else {
-                server.move_to_spectator(player_index);
-            }
+            server.remove_player_from_dual_control(player_index);
+            server.move_to_spectator(player_index);
         }
         if !joining_red.is_empty() || !joining_blue.is_empty() {
             let (red_player_count, blue_player_count) = {
@@ -581,8 +578,9 @@ impl HQMMatchBehaviour {
             let mut new_red_player_count = red_player_count;
             let mut new_blue_player_count = blue_player_count;
 
-            fn add_players(
-                joining: Vec<(usize, Rc<String>)>,
+            fn add_player(
+                player_index: usize,
+                player_name: Rc<String>,
                 server: &mut HQMServer,
                 team: HQMTeam,
                 spawn_point: HQMSpawnPoint,
@@ -590,29 +588,28 @@ impl HQMMatchBehaviour {
                 team_max: usize,
                 started_as_goalie: &mut Vec<usize>,
             ) {
-                for (player_index, player_name) in joining {
-                    if *player_count >= team_max {
-                        break;
-                    }
+                if *player_count >= team_max {
+                    return;
+                }
 
-                    if server
-                        .spawn_skater_at_spawnpoint(player_index, team, spawn_point)
-                        .is_some()
-                    {
-                        info!(
-                            "{} ({}) has joined team {:?}",
-                            player_name, player_index, team
-                        );
-                        *player_count += 1;
+                if server
+                    .spawn_skater_at_spawnpoint(player_index, team, spawn_point)
+                    .is_some()
+                {
+                    info!(
+                        "{} ({}) has joined team {:?}",
+                        player_name, player_index, team
+                    );
+                    *player_count += 1;
 
-                        if let Some(x) = started_as_goalie.iter().position(|x| *x == player_index) {
-                            started_as_goalie.remove(x);
-                        }
+                    if let Some(x) = started_as_goalie.iter().position(|x| *x == player_index) {
+                        started_as_goalie.remove(x);
                     }
                 }
             }
-            fn add_players_dual_control(
-                joining: Vec<(usize, Rc<String>)>,
+            fn add_player_dual_control(
+                player_index: usize,
+                player_name: Rc<String>,
                 server: &mut HQMServer,
                 team: HQMTeam,
                 spawn_point: HQMSpawnPoint,
@@ -620,89 +617,92 @@ impl HQMMatchBehaviour {
                 team_max: usize,
                 started_as_goalie: &mut Vec<usize>,
             ) {
-                let mut current_empty = find_empty_dual_control(server, team);
-                for (player_index, player_name) in joining {
-                    match current_empty {
-                        Some((index, movement @ Some(_), None)) => {
-                            server.update_dual_control(index, movement, Some(player_index));
-                            current_empty = find_empty_dual_control(server, team);
-                        }
-                        Some((index, None, stick @ Some(_))) => {
-                            server.update_dual_control(index, Some(player_index), stick);
-                            current_empty = find_empty_dual_control(server, team);
-                        }
-                        _ => {
-                            if *player_count >= team_max {
-                                break;
-                            }
+                let current_empty = find_empty_dual_control(server, team);
 
-                            if let Some((dual_control_player_index, _)) = server
-                                .spawn_dual_control_skater_at_spawnpoint(
-                                    team,
-                                    spawn_point,
-                                    Some(player_index),
-                                    None,
-                                )
+                match current_empty {
+                    Some((index, movement @ Some(_), None)) => {
+                        server.update_dual_control(index, movement, Some(player_index));
+                    }
+                    Some((index, None, stick @ Some(_))) => {
+                        server.update_dual_control(index, Some(player_index), stick);
+                    }
+                    _ => {
+                        if *player_count >= team_max {}
+
+                        if let Some((dual_control_player_index, _)) = server
+                            .spawn_dual_control_skater_at_spawnpoint(
+                                team,
+                                spawn_point,
+                                Some(player_index),
+                                None,
+                            )
+                        {
+                            info!(
+                                "{} ({}) has joined team {:?}",
+                                player_name, player_index, team
+                            );
+                            *player_count += 1;
+
+                            if let Some(x) = started_as_goalie
+                                .iter()
+                                .position(|x| *x == dual_control_player_index)
                             {
-                                info!(
-                                    "{} ({}) has joined team {:?}",
-                                    player_name, player_index, team
-                                );
-                                *player_count += 1;
-
-                                current_empty =
-                                    Some((dual_control_player_index, Some(player_index), None));
-
-                                if let Some(x) = started_as_goalie
-                                    .iter()
-                                    .position(|x| *x == dual_control_player_index)
-                                {
-                                    started_as_goalie.remove(x);
-                                }
+                                started_as_goalie.remove(x);
                             }
                         }
                     }
                 }
             }
 
-            if self.config.dual_control {
-                add_players_dual_control(
-                    joining_red,
-                    server,
-                    HQMTeam::Red,
-                    self.config.spawn_point,
-                    &mut new_red_player_count,
-                    self.config.team_max,
-                    &mut self.started_as_goalie,
-                );
-                add_players_dual_control(
-                    joining_blue,
-                    server,
-                    HQMTeam::Blue,
-                    self.config.spawn_point,
-                    &mut new_blue_player_count,
-                    self.config.team_max,
-                    &mut self.started_as_goalie,
-                );
-            } else {
-                add_players(
-                    joining_red,
-                    server,
-                    HQMTeam::Red,
-                    self.config.spawn_point,
-                    &mut new_red_player_count,
-                    self.config.team_max,
-                    &mut self.started_as_goalie,
-                );
-                add_players(
-                    joining_blue,
-                    server,
-                    HQMTeam::Blue,
-                    self.config.spawn_point,
-                    &mut new_blue_player_count,
-                    self.config.team_max,
-                    &mut self.started_as_goalie,
-                );
+            for (player_index, player_name, dual_control) in joining_red {
+                if dual_control {
+                    add_player_dual_control(
+                        player_index,
+                        player_name,
+                        server,
+                        HQMTeam::Red,
+                        self.config.spawn_point,
+                        &mut new_red_player_count,
+                        self.config.team_max,
+                        &mut self.started_as_goalie,
+                    )
+                } else {
+                    add_player(
+                        player_index,
+                        player_name,
+                        server,
+                        HQMTeam::Red,
+                        self.config.spawn_point,
+                        &mut new_red_player_count,
+                        self.config.team_max,
+                        &mut self.started_as_goalie,
+                    )
+                }
+            }
+            for (player_index, player_name, dual_control) in joining_blue {
+                if dual_control {
+                    add_player_dual_control(
+                        player_index,
+                        player_name,
+                        server,
+                        HQMTeam::Blue,
+                        self.config.spawn_point,
+                        &mut new_blue_player_count,
+                        self.config.team_max,
+                        &mut self.started_as_goalie,
+                    )
+                } else {
+                    add_player(
+                        player_index,
+                        player_name,
+                        server,
+                        HQMTeam::Blue,
+                        self.config.spawn_point,
+                        &mut new_blue_player_count,
+                        self.config.team_max,
+                        &mut self.started_as_goalie,
+                    )
+                }
             }
 
             if server.game.period == 0

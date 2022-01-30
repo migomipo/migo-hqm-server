@@ -5,15 +5,17 @@ extern crate ini;
 use ini::Ini;
 use std::env;
 
+mod hqm_behaviour_extra;
 mod hqm_match;
 mod hqm_multi_puck_match;
 mod hqm_russian;
 mod hqm_shootout;
 mod hqm_warmup;
 
-use crate::hqm_match::{
-    HQMIcingConfiguration, HQMMatchBehaviour, HQMMatchConfiguration, HQMOffsideConfiguration,
+use crate::hqm_behaviour_extra::{
+    HQMDualControlSetting, HQMIcingConfiguration, HQMOffsideConfiguration,
 };
+use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration};
 use crate::hqm_multi_puck_match::{HQMMultiPuckMatchBehaviour, HQMMultiPuckMatchConfiguration};
 use crate::hqm_russian::HQMRussianBehaviour;
 use crate::hqm_shootout::HQMShootoutBehaviour;
@@ -195,9 +197,20 @@ async fn main() -> std::io::Result<()> {
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
         tracing_subscriber::fmt().with_writer(non_blocking).init();
 
-        let dual_control = get_optional(game_section, "dual_control", false, |s| {
-            s.eq_ignore_ascii_case("true")
-        });
+        let dual_control = get_optional(
+            game_section,
+            "dual_control",
+            HQMDualControlSetting::No,
+            |s| {
+                if s.eq_ignore_ascii_case("true") {
+                    HQMDualControlSetting::Yes
+                } else if s.eq_ignore_ascii_case("combined") || s.eq_ignore_ascii_case("both") {
+                    HQMDualControlSetting::Combined
+                } else {
+                    HQMDualControlSetting::No
+                }
+            },
+        );
 
         return match mode {
             HQMServerMode::Match => {

@@ -1,3 +1,4 @@
+use crate::hqm_behaviour_extra::HQMDualControlSetting;
 use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMSpawnPoint,
@@ -9,7 +10,7 @@ pub struct HQMPermanentWarmup {
     physics_config: HQMPhysicsConfiguration,
     pucks: usize,
     spawn_point: HQMSpawnPoint,
-    use_dual_control: bool,
+    use_dual_control: HQMDualControlSetting,
 }
 
 impl HQMPermanentWarmup {
@@ -17,7 +18,7 @@ impl HQMPermanentWarmup {
         physics_config: HQMPhysicsConfiguration,
         pucks: usize,
         spawn_point: HQMSpawnPoint,
-        use_dual_control: bool,
+        use_dual_control: HQMDualControlSetting,
     ) -> Self {
         HQMPermanentWarmup {
             physics_config,
@@ -28,42 +29,37 @@ impl HQMPermanentWarmup {
     }
     fn update_players(&mut self, server: &mut HQMServer) {
         let mut spectating_players = vec![];
-        let mut joining_red = vec![];
-        let mut joining_blue = vec![];
+        let mut joining_team = vec![];
         for (player_index, player) in server.players.iter().enumerate() {
             if let Some(player) = player {
                 let has_skater = player.object.is_some()
                     || server.get_dual_control_player(player_index).is_some();
                 if has_skater && player.input.spectate() {
                     spectating_players.push(player_index);
-                } else {
-                }
-                if !has_skater {
+                } else if !has_skater {
+                    let dual_control = self.use_dual_control == HQMDualControlSetting::Yes
+                        || (self.use_dual_control == HQMDualControlSetting::Combined
+                            && player.input.shift());
                     if player.input.join_red() {
-                        joining_red.push(player_index);
+                        joining_team.push((player_index, HQMTeam::Red, dual_control));
                     } else if player.input.join_blue() {
-                        joining_blue.push(player_index);
+                        joining_team.push((player_index, HQMTeam::Blue, dual_control));
                     }
                 }
             }
         }
         for player_index in spectating_players {
-            if self.use_dual_control {
-                server.remove_player_from_dual_control(player_index);
-            } else {
-                server.move_to_spectator(player_index);
-            }
+            server.remove_player_from_dual_control(player_index);
+            server.move_to_spectator(player_index);
         }
 
         fn internal_add(
             server: &mut HQMServer,
-            joining: Vec<usize>,
+            player_index: usize,
             team: HQMTeam,
             spawn_point: HQMSpawnPoint,
         ) {
-            for player_index in joining {
-                server.spawn_skater_at_spawnpoint(player_index, team, spawn_point);
-            }
+            server.spawn_skater_at_spawnpoint(player_index, team, spawn_point);
         }
 
         fn find_empty_dual_control(
@@ -88,41 +84,35 @@ impl HQMPermanentWarmup {
 
         fn internal_add_dual_control(
             server: &mut HQMServer,
-            joining: Vec<usize>,
+            player_index: usize,
             team: HQMTeam,
             spawn_point: HQMSpawnPoint,
         ) {
-            let mut current_empty = find_empty_dual_control(server, team);
-            for player_index in joining {
-                match current_empty {
-                    Some((index, movement @ Some(_), None)) => {
-                        server.update_dual_control(index, movement, Some(player_index));
-                        current_empty = find_empty_dual_control(server, team);
-                    }
-                    Some((index, None, stick @ Some(_))) => {
-                        server.update_dual_control(index, Some(player_index), stick);
-                        current_empty = find_empty_dual_control(server, team);
-                    }
-                    _ => {
-                        if let Some((player, _)) = server.spawn_dual_control_skater_at_spawnpoint(
-                            team,
-                            spawn_point,
-                            Some(player_index),
-                            None,
-                        ) {
-                            current_empty = Some((player, Some(player_index), None));
-                        }
-                    }
+            let current_empty = find_empty_dual_control(server, team);
+
+            match current_empty {
+                Some((index, movement @ Some(_), None)) => {
+                    server.update_dual_control(index, movement, Some(player_index));
+                }
+                Some((index, None, stick @ Some(_))) => {
+                    server.update_dual_control(index, Some(player_index), stick);
+                }
+                _ => {
+                    server.spawn_dual_control_skater_at_spawnpoint(
+                        team,
+                        spawn_point,
+                        Some(player_index),
+                        None,
+                    );
                 }
             }
         }
-
-        if self.use_dual_control {
-            internal_add_dual_control(server, joining_red, HQMTeam::Red, self.spawn_point);
-            internal_add_dual_control(server, joining_blue, HQMTeam::Blue, self.spawn_point);
-        } else {
-            internal_add(server, joining_red, HQMTeam::Red, self.spawn_point);
-            internal_add(server, joining_blue, HQMTeam::Blue, self.spawn_point);
+        for (player_index, team, dual_control) in joining_team {
+            if dual_control {
+                internal_add_dual_control(server, player_index, team, self.spawn_point);
+            } else {
+                internal_add(server, player_index, team, self.spawn_point);
+            }
         }
     }
 }
