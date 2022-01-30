@@ -1678,6 +1678,8 @@ pub async fn run_server<B: HQMServerBehaviour>(
     };
     info!("Server started, new game {} started", 1);
 
+    behaviour.init(&mut server);
+
     // Set up timers
     let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
 
@@ -2305,6 +2307,8 @@ pub struct HQMServerConfiguration {
 }
 
 pub trait HQMServerBehaviour {
+    fn init(&mut self, _server: &mut HQMServer) {}
+
     fn before_tick(&mut self, server: &mut HQMServer);
     fn after_tick(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]);
     fn handle_command(&mut self, server: &mut HQMServer, cmd: &str, arg: &str, player_index: usize);
