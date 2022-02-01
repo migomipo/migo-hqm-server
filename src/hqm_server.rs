@@ -13,7 +13,7 @@ use bytes::{Bytes, BytesMut};
 use nalgebra::{Point3, Rotation3, Vector2};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use tokio::net::UdpSocket;
+use tokio::sync::mpsc::Sender;
 use tracing::info;
 use uuid::Uuid;
 
@@ -123,13 +123,13 @@ pub struct HQMServer {
     replay_queue: VecDeque<ReplayElement>,
     game_id: u32,
     pub is_muted: bool,
+    send_sender: Sender<(SocketAddr, Bytes)>,
 }
 
 impl HQMServer {
     async fn handle_message<B: HQMServerBehaviour>(
         &mut self,
         addr: SocketAddr,
-        socket: &Arc<UdpSocket>,
         msg: &[u8],
         behaviour: &mut B,
     ) {
@@ -142,7 +142,7 @@ impl HQMServer {
         let command = parser.read_byte_aligned();
         match command {
             0 => {
-                self.request_info(socket, addr, &mut parser, behaviour);
+                self.request_info(addr, &mut parser, behaviour).await;
             }
             2 => {
                 self.player_join(addr, &mut parser, behaviour);
@@ -163,18 +163,18 @@ impl HQMServer {
         }
     }
 
-    fn request_info<'a, B: HQMServerBehaviour>(
+    async fn request_info<'a, B: HQMServerBehaviour>(
         &self,
-        socket: &Arc<UdpSocket>,
         addr: SocketAddr,
         parser: &mut HQMMessageReader<'a>,
         behaviour: &B,
     ) {
-        let mut write_buf = [0u8; 128];
+        let mut write_buf = BytesMut::new();
+        write_buf.resize(128, 0);
         let _player_version = parser.read_bits(8);
         let ping = parser.read_u32_aligned();
 
-        let mut writer = HQMMessageWriter::new(&mut write_buf);
+        let mut writer = HQMMessageWriter::new(write_buf.as_mut());
         writer.write_bytes_aligned(GAME_HEADER);
         writer.write_byte_aligned(1);
         writer.write_bits(8, 55);
@@ -188,12 +188,11 @@ impl HQMServer {
         writer.write_bytes_aligned_padded(32, self.config.server_name.as_ref());
 
         let written = writer.get_bytes_written();
-        let socket = socket.clone();
+        write_buf.truncate(written);
+
         let addr = addr.clone();
-        tokio::spawn(async move {
-            let slice = &write_buf[0..written];
-            let _ = socket.send_to(slice, addr).await;
-        });
+        let bytes = write_buf.freeze();
+        let _ = self.send_sender.send((addr, bytes)).await;
     }
 
     fn player_count(&self) -> usize {
@@ -1338,7 +1337,7 @@ impl HQMServer {
         return self.players.iter().position(|x| x.is_none());
     }
 
-    fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B, write_buf: &mut [u8]) {
+    fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
         self.game.game_step = self.game.game_step.wrapping_add(1);
 
         behaviour.before_tick(self);
@@ -1433,7 +1432,7 @@ impl HQMServer {
         self.game.saved_pings.push_front(Instant::now());
 
         if self.config.replays_enabled {
-            write_replay(&mut self.game, write_buf);
+            write_replay(&mut self.game);
         }
     }
 
@@ -1473,12 +1472,7 @@ impl HQMServer {
         }
     }
 
-    async fn tick<B: HQMServerBehaviour>(
-        &mut self,
-        socket: &UdpSocket,
-        write_buf: &mut [u8],
-        behaviour: &mut B,
-    ) {
+    async fn tick<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
         if self.player_count() != 0 {
             self.game.active = true;
             let (game_step, forced_view) = tokio::task::block_in_place(|| {
@@ -1520,11 +1514,11 @@ impl HQMServer {
                         (game_step, forced_view)
                     } else {
                         self.replay_queue.pop_front();
-                        self.game_step(behaviour, write_buf);
+                        self.game_step(behaviour);
                         (self.game.game_step, None)
                     }
                 } else {
-                    self.game_step(behaviour, write_buf);
+                    self.game_step(behaviour);
                     (self.game.game_step, None)
                 }
             });
@@ -1542,9 +1536,8 @@ impl HQMServer {
                 self.game.rules_state,
                 self.game.packet,
                 &self.players.players,
-                socket,
-                write_buf,
                 forced_view,
+                &self.send_sender,
             )
             .await;
         } else if self.game.active {
@@ -1664,6 +1657,9 @@ pub async fn run_server<B: HQMServerBehaviour>(
     }
     let first_game = behaviour.create_game();
 
+    let (recv_sender, mut recv_receiver) = tokio::sync::mpsc::channel(256);
+    let (send_sender, mut send_receiver) = tokio::sync::mpsc::channel(256);
+
     let mut server = HQMServer {
         players: HQMServerPlayerList {
             players: player_vec,
@@ -1675,6 +1671,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
         config,
         game_id: 1,
         replay_queue: VecDeque::new(),
+        send_sender,
     };
     info!("Server started, new game {} started", 1);
 
@@ -1711,7 +1708,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
             }
         });
     }
-    let (msg_sender, mut msg_receiver) = tokio::sync::mpsc::channel(256);
+
     {
         let socket = socket.clone();
 
@@ -1723,7 +1720,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
                 match socket.recv_from(&mut buf).await {
                     Ok((size, addr)) => {
                         buf.truncate(size);
-                        let _ = msg_sender
+                        let _ = recv_sender
                             .send(HQMServerReceivedData {
                                 addr,
                                 data: buf.freeze(),
@@ -1735,19 +1732,29 @@ pub async fn run_server<B: HQMServerBehaviour>(
             }
         });
     };
+    {
+        let socket = socket.clone();
 
-    let mut write_buf = vec![0u8; 4096];
+        tokio::spawn(async move {
+            loop {
+                while let Some((addr, bytes)) = send_receiver.recv().await {
+                    let _ = socket.send_to(bytes.as_ref(), addr).await;
+                }
+            }
+        });
+    };
+
     loop {
         tokio::select! {
             _ = tick_timer.tick() => {
-                server.tick(& socket, & mut write_buf, & mut behaviour).await;
+                server.tick(& mut behaviour).await;
             }
-            x = msg_receiver.recv() => {
+            x = recv_receiver.recv() => {
                 if let Some (HQMServerReceivedData {
                     addr,
                     data: msg
                 }) = x {
-                    server.handle_message(addr, & socket, & msg, & mut behaviour).await;
+                    server.handle_message(addr, & msg, & mut behaviour).await;
                 }
             }
         }
@@ -1928,8 +1935,9 @@ fn write_objects(
     }
 }
 
-fn write_replay(game: &mut HQMGame, write_buf: &mut [u8]) {
-    let mut writer = HQMMessageWriter::new(write_buf);
+fn write_replay(game: &mut HQMGame) {
+    let mut write_buf = [0u8; 2048];
+    let mut writer = HQMMessageWriter::new(&mut write_buf);
 
     writer.write_byte_aligned(5);
     writer.write_bits(
@@ -1981,14 +1989,15 @@ async fn send_updates(
     rules_state: HQMRulesState,
     current_packet: u32,
     players: &[Option<HQMServerPlayer>],
-    socket: &UdpSocket,
-    write_buf: &mut [u8],
     force_view: Option<usize>,
+    send_sender: &Sender<(SocketAddr, Bytes)>,
 ) {
     for player in players.iter() {
         if let Some(player) = player {
             if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
-                let mut writer = HQMMessageWriter::new(write_buf);
+                let mut write_buf = BytesMut::new();
+                write_buf.resize(4096, 0u8);
+                let mut writer = HQMMessageWriter::new(write_buf.as_mut());
 
                 if data.game_id != game_id {
                     writer.write_bytes_aligned(GAME_HEADER);
@@ -2061,9 +2070,11 @@ async fn send_updates(
                     }
                 }
                 let bytes_written = writer.get_bytes_written();
+                write_buf.truncate(bytes_written);
+                let bytes = write_buf.freeze();
+                let addr = data.addr;
 
-                let slice = &write_buf[0..bytes_written];
-                let _ = socket.send_to(slice, data.addr).await;
+                let _ = send_sender.send((addr, bytes)).await;
             }
         }
     }
