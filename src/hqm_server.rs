@@ -14,6 +14,7 @@ use nalgebra::{Point3, Rotation3, Vector2};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
+use tokio::time::MissedTickBehavior;
 use tracing::info;
 use uuid::Uuid;
 
@@ -1760,6 +1761,7 @@ pub async fn run_server<B: HQMServerBehaviour + Send + 'static>(
     };
     // Set up timers
     let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
+    tick_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         tick_timer.tick().await;
         if main_loop_sender.send(HQMServerUpdate::Tick).await.is_err() {
