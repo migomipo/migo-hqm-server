@@ -26,11 +26,6 @@ use crate::hqm_simulate::HQMSimulationEvent;
 
 const GAME_HEADER: &[u8] = b"Hock";
 
-struct HQMServerReceivedData {
-    addr: SocketAddr,
-    data: Bytes,
-}
-
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum HQMClientVersion {
     Vanilla,
@@ -127,7 +122,7 @@ pub struct HQMServer {
 }
 
 impl HQMServer {
-    async fn handle_message<B: HQMServerBehaviour>(
+    fn handle_message<B: HQMServerBehaviour>(
         &mut self,
         addr: SocketAddr,
         msg: &[u8],
@@ -142,7 +137,7 @@ impl HQMServer {
         let command = parser.read_byte_aligned();
         match command {
             0 => {
-                self.request_info(addr, &mut parser, behaviour).await;
+                self.request_info(addr, &mut parser, behaviour);
             }
             2 => {
                 self.player_join(addr, &mut parser, behaviour);
@@ -163,7 +158,7 @@ impl HQMServer {
         }
     }
 
-    async fn request_info<'a, B: HQMServerBehaviour>(
+    fn request_info<'a, B: HQMServerBehaviour>(
         &self,
         addr: SocketAddr,
         parser: &mut HQMMessageReader<'a>,
@@ -192,7 +187,7 @@ impl HQMServer {
 
         let addr = addr.clone();
         let bytes = write_buf.freeze();
-        let _ = self.send_sender.send((addr, bytes)).await;
+        let _ = self.send_sender.blocking_send((addr, bytes));
     }
 
     fn player_count(&self) -> usize {
@@ -1472,10 +1467,10 @@ impl HQMServer {
         }
     }
 
-    async fn tick<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
+    fn tick<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
         if self.player_count() != 0 {
             self.game.active = true;
-            let (game_step, forced_view) = tokio::task::block_in_place(|| {
+            let (game_step, forced_view) = {
                 self.remove_inactive_players(behaviour);
 
                 if let Some(replay_element) = self.replay_queue.front_mut() {
@@ -1521,7 +1516,7 @@ impl HQMServer {
                     self.game_step(behaviour);
                     (self.game.game_step, None)
                 }
-            });
+            };
 
             send_updates(
                 self.game_id,
@@ -1538,8 +1533,7 @@ impl HQMServer {
                 &self.players.players,
                 forced_view,
                 &self.send_sender,
-            )
-            .await;
+            );
         } else if self.game.active {
             info!("Game {} abandoned", self.game_id);
             let new_game = behaviour.create_game();
@@ -1645,40 +1639,57 @@ pub(crate) struct ReplayElement {
     force_view: Option<usize>,
 }
 
-pub async fn run_server<B: HQMServerBehaviour>(
+enum HQMServerUpdate {
+    ReceivedData { addr: SocketAddr, data: Bytes },
+    Tick,
+}
+
+pub async fn run_server<B: HQMServerBehaviour + Send + 'static>(
     port: u16,
     public: bool,
     config: HQMServerConfiguration,
     mut behaviour: B,
 ) -> std::io::Result<()> {
-    let mut player_vec = Vec::with_capacity(64);
-    for _ in 0..64 {
-        player_vec.push(None);
-    }
-    let first_game = behaviour.create_game();
+    let (main_loop_sender, mut main_loop_receiver) = tokio::sync::mpsc::channel(512);
+    let (send_sender, mut send_receiver) = tokio::sync::mpsc::channel(512);
 
-    let (recv_sender, mut recv_receiver) = tokio::sync::mpsc::channel(256);
-    let (send_sender, mut send_receiver) = tokio::sync::mpsc::channel(256);
+    std::thread::spawn(move || {
+        let mut player_vec = Vec::with_capacity(64);
+        for _ in 0..64 {
+            player_vec.push(None);
+        }
+        let first_game = behaviour.create_game();
 
-    let mut server = HQMServer {
-        players: HQMServerPlayerList {
-            players: player_vec,
-        },
-        ban_list: HashSet::new(),
-        allow_join: true,
-        game: first_game,
-        is_muted: false,
-        config,
-        game_id: 1,
-        replay_queue: VecDeque::new(),
-        send_sender,
-    };
-    info!("Server started, new game {} started", 1);
+        let mut server = HQMServer {
+            players: HQMServerPlayerList {
+                players: player_vec,
+            },
+            ban_list: HashSet::new(),
+            allow_join: true,
+            game: first_game,
+            is_muted: false,
+            config,
+            game_id: 1,
+            replay_queue: VecDeque::new(),
+            send_sender,
+        };
 
-    behaviour.init(&mut server);
+        info!("Server started, new game {} started", 1);
 
-    // Set up timers
-    let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
+        behaviour.init(&mut server);
+        loop {
+            while let Some(msg) = main_loop_receiver.blocking_recv() {
+                match msg {
+                    HQMServerUpdate::ReceivedData { addr, data } => {
+                        server.handle_message(addr, &data, &mut behaviour);
+                    }
+                    HQMServerUpdate::Tick => {
+                        server.tick(&mut behaviour);
+                    }
+                }
+            }
+        }
+    });
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
@@ -1711,6 +1722,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
 
     {
         let socket = socket.clone();
+        let recv_sender = main_loop_sender.clone();
 
         tokio::spawn(async move {
             loop {
@@ -1720,12 +1732,15 @@ pub async fn run_server<B: HQMServerBehaviour>(
                 match socket.recv_from(&mut buf).await {
                     Ok((size, addr)) => {
                         buf.truncate(size);
-                        let _ = recv_sender
-                            .send(HQMServerReceivedData {
+                        let res = recv_sender
+                            .send(HQMServerUpdate::ReceivedData {
                                 addr,
                                 data: buf.freeze(),
                             })
                             .await;
+                        if res.is_err() {
+                            break;
+                        }
                     }
                     Err(_) => {}
                 }
@@ -1743,22 +1758,16 @@ pub async fn run_server<B: HQMServerBehaviour>(
             }
         });
     };
-
+    // Set up timers
+    let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
     loop {
-        tokio::select! {
-            _ = tick_timer.tick() => {
-                server.tick(& mut behaviour).await;
-            }
-            x = recv_receiver.recv() => {
-                if let Some (HQMServerReceivedData {
-                    addr,
-                    data: msg
-                }) = x {
-                    server.handle_message(addr, & msg, & mut behaviour).await;
-                }
-            }
+        tick_timer.tick().await;
+        if main_loop_sender.send(HQMServerUpdate::Tick).await.is_err() {
+            break;
         }
     }
+
+    Ok(())
 }
 
 fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage) {
@@ -1976,7 +1985,7 @@ fn write_replay(game: &mut HQMGame) {
     game.replay_data.extend_from_slice(slice);
 }
 
-async fn send_updates(
+fn send_updates(
     game_id: u32,
     packets: &VecDeque<Vec<HQMObjectPacket>>,
     game_step: u32,
@@ -2074,7 +2083,7 @@ async fn send_updates(
                 let bytes = write_buf.freeze();
                 let addr = data.addr;
 
-                let _ = send_sender.send((addr, bytes)).await;
+                let _ = send_sender.blocking_send((addr, bytes));
             }
         }
     }
