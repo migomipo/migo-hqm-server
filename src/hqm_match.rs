@@ -307,6 +307,8 @@ impl HQMMatchBehaviour {
                 gamestep + 200,
                 force_view,
             ));
+
+            self.pause_timer = self.pause_timer.saturating_sub(800).max(400);
         }
     }
 
