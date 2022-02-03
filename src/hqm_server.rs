@@ -1487,21 +1487,23 @@ impl HQMServer {
                 if let Some(replay_element) = self.replay_queue.front_mut() {
                     let from = replay_element.from;
                     let saved_history = &self.game.saved_history;
-
+                    let current_game_step = self.game.game_step;
                     let forced_view = replay_element.force_view;
-                    let i = self.game.game_step.checked_sub(from);
-                    if let Some(i) = i {
-                        let tick = if let Some(tick) = saved_history.get(i as usize) {
-                            replay_element.from += 1;
-                            tick
+                    let tick = current_game_step.checked_sub(from).and_then(|i| {
+                        if let Some(tick) = saved_history.get(i as usize) {
+                            Some((tick, replay_element.from))
+                        } else if saved_history.len() > 0 {
+                            let new_from = current_game_step - (saved_history.len() as u32 - 1);
+                            Some((&saved_history[saved_history.len() - 1], new_from))
                         } else {
-                            let new_from = self.game.game_step - (saved_history.len() as u32 - 1);
-                            replay_element.from = new_from + 1;
-                            &saved_history[saved_history.len() - 1]
-                        };
-
+                            None
+                        }
+                    });
+                    if let Some((tick, p)) = tick {
                         let game_step = tick.game_step;
                         let packets = tick.packets.clone();
+
+                        replay_element.from = p + 1;
 
                         if replay_element.from >= replay_element.to {
                             self.replay_queue.pop_front();
