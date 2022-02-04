@@ -14,6 +14,7 @@ use nalgebra::{Point3, Rotation3, Vector2};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
+use tokio::time::MissedTickBehavior;
 use tracing::info;
 use uuid::Uuid;
 
@@ -1684,6 +1685,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
 
     // Set up timers
     let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
+    tick_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
