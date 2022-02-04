@@ -1339,7 +1339,7 @@ impl HQMServer {
         return self.players.iter().position(|x| x.is_none());
     }
 
-    fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B, write_buf: &mut [u8]) {
+    fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
         self.game.game_step = self.game.game_step.wrapping_add(1);
 
         behaviour.before_tick(self);
@@ -1434,7 +1434,7 @@ impl HQMServer {
         self.game.saved_pings.push_front(Instant::now());
 
         if self.config.replays_enabled {
-            write_replay(&mut self.game, write_buf);
+            write_replay(&mut self.game);
         }
     }
 
@@ -1477,7 +1477,6 @@ impl HQMServer {
     async fn tick<B: HQMServerBehaviour>(
         &mut self,
         socket: &UdpSocket,
-        write_buf: &mut [u8],
         behaviour: &mut B,
     ) {
         if self.player_count() != 0 {
@@ -1523,11 +1522,11 @@ impl HQMServer {
                         (game_step, forced_view)
                     } else {
                         self.replay_queue.pop_front();
-                        self.game_step(behaviour, write_buf);
+                        self.game_step(behaviour);
                         (self.game.game_step, None)
                     }
                 } else {
-                    self.game_step(behaviour, write_buf);
+                    self.game_step(behaviour);
                     (self.game.game_step, None)
                 }
             });
@@ -1546,7 +1545,6 @@ impl HQMServer {
                 self.game.packet,
                 &self.players.players,
                 socket,
-                write_buf,
                 forced_view,
             )
             .await;
@@ -1740,11 +1738,10 @@ pub async fn run_server<B: HQMServerBehaviour>(
         });
     };
 
-    let mut write_buf = vec![0u8; 4096];
     loop {
         tokio::select! {
             _ = tick_timer.tick() => {
-                server.tick(& socket, & mut write_buf, & mut behaviour).await;
+                server.tick(& socket, & mut behaviour).await;
             }
             x = msg_receiver.recv() => {
                 if let Some (HQMServerReceivedData {
@@ -1932,8 +1929,9 @@ fn write_objects(
     }
 }
 
-fn write_replay(game: &mut HQMGame, write_buf: &mut [u8]) {
-    let mut writer = HQMMessageWriter::new(write_buf);
+fn write_replay(game: &mut HQMGame) {
+    let mut write_buf = [0u8; 2048];
+    let mut writer = HQMMessageWriter::new(& mut write_buf);
 
     writer.write_byte_aligned(5);
     writer.write_bits(
@@ -1986,13 +1984,14 @@ async fn send_updates(
     current_packet: u32,
     players: &[Option<HQMServerPlayer>],
     socket: &UdpSocket,
-    write_buf: &mut [u8],
     force_view: Option<usize>,
 ) {
+    let mut write_buf = [0u8; 4096];
     for player in players.iter() {
         if let Some(player) = player {
             if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
-                let mut writer = HQMMessageWriter::new(write_buf);
+
+                let mut writer = HQMMessageWriter::new(& mut write_buf);
 
                 if data.game_id != game_id {
                     writer.write_bytes_aligned(GAME_HEADER);
