@@ -1474,11 +1474,7 @@ impl HQMServer {
         }
     }
 
-    async fn tick<B: HQMServerBehaviour>(
-        &mut self,
-        socket: &UdpSocket,
-        behaviour: &mut B,
-    ) {
+    async fn tick<B: HQMServerBehaviour>(&mut self, socket: &UdpSocket, behaviour: &mut B) {
         if self.player_count() != 0 {
             self.game.active = true;
             let (game_step, forced_view) = tokio::task::block_in_place(|| {
@@ -1931,7 +1927,7 @@ fn write_objects(
 
 fn write_replay(game: &mut HQMGame) {
     let mut write_buf = [0u8; 2048];
-    let mut writer = HQMMessageWriter::new(& mut write_buf);
+    let mut writer = HQMMessageWriter::new(&mut write_buf);
 
     writer.write_byte_aligned(5);
     writer.write_bits(
@@ -1990,8 +1986,7 @@ async fn send_updates(
     for player in players.iter() {
         if let Some(player) = player {
             if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
-
-                let mut writer = HQMMessageWriter::new(& mut write_buf);
+                let mut writer = HQMMessageWriter::new(&mut write_buf);
 
                 if data.game_id != game_id {
                     writer.write_bytes_aligned(GAME_HEADER);
