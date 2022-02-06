@@ -133,6 +133,7 @@ impl HQMServer {
         socket: &Arc<UdpSocket>,
         msg: &[u8],
         behaviour: &mut B,
+        write_buf: &mut [u8],
     ) {
         let mut parser = HQMMessageReader::new(&msg);
         let header = parser.read_bytes_aligned(4);
@@ -143,7 +144,8 @@ impl HQMServer {
         let command = parser.read_byte_aligned();
         match command {
             0 => {
-                self.request_info(socket, addr, &mut parser, behaviour);
+                self.request_info(socket, addr, &mut parser, behaviour, write_buf)
+                    .await;
             }
             2 => {
                 self.player_join(addr, &mut parser, behaviour);
@@ -164,18 +166,18 @@ impl HQMServer {
         }
     }
 
-    fn request_info<'a, B: HQMServerBehaviour>(
+    async fn request_info<'a, B: HQMServerBehaviour>(
         &self,
         socket: &Arc<UdpSocket>,
         addr: SocketAddr,
         parser: &mut HQMMessageReader<'a>,
         behaviour: &B,
+        write_buf: &mut [u8],
     ) {
-        let mut write_buf = [0u8; 128];
         let _player_version = parser.read_bits(8);
         let ping = parser.read_u32_aligned();
 
-        let mut writer = HQMMessageWriter::new(&mut write_buf);
+        let mut writer = HQMMessageWriter::new(write_buf);
         writer.write_bytes_aligned(GAME_HEADER);
         writer.write_byte_aligned(1);
         writer.write_bits(8, 55);
@@ -191,10 +193,9 @@ impl HQMServer {
         let written = writer.get_bytes_written();
         let socket = socket.clone();
         let addr = addr.clone();
-        tokio::spawn(async move {
-            let slice = &write_buf[0..written];
-            let _ = socket.send_to(slice, addr).await;
-        });
+
+        let slice = &write_buf[0..written];
+        let _ = socket.send_to(slice, addr).await;
     }
 
     fn player_count(&self) -> usize {
@@ -1474,7 +1475,12 @@ impl HQMServer {
         }
     }
 
-    async fn tick<B: HQMServerBehaviour>(&mut self, socket: &UdpSocket, behaviour: &mut B) {
+    async fn tick<B: HQMServerBehaviour>(
+        &mut self,
+        socket: &UdpSocket,
+        behaviour: &mut B,
+        write_buf: &mut [u8],
+    ) {
         if self.player_count() != 0 {
             self.game.active = true;
             let (game_step, forced_view) = tokio::task::block_in_place(|| {
@@ -1542,6 +1548,7 @@ impl HQMServer {
                 &self.players.players,
                 socket,
                 forced_view,
+                write_buf,
             )
             .await;
         } else if self.game.active {
@@ -1733,18 +1740,18 @@ pub async fn run_server<B: HQMServerBehaviour>(
             }
         });
     };
-
+    let mut write_buf = [0u8; 4096];
     loop {
         tokio::select! {
             _ = tick_timer.tick() => {
-                server.tick(& socket, & mut behaviour).await;
+                server.tick(& socket, & mut behaviour, & mut write_buf).await;
             }
             x = msg_receiver.recv() => {
                 if let Some (HQMServerReceivedData {
                     addr,
                     data: msg
                 }) = x {
-                    server.handle_message(addr, & socket, & msg, & mut behaviour).await;
+                    server.handle_message(addr, & socket, & msg, & mut behaviour, & mut write_buf).await;
                 }
             }
         }
@@ -1926,7 +1933,7 @@ fn write_objects(
 }
 
 fn write_replay(game: &mut HQMGame) {
-    let mut write_buf = [0u8; 2048];
+    let mut write_buf = [0u8; 4096];
     let mut writer = HQMMessageWriter::new(&mut write_buf);
 
     writer.write_byte_aligned(5);
@@ -1981,12 +1988,12 @@ async fn send_updates(
     players: &[Option<HQMServerPlayer>],
     socket: &UdpSocket,
     force_view: Option<usize>,
+    write_buf: &mut [u8],
 ) {
-    let mut write_buf = [0u8; 4096];
     for player in players.iter() {
         if let Some(player) = player {
             if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
-                let mut writer = HQMMessageWriter::new(&mut write_buf);
+                let mut writer = HQMMessageWriter::new(write_buf);
 
                 if data.game_id != game_id {
                     writer.write_bytes_aligned(GAME_HEADER);
