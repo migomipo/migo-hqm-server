@@ -2327,10 +2327,10 @@ impl HQMServerPlayer {
 
 #[derive(Copy, Clone)]
 pub struct PingData {
-    min: f32,
-    max: f32,
-    avg: f32,
-    deviation: f32,
+    pub min: f32,
+    pub max: f32,
+    pub avg: f32,
+    pub deviation: f32,
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
