@@ -1340,7 +1340,7 @@ impl HQMServer {
         return self.players.iter().position(|x| x.is_none());
     }
 
-    fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
+    fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B, write_buf: &mut [u8]) {
         self.game.game_step = self.game.game_step.wrapping_add(1);
 
         behaviour.before_tick(self);
@@ -1435,7 +1435,7 @@ impl HQMServer {
         self.game.saved_pings.push_front(Instant::now());
 
         if self.config.replays_enabled {
-            write_replay(&mut self.game);
+            write_replay(&mut self.game, write_buf);
         }
     }
 
@@ -1524,11 +1524,11 @@ impl HQMServer {
                         (game_step, forced_view)
                     } else {
                         self.replay_queue.pop_front();
-                        self.game_step(behaviour);
+                        self.game_step(behaviour, write_buf);
                         (self.game.game_step, None)
                     }
                 } else {
-                    self.game_step(behaviour);
+                    self.game_step(behaviour, write_buf);
                     (self.game.game_step, None)
                 }
             });
@@ -1932,9 +1932,8 @@ fn write_objects(
     }
 }
 
-fn write_replay(game: &mut HQMGame) {
-    let mut write_buf = [0u8; 4096];
-    let mut writer = HQMMessageWriter::new(&mut write_buf);
+fn write_replay(game: &mut HQMGame, write_buf: &mut [u8]) {
+    let mut writer = HQMMessageWriter::new(write_buf);
 
     writer.write_byte_aligned(5);
     writer.write_bits(
