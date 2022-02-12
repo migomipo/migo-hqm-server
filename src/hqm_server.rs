@@ -639,52 +639,25 @@ impl HQMServer {
     fn ping(&mut self, ping_player_index: usize, player_index: usize) {
         if ping_player_index < self.players.len() {
             if let Some(ping_player) = self.players.get(ping_player_index) {
-                match &ping_player.data {
-                    HQMServerPlayerData::NetworkPlayer { data } => {
-                        if data.last_ping.is_empty() {
-                            let msg =
-                                format!("No ping values found for {}", ping_player.player_name);
-                            self.add_directed_server_chat_message(msg, player_index);
-                        } else {
-                            let n = data.last_ping.len() as f32;
-                            let mut min = f32::INFINITY;
-                            let mut max = f32::NEG_INFINITY;
-                            let mut sum = 0f32;
-                            for i in data.last_ping.iter() {
-                                min = min.min(*i);
-                                max = max.max(*i);
-                                sum += *i;
-                            }
-                            let avg = sum / n;
-                            let dev = {
-                                let mut s = 0f32;
-                                for i in data.last_ping.iter() {
-                                    s += (*i - avg).powi(2);
-                                }
-                                (s / n).sqrt()
-                            };
-
-                            let msg1 = format!(
-                                "{} ping: avg {:.0} ms",
-                                ping_player.player_name,
-                                (avg * 1000f32)
-                            );
-                            let msg2 = format!(
-                                "min {:.0} ms, max {:.0} ms, std.dev {:.1}",
-                                (min * 1000f32),
-                                (max * 1000f32),
-                                (dev * 1000f32)
-                            );
-                            self.add_directed_server_chat_message(msg1, player_index);
-                            self.add_directed_server_chat_message(msg2, player_index);
-                        }
-                    }
-                    _ => {
-                        self.add_directed_server_chat_message_str(
-                            "This player is not a connected player",
-                            player_index,
-                        );
-                    }
+                if let Some(ping) = ping_player.ping_data() {
+                    let msg1 = format!(
+                        "{} ping: avg {:.0} ms",
+                        ping_player.player_name,
+                        (ping.avg * 1000f32)
+                    );
+                    let msg2 = format!(
+                        "min {:.0} ms, max {:.0} ms, std.dev {:.1}",
+                        (ping.min * 1000f32),
+                        (ping.max * 1000f32),
+                        (ping.deviation * 1000f32)
+                    );
+                    self.add_directed_server_chat_message(msg1, player_index);
+                    self.add_directed_server_chat_message(msg2, player_index);
+                } else {
+                    self.add_directed_server_chat_message_str(
+                        "This player is not a connected player",
+                        player_index,
+                    );
                 }
             } else {
                 self.add_directed_server_chat_message_str(
@@ -2206,7 +2179,7 @@ pub enum HQMMuteStatus {
     Muted,
 }
 pub struct HQMNetworkPlayerData {
-    pub(crate) addr: SocketAddr,
+    pub addr: SocketAddr,
     client_version: HQMClientVersion,
     inactivity: u32,
     known_packet: u32,
@@ -2308,6 +2281,56 @@ impl HQMServerPlayer {
             _ => {}
         }
     }
+
+    pub fn addr(&self) -> Option<SocketAddr> {
+        match self.data {
+            HQMServerPlayerData::NetworkPlayer {
+                data: HQMNetworkPlayerData { addr, .. },
+            } => Some(addr),
+            _ => None,
+        }
+    }
+
+    pub fn ping_data(&self) -> Option<PingData> {
+        match self.data {
+            HQMServerPlayerData::NetworkPlayer {
+                data: HQMNetworkPlayerData { ref last_ping, .. },
+            } => {
+                let n = last_ping.len() as f32;
+                let mut min = f32::INFINITY;
+                let mut max = f32::NEG_INFINITY;
+                let mut sum = 0f32;
+                for i in last_ping.iter() {
+                    min = min.min(*i);
+                    max = max.max(*i);
+                    sum += *i;
+                }
+                let avg = sum / n;
+                let dev = {
+                    let mut s = 0f32;
+                    for i in last_ping.iter() {
+                        s += (*i - avg).powi(2);
+                    }
+                    (s / n).sqrt()
+                };
+                Some(PingData {
+                    min,
+                    max,
+                    avg,
+                    deviation: dev,
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct PingData {
+    min: f32,
+    max: f32,
+    avg: f32,
+    deviation: f32,
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
