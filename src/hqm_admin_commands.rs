@@ -173,7 +173,7 @@ impl HQMServer {
                 if force_player_index < self.players.len() {
                     if let Some(force_player) = self.players.get(force_player_index) {
                         let force_player_name = force_player.player_name.clone();
-                        if self.move_to_spectator(force_player_index) {
+                        if self.move_to_spectator(behaviour, force_player_index) {
                             let msg = format!(
                                 "{} forced off ice by {}",
                                 force_player_name, admin_player_name
@@ -279,8 +279,7 @@ impl HQMServer {
                 if !kick_player_list.is_empty() {
                     for (player_index, player_name, player_addr) in kick_player_list {
                         if player_index != admin_player_index {
-                            behaviour.before_player_exit(self, player_index);
-                            self.remove_player(player_index, true);
+                            self.remove_player(behaviour, player_index, true);
 
                             if ban_player {
                                 self.ban_list.insert(player_addr.ip());
@@ -370,8 +369,7 @@ impl HQMServer {
                             if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
                                 let kick_player_name = kick_player.player_name.clone();
                                 let kick_ip = data.addr.ip().clone();
-                                behaviour.before_player_exit(self, kick_player_index);
-                                self.remove_player(kick_player_index, true);
+                                self.remove_player(behaviour, kick_player_index, true);
 
                                 if ban_player {
                                     self.ban_list.insert(kick_ip);

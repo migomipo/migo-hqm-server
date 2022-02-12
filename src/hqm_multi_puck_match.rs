@@ -89,7 +89,7 @@ impl HQMMultiPuckMatchBehaviour {
             for (i, red_player_index) in red_players.into_iter().enumerate() {
                 let pos = Point3::new(player_line_start + 2.0 * (i as f32), 1.5, redline + 10.0);
                 let rot = Rotation3::identity();
-                server.spawn_skater(red_player_index, HQMTeam::Red, pos, rot);
+                server.spawn_skater(self, red_player_index, HQMTeam::Red, pos, rot);
             }
         }
         if !blue_players.is_empty() {
@@ -97,7 +97,7 @@ impl HQMMultiPuckMatchBehaviour {
             for (i, blue_player_index) in blue_players.into_iter().enumerate() {
                 let pos = Point3::new(player_line_start + 2.0 * (i as f32), 1.5, redline - 10.0);
                 let rot = Rotation3::from_euler_angles(0.0, PI, 0.0);
-                server.spawn_skater(blue_player_index, HQMTeam::Blue, pos, rot);
+                server.spawn_skater(self, blue_player_index, HQMTeam::Blue, pos, rot);
             }
         }
     }
@@ -252,8 +252,8 @@ impl HQMMultiPuckMatchBehaviour {
         }
         for (player_index, player_name) in spectating_players {
             info!("{} ({}) is spectating", player_name, player_index);
-            server.remove_player_from_dual_control(player_index);
-            server.move_to_spectator(player_index);
+            server.remove_player_from_dual_control(self, player_index);
+            server.move_to_spectator(self, player_index);
         }
         if !joining_red.is_empty() || !joining_blue.is_empty() {
             let (red_player_count, blue_player_count) = {
@@ -276,6 +276,7 @@ impl HQMMultiPuckMatchBehaviour {
             let mut new_blue_player_count = blue_player_count;
 
             fn add_player(
+                behaviour: &mut HQMMultiPuckMatchBehaviour,
                 player_index: usize,
                 player_name: Rc<String>,
                 server: &mut HQMServer,
@@ -289,7 +290,7 @@ impl HQMMultiPuckMatchBehaviour {
                 }
 
                 if server
-                    .spawn_skater_at_spawnpoint(player_index, team, spawn_point)
+                    .spawn_skater_at_spawnpoint(behaviour, player_index, team, spawn_point)
                     .is_some()
                 {
                     info!(
@@ -300,6 +301,7 @@ impl HQMMultiPuckMatchBehaviour {
                 }
             }
             fn add_player_dual_control(
+                behaviour: &mut HQMMultiPuckMatchBehaviour,
                 player_index: usize,
                 player_name: Rc<String>,
                 server: &mut HQMServer,
@@ -312,16 +314,16 @@ impl HQMMultiPuckMatchBehaviour {
 
                 match current_empty {
                     Some((index, movement @ Some(_), None)) => {
-                        server.update_dual_control(index, movement, Some(player_index));
+                        server.update_dual_control(behaviour, index, movement, Some(player_index));
                     }
                     Some((index, None, stick @ Some(_))) => {
-                        server.update_dual_control(index, Some(player_index), stick);
+                        server.update_dual_control(behaviour, index, Some(player_index), stick);
                     }
                     _ => {
-                        if *player_count >= team_max {}
-
-                        if server
+                        if *player_count >= team_max {
+                        } else if server
                             .spawn_dual_control_skater_at_spawnpoint(
+                                behaviour,
                                 team,
                                 spawn_point,
                                 Some(player_index),
@@ -342,6 +344,7 @@ impl HQMMultiPuckMatchBehaviour {
             for (player_index, player_name, dual_control) in joining_red {
                 if dual_control {
                     add_player_dual_control(
+                        self,
                         player_index,
                         player_name,
                         server,
@@ -352,6 +355,7 @@ impl HQMMultiPuckMatchBehaviour {
                     );
                 } else {
                     add_player(
+                        self,
                         player_index,
                         player_name,
                         server,
@@ -365,6 +369,7 @@ impl HQMMultiPuckMatchBehaviour {
             for (player_index, player_name, dual_control) in joining_blue {
                 if dual_control {
                     add_player_dual_control(
+                        self,
                         player_index,
                         player_name,
                         server,
@@ -375,6 +380,7 @@ impl HQMMultiPuckMatchBehaviour {
                     )
                 } else {
                     add_player(
+                        self,
                         player_index,
                         player_name,
                         server,

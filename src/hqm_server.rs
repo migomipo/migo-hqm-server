@@ -557,7 +557,7 @@ impl HQMServer {
                 }
             }
             "swap" => {
-                self.swap_dual_control(player_index);
+                self.swap_dual_control(behaviour, player_index);
             }
             "t" => {
                 self.add_user_team_message(arg, player_index);
@@ -566,11 +566,16 @@ impl HQMServer {
         }
     }
 
-    fn swap_dual_control(&mut self, player_index: usize) {
+    fn swap_dual_control<B: HQMServerBehaviour>(&mut self, behaviour: &mut B, player_index: usize) {
         if let Some((dual_control_player_index, movement, stick)) =
             self.get_dual_control_player(player_index)
         {
-            self.update_dual_control_internal(dual_control_player_index, stick, movement);
+            self.update_dual_control_internal(
+                behaviour,
+                dual_control_player_index,
+                stick,
+                movement,
+            );
         }
     }
 
@@ -775,12 +780,11 @@ impl HQMServer {
         let player_index = self.find_player_slot(addr);
 
         if let Some(player_index) = player_index {
-            behaviour.before_player_exit(self, player_index);
             let player_name = {
                 let player = self.players.get(player_index).unwrap();
                 player.player_name.clone()
             };
-            self.remove_player(player_index, true);
+            self.remove_player(behaviour, player_index, true);
             info!("{} ({}) exited server", player_name, player_index);
             let msg = format!("{} exited", player_name);
             self.add_server_chat_message(msg);
@@ -814,7 +818,13 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn remove_player(&mut self, player_index: usize, on_replay: bool) {
+    pub fn remove_player<B: HQMServerBehaviour>(
+        &mut self,
+        behaviour: &mut B,
+        player_index: usize,
+        on_replay: bool,
+    ) {
+        behaviour.before_player_exit(self, player_index);
         if let Some(player) = self.players.get(player_index) {
             let player_name = player.player_name.clone();
             let is_admin = player.is_admin;
@@ -825,7 +835,7 @@ impl HQMServer {
 
             match &player.data {
                 HQMServerPlayerData::NetworkPlayer { .. } => {
-                    self.remove_player_from_dual_control(player_index);
+                    self.remove_player_from_dual_control(behaviour, player_index);
                 }
                 HQMServerPlayerData::DualControl { movement, stick } => {
                     let movement = *movement;
@@ -860,7 +870,11 @@ impl HQMServer {
         }
     }
 
-    pub fn remove_player_from_dual_control(&mut self, player_index: usize) {
+    pub fn remove_player_from_dual_control<B: HQMServerBehaviour>(
+        &mut self,
+        behaviour: &mut B,
+        player_index: usize,
+    ) {
         let mut changes = vec![];
         for (i, player) in self.players.iter().enumerate() {
             if let Some(player) = player {
@@ -882,14 +896,18 @@ impl HQMServer {
             }
         }
         for (i, movement, stick) in changes {
-            self.update_dual_control_internal(i, movement, stick)
+            self.update_dual_control_internal(behaviour, i, movement, stick)
         }
     }
 
-    pub fn move_to_spectator(&mut self, player_index: usize) -> bool {
+    pub fn move_to_spectator<B: HQMServerBehaviour>(
+        &mut self,
+        behaviour: &mut B,
+        player_index: usize,
+    ) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
             if let HQMServerPlayerData::DualControl { .. } = player.data {
-                self.remove_player(player_index, true);
+                self.remove_player(behaviour, player_index, true);
                 return true;
             } else {
                 if let Some((object_index, _)) = player.object {
@@ -906,29 +924,32 @@ impl HQMServer {
         false
     }
 
-    pub fn spawn_skater_at_spawnpoint(
+    pub fn spawn_skater_at_spawnpoint<B: HQMServerBehaviour>(
         &mut self,
+        behaviour: &mut B,
         player_index: usize,
         team: HQMTeam,
         spawn_point: HQMSpawnPoint,
     ) -> Option<usize> {
         let (pos, rot) = get_spawnpoint(&self.game.world.rink, team, spawn_point);
-        self.spawn_skater(player_index, team, pos, rot)
+        self.spawn_skater(behaviour, player_index, team, pos, rot)
     }
 
-    pub fn spawn_dual_control_skater_at_spawnpoint(
+    pub fn spawn_dual_control_skater_at_spawnpoint<B: HQMServerBehaviour>(
         &mut self,
+        behaviour: &mut B,
         team: HQMTeam,
         spawn_point: HQMSpawnPoint,
         movement: Option<usize>,
         stick: Option<usize>,
     ) -> Option<(usize, usize)> {
         let (pos, rot) = get_spawnpoint(&self.game.world.rink, team, spawn_point);
-        self.spawn_dual_control_skater(team, pos, rot, movement, stick)
+        self.spawn_dual_control_skater(behaviour, team, pos, rot, movement, stick)
     }
 
-    pub fn spawn_dual_control_skater(
+    pub fn spawn_dual_control_skater<B: HQMServerBehaviour>(
         &mut self,
+        behaviour: &mut B,
         team: HQMTeam,
         pos: Point3<f32>,
         rot: Rotation3<f32>,
@@ -963,7 +984,7 @@ impl HQMServer {
                     };
                     self.players.add_player(player_index, new_player);
 
-                    self.update_dual_control_internal(player_index, movement, stick);
+                    self.update_dual_control_internal(behaviour, player_index, movement, stick);
 
                     Some((player_index, skater))
                 } else {
@@ -974,8 +995,9 @@ impl HQMServer {
         }
     }
 
-    pub fn spawn_skater(
+    pub fn spawn_skater<B: HQMServerBehaviour>(
         &mut self,
+        behaviour: &mut B,
         player_index: usize,
         team: HQMTeam,
         pos: Point3<f32>,
@@ -1004,7 +1026,7 @@ impl HQMServer {
                     player.object = object;
                     let update = player.get_update_message(player_index);
                     self.add_global_message(update, true, true);
-                    self.remove_player_from_dual_control(player_index);
+                    self.remove_player_from_dual_control(behaviour, player_index);
                     return Some(skater);
                 }
             }
@@ -1012,8 +1034,9 @@ impl HQMServer {
         None
     }
 
-    pub fn update_dual_control(
+    pub fn update_dual_control<B: HQMServerBehaviour>(
         &mut self,
+        behaviour: &mut B,
         dual_control_player_index: usize,
         movement: Option<usize>,
         stick: Option<usize>,
@@ -1048,15 +1071,16 @@ impl HQMServer {
                 }
             }
             for (i, new_movement, new_stick) in changes {
-                self.update_dual_control_internal(i, new_movement, new_stick);
+                self.update_dual_control_internal(behaviour, i, new_movement, new_stick);
             }
         }
 
-        self.update_dual_control_internal(dual_control_player_index, movement, stick);
+        self.update_dual_control_internal(behaviour, dual_control_player_index, movement, stick);
     }
 
-    fn update_dual_control_internal(
+    fn update_dual_control_internal<B: HQMServerBehaviour>(
         &mut self,
+        behaviour: &mut B,
         dual_control_player_index: usize,
         movement: Option<usize>,
         stick: Option<usize>,
@@ -1078,7 +1102,7 @@ impl HQMServer {
                 let old_stick = *s;
 
                 if movement.is_none() && stick.is_none() {
-                    self.remove_player(dual_control_player_index, true);
+                    self.remove_player(behaviour, dual_control_player_index, true);
                 } else {
                     *m = movement;
                     *s = stick;
@@ -1101,11 +1125,11 @@ impl HQMServer {
                             &mut self.players,
                             dual_control_player_index,
                         );
-                        self.move_to_spectator(movement);
+                        self.move_to_spectator(behaviour, movement);
                     }
                     if let Some(stick) = stick {
                         set_view_player_index(stick, &mut self.players, dual_control_player_index);
-                        self.move_to_spectator(stick);
+                        self.move_to_spectator(behaviour, stick);
                     }
                 }
             }
@@ -1464,8 +1488,7 @@ impl HQMServer {
             })
             .collect();
         for (player_index, player_name) in inactive_players {
-            behaviour.before_player_exit(self, player_index);
-            self.remove_player(player_index, true);
+            self.remove_player(behaviour, player_index, true);
             info!("{} ({}) timed out", player_name, player_index);
             let chat_msg = format!("{} timed out", player_name);
             chat_messages.push(chat_msg);
