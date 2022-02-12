@@ -706,6 +706,43 @@ impl HQMMultiPuckMatchBehaviour {
             server.game.goal_message_timer = server.game.goal_message_timer.saturating_sub(1);
         }
     }
+
+    fn force_player_off_ice(
+        &mut self,
+        server: &mut HQMServer,
+        admin_player_index: usize,
+        force_player_index: usize,
+    ) {
+        if let Some(player) = server.players.get(admin_player_index) {
+            if player.is_admin {
+                let admin_player_name = player.player_name.clone();
+
+                if force_player_index < server.players.len() {
+                    if let Some(force_player) = server.players.get(force_player_index) {
+                        let force_player_name = force_player.player_name.clone();
+                        if server.move_to_spectator(self, force_player_index) {
+                            let msg = format!(
+                                "{} forced off ice by {}",
+                                force_player_name, admin_player_name
+                            );
+                            info!(
+                                "{} ({}) forced {} ({}) off ice",
+                                admin_player_name,
+                                admin_player_index,
+                                force_player_name,
+                                force_player_index
+                            );
+                            server.add_server_chat_message(msg);
+                            self.team_switch_timer.insert(force_player_index, 500);
+                        }
+                    }
+                }
+            } else {
+                server.admin_deny_message(admin_player_index);
+                return;
+            }
+        }
+    }
 }
 
 impl HQMServerBehaviour for HQMMultiPuckMatchBehaviour {
@@ -840,6 +877,11 @@ impl HQMServerBehaviour for HQMMultiPuckMatchBehaviour {
                     }
                 }
             }
+            "fs" => {
+                if let Ok(force_player_index) = arg.parse::<usize>() {
+                    self.force_player_off_ice(server, player_index, force_player_index);
+                }
+            }
             "faceoff" => {
                 self.faceoff(server, player_index);
             }
@@ -883,10 +925,6 @@ impl HQMServerBehaviour for HQMMultiPuckMatchBehaviour {
 
     fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: usize) {
         self.team_switch_timer.remove(&player_index);
-    }
-
-    fn after_player_force_off(&mut self, _server: &mut HQMServer, player_index: usize) {
-        self.team_switch_timer.insert(player_index, 500);
     }
 
     fn get_number_of_players(&self) -> u32 {

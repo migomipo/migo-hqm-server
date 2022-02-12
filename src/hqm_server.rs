@@ -442,13 +442,6 @@ impl HQMServer {
             "unmutechat" => {
                 self.unmute_chat(player_index);
             }
-            "fs" => {
-                if let Ok(force_player_index) = arg.parse::<usize>() {
-                    if force_player_index < self.players.len() {
-                        self.force_player_off_ice(player_index, force_player_index, behaviour);
-                    }
-                }
-            }
             "kick" => {
                 if let Ok(kick_player_index) = arg.parse::<usize>() {
                     if kick_player_index < self.players.len() {
@@ -2345,8 +2338,6 @@ pub trait HQMServerBehaviour {
     fn before_player_exit(&mut self, _server: &mut HQMServer, _player_index: usize) {}
 
     fn after_player_join(&mut self, _server: &mut HQMServer, _player_index: usize) {}
-
-    fn after_player_force_off(&mut self, _server: &mut HQMServer, _player_index: usize) {}
 
     fn get_number_of_players(&self) -> u32;
 }

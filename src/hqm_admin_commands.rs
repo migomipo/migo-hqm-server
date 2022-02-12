@@ -160,43 +160,6 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn force_player_off_ice<B: HQMServerBehaviour>(
-        &mut self,
-        admin_player_index: usize,
-        force_player_index: usize,
-        behaviour: &mut B,
-    ) {
-        if let Some(player) = self.players.get(admin_player_index) {
-            if player.is_admin {
-                let admin_player_name = player.player_name.clone();
-
-                if force_player_index < self.players.len() {
-                    if let Some(force_player) = self.players.get(force_player_index) {
-                        let force_player_name = force_player.player_name.clone();
-                        if self.move_to_spectator(behaviour, force_player_index) {
-                            let msg = format!(
-                                "{} forced off ice by {}",
-                                force_player_name, admin_player_name
-                            );
-                            info!(
-                                "{} ({}) forced {} ({}) off ice",
-                                admin_player_name,
-                                admin_player_index,
-                                force_player_name,
-                                force_player_index
-                            );
-                            self.add_server_chat_message(msg);
-                            behaviour.after_player_force_off(self, force_player_index);
-                        }
-                    }
-                }
-            } else {
-                self.admin_deny_message(admin_player_index);
-                return;
-            }
-        }
-    }
-
     pub(crate) fn admin_login(&mut self, player_index: usize, password: &str) {
         if let Some(player) = self.players.get_mut(player_index) {
             let msg = if player.is_admin {
