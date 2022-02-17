@@ -604,16 +604,15 @@ impl HQMServer {
         if view_player_index < self.players.len() {
             if let Some(view_player) = self.players.get(view_player_index) {
                 let view_player_name = view_player.player_name.clone();
-                if view_player.object.is_some()
-                    || self.get_dual_control_player(player_index).is_some()
-                {
-                    self.add_directed_server_chat_message_str(
-                        "You must be a spectator to change view",
-                        player_index,
-                    );
-                } else if let Some(player) = self.players.get_mut(player_index) {
+                let has_dual_control_player = self.get_dual_control_player(player_index).is_some();
+                if let Some(player) = self.players.get_mut(player_index) {
                     if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
-                        if view_player_index != data.view_player_index {
+                        if player.object.is_some() || has_dual_control_player {
+                            self.add_directed_server_chat_message_str(
+                                "You must be a spectator to change view",
+                                player_index,
+                            );
+                        } else if view_player_index != data.view_player_index {
                             data.view_player_index = view_player_index;
                             if player_index != view_player_index {
                                 let msg = format!("You are now viewing {}", view_player_name);
