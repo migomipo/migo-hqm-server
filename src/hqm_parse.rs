@@ -287,18 +287,18 @@ impl<'a> HQMMessageReader<'a> {
 
     pub fn read_u16_aligned(&mut self) -> u16 {
         self.align();
-        let b1 = self.safe_get_byte(self.pos) as u16;
-        let b2 = self.safe_get_byte(self.pos + 1) as u16;
+        let b1: u16 = self.safe_get_byte(self.pos).into();
+        let b2: u16 = self.safe_get_byte(self.pos + 1).into();
         self.pos = self.pos + 2;
         return b1 | b2 << 8;
     }
 
     pub fn read_u32_aligned(&mut self) -> u32 {
         self.align();
-        let b1 = self.safe_get_byte(self.pos) as u32;
-        let b2 = self.safe_get_byte(self.pos + 1) as u32;
-        let b3 = self.safe_get_byte(self.pos + 2) as u32;
-        let b4 = self.safe_get_byte(self.pos + 3) as u32;
+        let b1: u32 = self.safe_get_byte(self.pos).into();
+        let b2: u32 = self.safe_get_byte(self.pos + 1).into();
+        let b3: u32 = self.safe_get_byte(self.pos + 2).into();
+        let b4: u32 = self.safe_get_byte(self.pos + 3).into();
         self.pos = self.pos + 4;
         return b1 | b2 << 8 | b3 << 16 | b4 << 24;
     }
@@ -350,9 +350,14 @@ impl<'a> HQMMessageReader<'a> {
         while bits_remaining > 0 {
             let bits_possible_to_write = 8 - self.bit_pos;
             let bits = min(bits_remaining, bits_possible_to_write);
-            let mask = !(!0u32 << bits);
-            let a = (self.safe_get_byte(self.pos) as u32 >> self.bit_pos) & mask;
 
+            let mask = if bits == 8 {
+                u8::MAX
+            } else {
+                !(u8::MAX << bits)
+            };
+            let a = (self.safe_get_byte(self.pos) >> self.bit_pos) & mask;
+            let a: u32 = a.into();
             res = res | (a << p);
 
             if bits_remaining >= bits_possible_to_write {
