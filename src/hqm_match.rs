@@ -1114,7 +1114,7 @@ impl HQMMatchBehaviour {
                 if self.pause_timer > 0 && self.pause_timer < self.config.time_break {
                     // If we're currently in a break, with very little time left,
                     // we reset the timer
-                    self.pause_timer = self.pause_timer;
+                    self.pause_timer = self.config.time_break;
                 }
                 info!("{} ({}) paused game", player.player_name, player_index);
                 let msg = format!("Game paused by {}", player.player_name);
