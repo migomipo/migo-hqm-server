@@ -167,9 +167,37 @@ impl HQMMatchBehaviour {
         self.faceoff_game_step = server.game.game_step;
     }
 
+    fn update_game_over(&mut self, server: &mut HQMServer) {
+        let time_gameover = self.config.time_intermission * 100;
+        let time_break = self.config.time_break * 100;
+
+        let red_score = server.game.red_score;
+        let blue_score = server.game.blue_score;
+        let old_game_over = server.game.game_over;
+        server.game.game_over =
+            if server.game.period > self.config.periods && red_score != blue_score {
+                true
+            } else if self.config.mercy > 0
+                && (red_score.saturating_sub(blue_score) >= self.config.mercy
+                    || blue_score.saturating_sub(red_score) >= self.config.mercy)
+            {
+                true
+            } else if self.config.first_to > 0
+                && (red_score >= self.config.first_to || blue_score >= self.config.first_to)
+            {
+                true
+            } else {
+                false
+            };
+        if server.game.game_over && !old_game_over {
+            self.pause_timer = self.pause_timer.max(time_gameover);
+        } else if !server.game.game_over && old_game_over {
+            self.pause_timer = self.pause_timer.max(time_break);
+        }
+    }
+
     fn call_goal(&mut self, server: &mut HQMServer, team: HQMTeam, puck_index: usize) {
         let time_break = self.config.time_break * 100;
-        let time_gameover = self.config.time_intermission * 100;
 
         match team {
             HQMTeam::Red => {
@@ -237,25 +265,6 @@ impl HQMMatchBehaviour {
             return;
         };
 
-        let (new_score, opponent_score) = match team {
-            HQMTeam::Red => (server.game.red_score, server.game.blue_score),
-            HQMTeam::Blue => (server.game.blue_score, server.game.red_score),
-        };
-
-        let game_over = if server.game.period > self.config.periods
-            && server.game.red_score != server.game.blue_score
-        {
-            true
-        } else if self.config.mercy > 0
-            && new_score.saturating_sub(opponent_score) >= self.config.mercy
-        {
-            true
-        } else if self.config.first_to > 0 && new_score >= self.config.first_to {
-            true
-        } else {
-            false
-        };
-
         server.add_goal_message(team, goal_scorer_index, assist_index);
 
         fn convert(puck_speed: f32, use_mph: bool) -> (f32, &'static str) {
@@ -293,16 +302,10 @@ impl HQMMatchBehaviour {
             server.add_server_chat_message(s);
         }
 
-        if game_over {
-            server.game.game_over = true;
-        }
-
-        if server.game.game_over {
-            self.pause_timer = time_gameover;
-        } else {
-            self.pause_timer = time_break;
-        }
+        self.pause_timer = time_break;
         self.is_pause_goal = true;
+
+        self.update_game_over(server);
 
         let gamestep = server.game.game_step;
 
@@ -1140,6 +1143,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_clock(
+        & mut self,
         server: &mut HQMServer,
         input_minutes: u32,
         input_seconds: u32,
@@ -1155,6 +1159,7 @@ impl HQMMatchBehaviour {
                 );
                 let msg = format!("Clock set by {}", player.player_name);
                 server.add_server_chat_message(msg);
+                self.update_game_over(server);
             } else {
                 server.admin_deny_message(player_index);
             }
@@ -1162,6 +1167,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_score(
+        &mut self,
         server: &mut HQMServer,
         input_team: HQMTeam,
         input_score: u32,
@@ -1191,13 +1197,14 @@ impl HQMMatchBehaviour {
                         server.add_server_chat_message(msg);
                     }
                 }
+                self.update_game_over(server);
             } else {
                 server.admin_deny_message(player_index);
             }
         }
     }
 
-    fn set_period(server: &mut HQMServer, input_period: u32, player_index: usize) {
+    fn set_period(&mut self, server: &mut HQMServer, input_period: u32, player_index: usize) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 server.game.period = input_period;
@@ -1208,6 +1215,7 @@ impl HQMMatchBehaviour {
                 );
                 let msg = format!("Period set by {}", player.player_name);
                 server.add_server_chat_message(msg);
+                self.update_game_over(server);
             } else {
                 server.admin_deny_message(player_index);
             }
@@ -1228,6 +1236,7 @@ impl HQMMatchBehaviour {
                     input_period, player.player_name
                 );
                 server.add_server_chat_message(msg);
+                self.update_game_over(server);
             } else {
                 server.admin_deny_message(player_index);
             }
@@ -1290,11 +1299,7 @@ impl HQMMatchBehaviour {
                     self.step_where_period_ended = server.game.game_step;
                     self.too_late_printed_this_period = false;
                     self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
-                    if server.game.period > self.config.periods
-                        && server.game.red_score != server.game.blue_score
-                    {
-                        server.game.game_over = true;
-                    }
+                    self.update_game_over(server);
                 }
             }
         }
@@ -1477,17 +1482,17 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                     match args[0] {
                         "redscore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
-                                Self::set_score(server, HQMTeam::Red, input_score, player_index);
+                                self.set_score(server, HQMTeam::Red, input_score, player_index);
                             }
                         }
                         "bluescore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
-                                Self::set_score(server, HQMTeam::Blue, input_score, player_index);
+                               self.set_score(server, HQMTeam::Blue, input_score, player_index);
                             }
                         }
                         "period" => {
                             if let Ok(input_period) = args[1].parse::<u32>() {
-                                Self::set_period(server, input_period, player_index);
+                                self.set_period(server, input_period, player_index);
                             }
                         }
                         "periodnum" => {
@@ -1509,7 +1514,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                                 if let (Ok(time_minutes), Ok(time_seconds)) =
                                     (time_parts[0].parse::<u32>(), time_parts[1].parse::<u32>())
                                 {
-                                    Self::set_clock(
+                                    self.set_clock(
                                         server,
                                         time_minutes,
                                         time_seconds,
