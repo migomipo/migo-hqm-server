@@ -1597,12 +1597,19 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                     HQMOffsideConfiguration::Delayed => "Offside enabled",
                     HQMOffsideConfiguration::Immediate => "Immediate offside enabled",
                 };
+                let offside_line_str = if self.config.offside != HQMOffsideConfiguration::Off
+                    && self.config.offside_line == HQMOffsideLineConfiguration::Center
+                {
+                    ""
+                } else {
+                    " (center line)"
+                };
                 let icing_str = match self.config.icing {
                     HQMIcingConfiguration::Off => "Icing disabled",
                     HQMIcingConfiguration::Touch => "Icing enabled",
                     HQMIcingConfiguration::NoTouch => "No-touch icing enabled",
                 };
-                let msg = format!("{}, {}", offside_str, icing_str);
+                let msg = format!("{}{}, {}", offside_str, offside_line_str, icing_str);
                 server.add_directed_server_chat_message(msg, player_index);
                 if self.config.mercy > 0 {
                     let msg = format!("Mercy rule when team leads by {} goals", self.config.mercy);
