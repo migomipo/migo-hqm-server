@@ -34,6 +34,7 @@ Property               | Explanation
 spawn                  | Spawn point for players who join a team. Allowed values are "center" (default, spawns players at the center faceoff circle) and "bench" (spawns players right next to the "bench", opposite side of the spectator camera)
 limit_jump_speed       | If true, nerfs jump speed, effectively nerfing double-jumping. If false, it should work like vanilla.
 offside                | Offside setting. Allowed values are "off" (default, no offside), "on", (offside rule enabled) and "immediate", which will call offside immediately instead of warning when the puck has entered the offensive zone in an offside situation.
+offsideline            | Offside line setting. Allowed values are "blue" (default, offensive blue line), and "center" (center line)
 icing                  | Icing setting. Allowed values are "off" (default, no icing), "on" (touch icing rule enabled) and "notouch" (no-touch icing rule enabled)
 time_period            | (Match mode only) Period length in seconds.
 time_warmup            | (Match mode only) Warmup length in seconds.
@@ -108,6 +109,7 @@ Commands                 | Explanation
 /set bluescore *N*       | Sets blue score.
 /set icing *S*           | Sets icing rule. Allowed values are "off", "on" (touch icing" and "notouch" (no-touch icing)
 /set offside *S*         | Sets offside rule. Allowed values are "off", "on" (delayed offside) and "imm" or "immediate" (immediate offside, no offside warnings).
+/set offsideline *S*     | Sets offside line settings. Allowed values are "blue" (default, offensive blue line), and "center" (center line).
 /set teamsize *N*        | Sets team size.
 /set replay *on/off*     | Enables/disables server-side replays.
 /set mercy *N/off*       | Sets mercy rule setting. If 0 or off, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least N goals.
