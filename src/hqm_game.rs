@@ -689,37 +689,6 @@ impl HQMRink {
             }
         }
     }
-
-    pub fn get_offside_faceoff_spot(&self, pos: &Point3<f32>, team: HQMTeam) -> HQMRinkFaceoffSpot {
-        let side = if pos.x <= self.width / 2.0 {
-            HQMRinkSide::Left
-        } else {
-            HQMRinkSide::Right
-        };
-        let lines_and_net = match team {
-            HQMTeam::Red => &self.red_lines_and_net,
-            HQMTeam::Blue => &self.blue_lines_and_net,
-        };
-        if lines_and_net.offensive_line.point_past_middle_of_line(pos) {
-            HQMRinkFaceoffSpot::Offside(team.get_other_team(), side)
-        } else if lines_and_net.mid_line.point_past_middle_of_line(pos) {
-            HQMRinkFaceoffSpot::Center
-        } else if lines_and_net.defensive_line.point_past_middle_of_line(pos) {
-            HQMRinkFaceoffSpot::Offside(team, side)
-        } else {
-            HQMRinkFaceoffSpot::DefensiveZone(team, side)
-        }
-    }
-
-    pub fn get_icing_faceoff_spot(&self, pos: &Point3<f32>, team: HQMTeam) -> HQMRinkFaceoffSpot {
-        let side = if pos.x <= self.width / 2.0 {
-            HQMRinkSide::Left
-        } else {
-            HQMRinkSide::Right
-        };
-
-        HQMRinkFaceoffSpot::DefensiveZone(team, side)
-    }
 }
 
 #[derive(Debug, Clone)]

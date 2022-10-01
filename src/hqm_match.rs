@@ -3,10 +3,11 @@ use tracing::info;
 
 use crate::hqm_behaviour_extra::{
     HQMDualControlSetting, HQMIcingConfiguration, HQMOffsideConfiguration,
+    HQMOffsideLineConfiguration,
 };
 use migo_hqm_server::hqm_game::{
-    HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot, HQMRulesState,
-    HQMTeam,
+    HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot, HQMRinkSide,
+    HQMRulesState, HQMSkater, HQMTeam,
 };
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerList, HQMSpawnPoint,
@@ -27,6 +28,7 @@ pub struct HQMMatchConfiguration {
     pub periods: u32,
     pub offside: HQMOffsideConfiguration,
     pub icing: HQMIcingConfiguration,
+    pub offside_line: HQMOffsideLineConfiguration,
     pub warmup_pucks: usize,
     pub physics_config: HQMPhysicsConfiguration,
     pub blue_line_location: f32,
@@ -41,6 +43,7 @@ pub struct HQMMatchConfiguration {
 #[derive(Debug, Clone)]
 pub struct HQMPuckTouch {
     pub player_index: usize,
+    pub skater_index: usize,
     pub team: HQMTeam,
     pub puck_pos: Point3<f32>,
     pub puck_speed: f32,
@@ -76,7 +79,7 @@ pub enum HQMIcingStatus {
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum HQMOffsideStatus {
-    InNeutralZone,                        // No offside
+    Neutral,                              // No offside
     InOffensiveZone(HQMTeam),             // No offside, puck in offensive zone
     Warning(HQMTeam, Point3<f32>, usize), // Warning, puck entered offensive zone in an offside situation but not touched yet
     Offside(HQMTeam),                     // Offside has been called
@@ -91,7 +94,7 @@ impl HQMMatchBehaviour {
             is_pause_goal: false,
             next_faceoff_spot: HQMRinkFaceoffSpot::Center,
             icing_status: HQMIcingStatus::No,
-            offside_status: HQMOffsideStatus::InNeutralZone,
+            offside_status: HQMOffsideStatus::Neutral,
             preferred_positions: HashMap::new(),
             team_switch_timer: Default::default(),
             started_as_goalie: vec![],
@@ -101,6 +104,10 @@ impl HQMMatchBehaviour {
             start_next_replay: None,
             puck_touches: Default::default(),
         }
+    }
+
+    fn get_last_touch(&self, puck_index: usize) -> Option<&HQMPuckTouch> {
+        self.puck_touches.get(&puck_index).and_then(|x| x.front())
     }
 
     fn do_faceoff(&mut self, server: &mut HQMServer) {
@@ -154,7 +161,7 @@ impl HQMMatchBehaviour {
         {
             HQMOffsideStatus::InOffensiveZone(HQMTeam::Blue)
         } else {
-            HQMOffsideStatus::InNeutralZone
+            HQMOffsideStatus::Neutral
         };
 
         self.faceoff_game_step = server.game.game_step;
@@ -335,176 +342,245 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn handle_events(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
-        let offside = self.config.offside;
-        let icing = self.config.icing;
-        for event in events {
-            match event {
-                HQMSimulationEvent::PuckEnteredNet { team, puck } => {
-                    let (team, puck) = (*team, *puck);
-                    match &self.offside_status {
-                        HQMOffsideStatus::Warning(offside_team, p, _) if *offside_team == team => {
-                            let copy = p.clone();
-                            self.call_offside(server, team, &copy);
-                        }
-                        HQMOffsideStatus::Offside(_) => {}
-                        _ => {
-                            self.call_goal(server, team, puck);
-                        }
-                    }
-                }
-                HQMSimulationEvent::PuckTouch { player, puck, .. } => {
-                    let (player, puck_index) = (*player, *puck);
-                    // Get connected player index from skater
-                    if let Some((player_index, touching_team, _)) =
-                        server.players.get_from_object_index(player)
-                    {
-                        if let Some(puck) = server.game.world.objects.get_puck_mut(puck_index) {
-                            add_touch(
-                                puck,
-                                self.puck_touches.entry(puck_index),
-                                player_index,
-                                touching_team,
-                                server.game.time,
-                            );
+    fn handle_puck_touch(&mut self, server: &mut HQMServer, player: usize, puck_index: usize) {
+        if let Some((player_index, touching_team, _)) = server.players.get_from_object_index(player)
+        {
+            if let Some(puck) = server.game.world.objects.get_puck_mut(puck_index) {
+                add_touch(
+                    puck,
+                    self.puck_touches.entry(puck_index),
+                    player_index,
+                    player,
+                    touching_team,
+                    server.game.time,
+                );
 
-                            let other_team = touching_team.get_other_team();
+                let other_team = touching_team.get_other_team();
 
-                            if let HQMOffsideStatus::Warning(team, p, i) = &self.offside_status {
-                                if *team == touching_team {
-                                    let pass_origin = if player_index == *i {
-                                        puck.body.pos.clone()
-                                    } else {
-                                        p.clone()
-                                    };
-                                    self.call_offside(server, touching_team, &pass_origin);
-                                }
-                                continue;
-                            }
-                            if let HQMIcingStatus::Warning(team, p) = &self.icing_status {
-                                if touching_team != *team {
-                                    if self.started_as_goalie.contains(&player_index) {
-                                        self.icing_status = HQMIcingStatus::No;
-                                        server.add_server_chat_message_str("Icing waved off");
-                                    } else {
-                                        let copy = p.clone();
-                                        self.call_icing(server, other_team, &copy);
-                                    }
-                                } else {
-                                    self.icing_status = HQMIcingStatus::No;
-                                    server.add_server_chat_message_str("Icing waved off");
-                                }
-                            } else if let HQMIcingStatus::NotTouched(_, _) = self.icing_status {
-                                self.icing_status = HQMIcingStatus::No;
-                            }
-                        }
-                    }
-                }
-                HQMSimulationEvent::PuckEnteredOtherHalf { team, puck } => {
-                    let (team, puck_index) = (*team, *puck);
-                    if let Some(touch) = self.puck_touches.get(&puck_index).and_then(|x| x.front())
-                    {
-                        if team == touch.team && self.icing_status == HQMIcingStatus::No {
-                            self.icing_status =
-                                HQMIcingStatus::NotTouched(team, touch.puck_pos.clone());
-                        }
-                    }
-                }
-                HQMSimulationEvent::PuckPassedGoalLine { team, puck: _ } => {
-                    let team = *team;
-                    if let HQMIcingStatus::NotTouched(icing_team, p) = &self.icing_status {
-                        if team == *icing_team {
-                            match icing {
-                                HQMIcingConfiguration::Touch => {
-                                    self.icing_status = HQMIcingStatus::Warning(team, p.clone());
-                                    server.add_server_chat_message_str("Icing warning");
-                                }
-                                HQMIcingConfiguration::NoTouch => {
-                                    let copy = p.clone();
-                                    self.call_icing(server, team, &copy);
-                                }
-                                HQMIcingConfiguration::Off => {}
-                            }
-                        }
-                    }
-                }
-                HQMSimulationEvent::PuckEnteredOffensiveZone { team, puck } => {
-                    let (team, puck_index) = (*team, *puck);
-                    if self.offside_status == HQMOffsideStatus::InNeutralZone {
-                        if let Some(touch) =
-                            self.puck_touches.get(&puck_index).and_then(|x| x.front())
-                        {
-                            if team == touch.team
-                                && has_players_in_offensive_zone(
-                                    &server,
-                                    team,
-                                    Some(touch.player_index),
-                                )
-                            {
-                                match offside {
-                                    HQMOffsideConfiguration::Delayed => {
-                                        self.offside_status = HQMOffsideStatus::Warning(
-                                            team,
-                                            touch.puck_pos.clone(),
-                                            touch.player_index,
-                                        );
-                                        server.add_server_chat_message_str("Offside warning");
-                                    }
-                                    HQMOffsideConfiguration::Immediate => {
-                                        let copy = touch.puck_pos.clone();
-                                        self.call_offside(server, team, &copy);
-                                    }
-                                    HQMOffsideConfiguration::Off => {
-                                        self.offside_status =
-                                            HQMOffsideStatus::InOffensiveZone(team);
-                                    }
-                                }
-                            } else {
-                                self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
-                            }
+                if let HQMOffsideStatus::Warning(team, p, i) = &self.offside_status {
+                    if *team == touching_team {
+                        let self_touch = player_index == *i;
+                        let pass_origin = if player_index == *i {
+                            puck.body.pos.clone()
                         } else {
-                            self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+                            p.clone()
+                        };
+                        self.call_offside(server, touching_team, &pass_origin, self_touch);
+                        return;
+                    }
+                }
+                if let HQMIcingStatus::Warning(team, p) = &self.icing_status {
+                    if touching_team != *team {
+                        if self.started_as_goalie.contains(&player_index) {
+                            self.icing_status = HQMIcingStatus::No;
+                            server.add_server_chat_message_str("Icing waved off");
+                        } else {
+                            let copy = p.clone();
+                            self.call_icing(server, other_team, &copy);
                         }
+                    } else {
+                        self.icing_status = HQMIcingStatus::No;
+                        server.add_server_chat_message_str("Icing waved off");
                     }
+                } else if let HQMIcingStatus::NotTouched(_, _) = self.icing_status {
+                    self.icing_status = HQMIcingStatus::No;
                 }
-                HQMSimulationEvent::PuckLeftOffensiveZone { team: _, puck: _ } => {
-                    if let HQMOffsideStatus::Warning(_, _, _) = self.offside_status {
-                        server.add_server_chat_message_str("Offside waved off");
-                    }
-                    self.offside_status = HQMOffsideStatus::InNeutralZone;
-                }
-                _ => {}
-            }
-        }
-        if let HQMOffsideStatus::Warning(team, _, _) = self.offside_status {
-            if !has_players_in_offensive_zone(server, team, None) {
-                self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
-                server.add_server_chat_message_str("Offside waved off");
             }
         }
     }
 
-    fn call_offside(&mut self, server: &mut HQMServer, team: HQMTeam, pass_origin: &Point3<f32>) {
+    fn handle_puck_entered_net(&mut self, server: &mut HQMServer, team: HQMTeam, puck: usize) {
+        match &self.offside_status {
+            HQMOffsideStatus::Warning(offside_team, p, _) if *offside_team == team => {
+                let copy = p.clone();
+                self.call_offside(server, team, &copy, false);
+            }
+            HQMOffsideStatus::Offside(_) => {}
+            _ => {
+                self.call_goal(server, team, puck);
+            }
+        }
+    }
+
+    fn handle_puck_passed_goal_line(&mut self, server: &mut HQMServer, team: HQMTeam) {
+        if let HQMIcingStatus::NotTouched(icing_team, p) = &self.icing_status {
+            if team == *icing_team {
+                match self.config.icing {
+                    HQMIcingConfiguration::Touch => {
+                        self.icing_status = HQMIcingStatus::Warning(team, p.clone());
+                        server.add_server_chat_message_str("Icing warning");
+                    }
+                    HQMIcingConfiguration::NoTouch => {
+                        let copy = p.clone();
+                        self.call_icing(server, team, &copy);
+                    }
+                    HQMIcingConfiguration::Off => {}
+                }
+            }
+        }
+    }
+
+    fn puck_into_offside_zone(&mut self, server: &mut HQMServer, team: HQMTeam, puck_index: usize) {
+        if let Some(touch) = self.get_last_touch(puck_index) {
+            if team == touch.team
+                && has_players_in_offensive_zone(&server, team, Some(touch.player_index))
+            {
+                match self.config.offside {
+                    HQMOffsideConfiguration::Delayed => {
+                        self.offside_status = HQMOffsideStatus::Warning(
+                            team,
+                            touch.puck_pos.clone(),
+                            touch.player_index,
+                        );
+                        server.add_server_chat_message_str("Offside warning");
+                    }
+                    HQMOffsideConfiguration::Immediate => {
+                        let puck_pos = touch.puck_pos.clone();
+
+                        let self_touch = server
+                            .game
+                            .world
+                            .objects
+                            .get_skater(touch.skater_index)
+                            .map_or(false, |skater: &HQMSkater| {
+                                (&skater.body.pos - &puck_pos).norm() < 0.5
+                            });
+
+                        self.call_offside(server, team, &puck_pos, self_touch);
+                    }
+                    HQMOffsideConfiguration::Off => {
+                        self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+                    }
+                }
+            } else {
+                self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+            }
+        } else {
+            self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+        }
+    }
+
+    fn handle_puck_entered_offensive_zone(
+        &mut self,
+        server: &mut HQMServer,
+        team: HQMTeam,
+        puck: usize,
+    ) {
+        if self.config.offside_line == HQMOffsideLineConfiguration::OffensiveBlue {
+            self.puck_into_offside_zone(server, team, puck);
+        }
+    }
+
+    fn handle_puck_left_offensive_zone(&mut self, server: &mut HQMServer) {
+        if self.config.offside_line == HQMOffsideLineConfiguration::OffensiveBlue {
+            if let HQMOffsideStatus::Warning(_, _, _) = self.offside_status {
+                server.add_server_chat_message_str("Offside waved off");
+            }
+            self.offside_status = HQMOffsideStatus::Neutral;
+        }
+    }
+
+    fn handle_puck_entered_other_half(
+        &mut self,
+        server: &mut HQMServer,
+        team: HQMTeam,
+        puck_index: usize,
+    ) {
+        if !matches!(&self.offside_status, HQMOffsideStatus::Offside(_))
+            && self.config.offside_line == HQMOffsideLineConfiguration::Center
+        {
+            if let HQMOffsideStatus::Warning(warning_team, _, _) = self.offside_status {
+                if warning_team != team {
+                    server.add_server_chat_message_str("Offside waved off");
+                }
+            }
+            self.puck_into_offside_zone(server, team, puck_index);
+        }
+
+        if let Some(touch) = self.get_last_touch(puck_index) {
+            if team == touch.team && self.icing_status == HQMIcingStatus::No {
+                self.icing_status = HQMIcingStatus::NotTouched(team, touch.puck_pos.clone());
+            }
+        }
+    }
+
+    fn handle_events(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
+        for event in events {
+            match event {
+                HQMSimulationEvent::PuckEnteredNet { team, puck } => {
+                    self.handle_puck_entered_net(server, *team, *puck);
+                }
+                HQMSimulationEvent::PuckTouch { player, puck, .. } => {
+                    self.handle_puck_touch(server, *player, *puck);
+                }
+                HQMSimulationEvent::PuckEnteredOtherHalf { team, puck } => {
+                    self.handle_puck_entered_other_half(server, *team, *puck);
+                }
+                HQMSimulationEvent::PuckPassedGoalLine { team, puck: _ } => {
+                    self.handle_puck_passed_goal_line(server, *team);
+                }
+                HQMSimulationEvent::PuckEnteredOffensiveZone { team, puck } => {
+                    self.handle_puck_entered_offensive_zone(server, *team, *puck);
+                }
+                HQMSimulationEvent::PuckLeftOffensiveZone { team: _, puck: _ } => {
+                    self.handle_puck_left_offensive_zone(server);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn call_offside(
+        &mut self,
+        server: &mut HQMServer,
+        team: HQMTeam,
+        pos: &Point3<f32>,
+        self_touch: bool,
+    ) {
         let time_break = self.config.time_break * 100;
 
-        self.next_faceoff_spot = server
-            .game
-            .world
-            .rink
-            .get_offside_faceoff_spot(pass_origin, team);
+        let side = if pos.x <= &server.game.world.rink.width / 2.0 {
+            HQMRinkSide::Left
+        } else {
+            HQMRinkSide::Right
+        };
+        let lines_and_net = match team {
+            HQMTeam::Red => &server.game.world.rink.red_lines_and_net,
+            HQMTeam::Blue => &server.game.world.rink.blue_lines_and_net,
+        };
+        let faceoff_spot = if self_touch {
+            match self.config.offside_line {
+                HQMOffsideLineConfiguration::OffensiveBlue => {
+                    HQMRinkFaceoffSpot::Offside(team.get_other_team(), side)
+                }
+                HQMOffsideLineConfiguration::Center => HQMRinkFaceoffSpot::Center,
+            }
+        } else if lines_and_net.offensive_line.point_past_middle_of_line(pos) {
+            HQMRinkFaceoffSpot::Offside(team.get_other_team(), side)
+        } else if lines_and_net.mid_line.point_past_middle_of_line(pos) {
+            HQMRinkFaceoffSpot::Center
+        } else if lines_and_net.defensive_line.point_past_middle_of_line(pos) {
+            HQMRinkFaceoffSpot::Offside(team, side)
+        } else {
+            HQMRinkFaceoffSpot::DefensiveZone(team, side)
+        };
+
+        self.next_faceoff_spot = faceoff_spot;
         self.pause_timer = time_break;
         self.offside_status = HQMOffsideStatus::Offside(team);
         server.add_server_chat_message_str("Offside");
     }
 
-    fn call_icing(&mut self, server: &mut HQMServer, team: HQMTeam, pass_origin: &Point3<f32>) {
+    fn call_icing(&mut self, server: &mut HQMServer, team: HQMTeam, pos: &Point3<f32>) {
         let time_break = self.config.time_break * 100;
 
-        self.next_faceoff_spot = server
-            .game
-            .world
-            .rink
-            .get_icing_faceoff_spot(pass_origin, team);
+        let side = if pos.x <= server.game.world.rink.width / 2.0 {
+            HQMRinkSide::Left
+        } else {
+            HQMRinkSide::Right
+        };
+
+        self.next_faceoff_spot = HQMRinkFaceoffSpot::DefensiveZone(team, side);
         self.pause_timer = time_break;
         self.icing_status = HQMIcingStatus::Icing(team);
         server.add_server_chat_message_str("Icing");
@@ -802,6 +878,40 @@ impl HQMMatchBehaviour {
                         self.config.icing = HQMIcingConfiguration::Off;
                         info!("{} ({}) disabled icing", player.player_name, player_index);
                         let msg = format!("Icing disabled by {}", player.player_name);
+
+                        server.add_server_chat_message(msg);
+                    }
+                    _ => {}
+                }
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    fn set_offside_line(&mut self, server: &mut HQMServer, player_index: usize, rule: &str) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                match rule {
+                    "blue" => {
+                        self.config.offside_line = HQMOffsideLineConfiguration::OffensiveBlue;
+                        info!(
+                            "{} ({}) set blue line as offside line",
+                            player.player_name, player_index
+                        );
+                        let msg =
+                            format!("Blue line set as offside line by {}", player.player_name);
+
+                        server.add_server_chat_message(msg);
+                    }
+                    "center" => {
+                        self.config.offside_line = HQMOffsideLineConfiguration::Center;
+                        info!(
+                            "{} ({}) set center line as offside line",
+                            player.player_name, player_index
+                        );
+                        let msg =
+                            format!("Center line set as offside line by {}", player.player_name);
 
                         server.add_server_chat_message(msg);
                     }
@@ -1318,6 +1428,13 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         } else {
             self.handle_events(server, events);
 
+            if let HQMOffsideStatus::Warning(team, _, _) = self.offside_status {
+                if !has_players_in_offensive_zone(server, team, None) {
+                    self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+                    server.add_server_chat_message_str("Offside waved off");
+                }
+            }
+
             let rules_state = if let HQMOffsideStatus::Offside(_) = self.offside_status {
                 HQMRulesState::Offside
             } else if let HQMIcingStatus::Icing(_) = self.icing_status {
@@ -1409,6 +1526,11 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                         "offside" => {
                             if let Some(arg) = args.get(1) {
                                 self.set_offside_rule(server, player_index, arg);
+                            }
+                        }
+                        "offsideline" => {
+                            if let Some(arg) = args.get(1) {
+                                self.set_offside_line(server, player_index, arg);
                             }
                         }
                         "mercy" => {
@@ -1504,7 +1626,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         self.paused = false;
         self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
         self.icing_status = HQMIcingStatus::No;
-        self.offside_status = HQMOffsideStatus::InNeutralZone;
+        self.offside_status = HQMOffsideStatus::Neutral;
 
         let warmup_pucks = self.config.warmup_pucks;
 
@@ -1753,6 +1875,7 @@ pub fn add_touch(
     puck: &HQMPuck,
     entry: Entry<usize, VecDeque<HQMPuckTouch>>,
     player_index: usize,
+    skater_index: usize,
     team: HQMTeam,
     time: u32,
 ) {
@@ -1774,6 +1897,7 @@ pub fn add_touch(
             touches.truncate(15);
             touches.push_front(HQMPuckTouch {
                 player_index,
+                skater_index,
                 team,
                 puck_pos,
                 puck_speed,

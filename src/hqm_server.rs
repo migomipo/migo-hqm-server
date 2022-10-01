@@ -2353,7 +2353,14 @@ pub trait HQMServerBehaviour {
 
     fn before_tick(&mut self, server: &mut HQMServer);
     fn after_tick(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]);
-    fn handle_command(&mut self, server: &mut HQMServer, cmd: &str, arg: &str, player_index: usize);
+    fn handle_command(
+        &mut self,
+        _server: &mut HQMServer,
+        _cmd: &str,
+        _arg: &str,
+        _player_index: usize,
+    ) {
+    }
 
     fn create_game(&mut self) -> HQMGame;
 

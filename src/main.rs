@@ -6,6 +6,7 @@ use ini::Ini;
 use std::env;
 
 mod hqm_behaviour_extra;
+mod hqm_faceoff_practice;
 mod hqm_match;
 mod hqm_multi_puck_match;
 mod hqm_russian;
@@ -14,7 +15,9 @@ mod hqm_warmup;
 
 use crate::hqm_behaviour_extra::{
     HQMDualControlSetting, HQMIcingConfiguration, HQMOffsideConfiguration,
+    HQMOffsideLineConfiguration,
 };
+use crate::hqm_faceoff_practice::HQMFaceoffPracticeBehaviour;
 use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration};
 use crate::hqm_multi_puck_match::{HQMMultiPuckMatchBehaviour, HQMMultiPuckMatchConfiguration};
 use crate::hqm_russian::HQMRussianBehaviour;
@@ -33,6 +36,7 @@ enum HQMServerMode {
     Russian,
     Shootout,
     MultiPuckMatch,
+    FaceoffPractice,
 }
 
 #[tokio::main]
@@ -87,6 +91,7 @@ async fn main() -> std::io::Result<()> {
                 "russian" => HQMServerMode::Russian,
                 "shootout" => HQMServerMode::Shootout,
                 "multipuckmatch" => HQMServerMode::MultiPuckMatch,
+                "faceoff" => HQMServerMode::FaceoffPractice,
                 _ => HQMServerMode::Match,
             });
 
@@ -261,6 +266,17 @@ async fn main() -> std::io::Result<()> {
                     },
                 );
 
+                let offside_line = get_optional(
+                    game_section,
+                    "offsideline",
+                    HQMOffsideLineConfiguration::OffensiveBlue,
+                    |x| match x {
+                        "blue" => HQMOffsideLineConfiguration::OffensiveBlue,
+                        "center" => HQMOffsideLineConfiguration::Center,
+                        _ => HQMOffsideLineConfiguration::OffensiveBlue,
+                    },
+                );
+
                 let spawn_point =
                     get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
                         "bench" => HQMSpawnPoint::Bench,
@@ -284,6 +300,7 @@ async fn main() -> std::io::Result<()> {
                     first_to,
                     icing,
                     offside,
+                    offside_line,
                     warmup_pucks,
                     cheats_enabled,
                     use_mph,
@@ -403,6 +420,15 @@ async fn main() -> std::io::Result<()> {
                     server_public,
                     config,
                     HQMMultiPuckMatchBehaviour::new(match_config),
+                )
+                .await
+            }
+            HQMServerMode::FaceoffPractice => {
+                hqm_server::run_server(
+                    server_port,
+                    server_public,
+                    config,
+                    HQMFaceoffPracticeBehaviour::new(physics_config),
                 )
                 .await
             }

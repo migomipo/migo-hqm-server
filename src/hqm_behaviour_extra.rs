@@ -18,3 +18,9 @@ pub enum HQMOffsideConfiguration {
     Delayed,
     Immediate,
 }
+
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum HQMOffsideLineConfiguration {
+    OffensiveBlue,
+    Center,
+}
