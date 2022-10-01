@@ -17,7 +17,8 @@ pub enum HQMSimulationEvent {
     PuckPassedGoalLine { team: HQMTeam, puck: usize },
     PuckTouch { player: usize, puck: usize },
     PuckEnteredOffensiveZone { team: HQMTeam, puck: usize },
-    PuckEnteredOtherHalf { team: HQMTeam, puck: usize },
+    PuckReachedRedLine { team: HQMTeam, puck: usize },
+    PuckFullyEnteredOffensiveHalf { team: HQMTeam, puck: usize },
     PuckLeftOffensiveZone { team: HQMTeam, puck: usize },
     PuckTouchedNet { team: HQMTeam, puck: usize },
 }
@@ -587,7 +588,16 @@ fn puck_detection(
     if mid_line.sphere_reached_line(&puck.body.pos, puck.radius)
         && !mid_line.sphere_reached_line(&old_puck_pos, puck.radius)
     {
-        let event = HQMSimulationEvent::PuckEnteredOtherHalf {
+        let event = HQMSimulationEvent::PuckReachedRedLine {
+            team,
+            puck: puck_index,
+        };
+        events.push(event);
+    }
+    if mid_line.sphere_past_leading_edge(&puck.body.pos, puck.radius)
+        && !mid_line.sphere_past_leading_edge(&old_puck_pos, puck.radius)
+    {
+        let event = HQMSimulationEvent::PuckFullyEnteredOffensiveHalf {
             team,
             puck: puck_index,
         };

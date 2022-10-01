@@ -424,6 +424,9 @@ impl HQMMatchBehaviour {
     }
 
     fn puck_into_offside_zone(&mut self, server: &mut HQMServer, team: HQMTeam, puck_index: usize) {
+        if self.offside_status == HQMOffsideStatus::InOffensiveZone(team) {
+            return;
+        }
         if let Some(touch) = self.get_last_touch(puck_index) {
             if team == touch.team
                 && has_players_in_offensive_zone(&server, team, Some(touch.player_index))
@@ -463,31 +466,11 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn handle_puck_entered_offensive_zone(
+    fn handle_puck_entered_offensive_half(
         &mut self,
         server: &mut HQMServer,
         team: HQMTeam,
         puck: usize,
-    ) {
-        if self.config.offside_line == HQMOffsideLineConfiguration::OffensiveBlue {
-            self.puck_into_offside_zone(server, team, puck);
-        }
-    }
-
-    fn handle_puck_left_offensive_zone(&mut self, server: &mut HQMServer) {
-        if self.config.offside_line == HQMOffsideLineConfiguration::OffensiveBlue {
-            if let HQMOffsideStatus::Warning(_, _, _) = self.offside_status {
-                server.add_server_chat_message_str("Offside waved off");
-            }
-            self.offside_status = HQMOffsideStatus::Neutral;
-        }
-    }
-
-    fn handle_puck_entered_other_half(
-        &mut self,
-        server: &mut HQMServer,
-        team: HQMTeam,
-        puck_index: usize,
     ) {
         if !matches!(&self.offside_status, HQMOffsideStatus::Offside(_))
             && self.config.offside_line == HQMOffsideLineConfiguration::Center
@@ -497,9 +480,40 @@ impl HQMMatchBehaviour {
                     server.add_server_chat_message_str("Offside waved off");
                 }
             }
-            self.puck_into_offside_zone(server, team, puck_index);
+            self.puck_into_offside_zone(server, team, puck);
         }
+    }
 
+    fn handle_puck_entered_offensive_zone(
+        &mut self,
+        server: &mut HQMServer,
+        team: HQMTeam,
+        puck: usize,
+    ) {
+        if !matches!(&self.offside_status, HQMOffsideStatus::Offside(_))
+            && self.config.offside_line == HQMOffsideLineConfiguration::OffensiveBlue
+        {
+            self.puck_into_offside_zone(server, team, puck);
+        }
+    }
+
+    fn handle_puck_left_offensive_zone(&mut self, server: &mut HQMServer) {
+        if !matches!(&self.offside_status, HQMOffsideStatus::Offside(_))
+            && self.config.offside_line == HQMOffsideLineConfiguration::OffensiveBlue
+        {
+            if let HQMOffsideStatus::Warning(_, _, _) = self.offside_status {
+                server.add_server_chat_message_str("Offside waved off");
+            }
+            self.offside_status = HQMOffsideStatus::Neutral;
+        }
+    }
+
+    fn handle_puck_reached_other_half(
+        &mut self,
+        server: &mut HQMServer,
+        team: HQMTeam,
+        puck_index: usize,
+    ) {
         if let Some(touch) = self.get_last_touch(puck_index) {
             if team == touch.team && self.icing_status == HQMIcingStatus::No {
                 self.icing_status = HQMIcingStatus::NotTouched(team, touch.puck_pos.clone());
@@ -516,11 +530,14 @@ impl HQMMatchBehaviour {
                 HQMSimulationEvent::PuckTouch { player, puck, .. } => {
                     self.handle_puck_touch(server, *player, *puck);
                 }
-                HQMSimulationEvent::PuckEnteredOtherHalf { team, puck } => {
-                    self.handle_puck_entered_other_half(server, *team, *puck);
+                HQMSimulationEvent::PuckReachedRedLine { team, puck } => {
+                    self.handle_puck_reached_other_half(server, *team, *puck);
                 }
                 HQMSimulationEvent::PuckPassedGoalLine { team, puck: _ } => {
                     self.handle_puck_passed_goal_line(server, *team);
+                }
+                HQMSimulationEvent::PuckFullyEnteredOffensiveHalf { team, puck } => {
+                    self.handle_puck_entered_offensive_half(server, *team, *puck);
                 }
                 HQMSimulationEvent::PuckEnteredOffensiveZone { team, puck } => {
                     self.handle_puck_entered_offensive_zone(server, *team, *puck);
@@ -968,13 +985,11 @@ impl HQMMatchBehaviour {
                 match setting {
                     "on" => {
                         self.config.goal_replay = true;
-                        server.game.history_length = 850;
                         let msg = format!("Goal replays enabled by {}", player.player_name);
                         server.add_server_chat_message(msg);
                     }
                     "off" => {
                         self.config.goal_replay = false;
-                        server.game.history_length = 0;
                         let msg = format!("Goal replays disabled by {}", player.player_name);
                         server.add_server_chat_message(msg);
                     }
@@ -1143,7 +1158,7 @@ impl HQMMatchBehaviour {
     }
 
     fn set_clock(
-        & mut self,
+        &mut self,
         server: &mut HQMServer,
         input_minutes: u32,
         input_seconds: u32,
@@ -1487,7 +1502,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                         }
                         "bluescore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
-                               self.set_score(server, HQMTeam::Blue, input_score, player_index);
+                                self.set_score(server, HQMTeam::Blue, input_score, player_index);
                             }
                         }
                         "period" => {
@@ -1647,7 +1662,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
             self.config.physics_config.clone(),
             self.config.blue_line_location,
         );
-        game.history_length = if self.config.goal_replay { 850 } else { 0 };
+        game.history_length = 1000;
         let puck_line_start = game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {
