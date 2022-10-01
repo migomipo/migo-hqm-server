@@ -16,7 +16,7 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
 use tokio::time::MissedTickBehavior;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::hqm_game::{
@@ -320,6 +320,7 @@ pub struct HQMServer {
     pub config: HQMServerConfiguration,
     pub game: HQMGame,
     replay_queue: VecDeque<ReplayElement>,
+    requested_replays: VecDeque<(u32, u32, Option<HQMServerPlayerIndex>)>,
     game_id: u32,
     pub is_muted: bool,
 }
@@ -1578,47 +1579,32 @@ impl HQMServer {
             let (game_step, forced_view) = tokio::task::block_in_place(|| {
                 self.remove_inactive_players(behaviour);
 
-                if let Some(replay_element) = self.replay_queue.front_mut() {
-                    let from = replay_element.from;
-                    let saved_history = &self.game.saved_history;
-                    let current_game_step = self.game.game_step;
-                    let forced_view = replay_element.force_view;
-                    let tick = current_game_step.checked_sub(from).and_then(|i| {
-                        if let Some(tick) = saved_history.get(i as usize) {
-                            Some((tick, replay_element.from))
-                        } else if saved_history.len() > 0 {
-                            let new_from = current_game_step - (saved_history.len() as u32 - 1);
-                            Some((&saved_history[saved_history.len() - 1], new_from))
-                        } else {
-                            None
-                        }
-                    });
-                    if let Some((tick, p)) = tick {
-                        let game_step = tick.game_step;
-                        let packets = tick.packets.clone();
-
-                        replay_element.from = p + 1;
-
-                        if replay_element.from >= replay_element.to {
-                            self.replay_queue.pop_front();
-                        }
-
-                        self.game
-                            .saved_packets
-                            .truncate(191 - 1);
-                        self.game.saved_packets.push_front(packets);
-                        self.game
-                            .saved_pings
-                            .truncate(100 - 1);
-                        self.game.saved_pings.push_front(Instant::now());
-
-                        self.game.packet = self.game.packet.wrapping_add(1);
-                        (game_step, forced_view)
+                let has_replay_data = if let Some(replay_element) = self.replay_queue.front_mut() {
+                    if let Some(tick) = replay_element.data.pop_front() {
+                        Some((replay_element.force_view, tick))
                     } else {
                         self.replay_queue.pop_front();
-                        self.game_step(behaviour, write_buf);
-                        (self.game.game_step, None)
+                        None
                     }
+                } else {
+                    None
+                };
+
+                if let Some((forced_view, tick)) = has_replay_data {
+
+                    let game_step = tick.game_step;
+                    let packets = tick.packets;
+                    self.game
+                        .saved_packets
+                        .truncate(self.game.saved_packets.capacity() - 1);
+                    self.game.saved_packets.push_front(packets);
+                    self.game
+                        .saved_pings
+                        .truncate(self.game.saved_pings.capacity() - 1);
+                    self.game.saved_pings.push_front(Instant::now());
+
+                    self.game.packet = self.game.packet.wrapping_add(1);
+                    (game_step, forced_view)
                 } else {
                     self.game_step(behaviour, write_buf);
                     (self.game.game_step, None)
@@ -1660,6 +1646,20 @@ impl HQMServer {
                 write_buf,
             )
             .await;
+
+            let game_step = self.game.game_step;
+            while let Some((start_step, end_step, force_view)) = self.requested_replays.pop_front() {
+                let i_end = game_step.saturating_sub(end_step) as usize;
+                let i_start = game_step.saturating_sub(start_step) as usize;
+                if i_start <= i_end {
+                    continue;
+                }
+                let data = self.game.saved_history.range(i_end..=i_start).rev().cloned().collect();
+                self.replay_queue.push_back(ReplayElement {
+                    data,
+                    force_view
+                })
+            }
         } else if self.game.active {
             info!("Game {} abandoned", self.game_id);
             let new_game = behaviour.create_game();
@@ -1735,25 +1735,21 @@ impl HQMServer {
         force_view: Option<HQMServerPlayerIndex>,
     ) {
         if start_step > end_step {
-            panic!("start_packet must be less than or equal to end_packet")
+            warn!("start_step must be less than or equal to end_step");
+            return;
         }
-
-        self.replay_queue.push_back(ReplayElement {
-            from: start_step,
-            to: end_step,
-            force_view,
-        });
+        self.requested_replays.push_back((start_step, end_step, force_view));
     }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct ReplayTick {
     game_step: u32,
     packets: smallvec::SmallVec<[HQMObjectPacket; 32]>,
 }
 
 pub(crate) struct ReplayElement {
-    from: u32,
-    to: u32,
+    data: VecDeque<ReplayTick>,
     force_view: Option<HQMServerPlayerIndex>,
 }
 
@@ -1781,6 +1777,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
         config,
         game_id: 1,
         replay_queue: VecDeque::new(),
+        requested_replays: VecDeque::new()
     };
     info!("Server started, new game {} started", 1);
 

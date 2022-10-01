@@ -5,7 +5,7 @@ use crate::hqm_behaviour_extra::{
     HQMDualControlSetting, HQMIcingConfiguration, HQMOffsideConfiguration,
     HQMOffsideLineConfiguration,
 };
-use migo_hqm_server::hqm_game::{HQMFaceoffSpot, HQMGame, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot, HQMRinkSide, HQMRulesState, HQMSkater, HQMTeam};
+use migo_hqm_server::hqm_game::{HQMGame, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot, HQMRinkSide, HQMRulesState, HQMSkater, HQMTeam};
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex, HQMServerPlayerList,
     HQMSpawnPoint,
@@ -309,9 +309,8 @@ impl HQMMatchBehaviour {
 
         let gamestep = server.game.game_step;
 
-        let force_view = goal_scorer_index.or(last_touch);
-
         if self.config.goal_replay {
+            let force_view = goal_scorer_index.or(last_touch);
             self.start_next_replay = Some((
                 self.faceoff_game_step.max(gamestep - 600),
                 gamestep + 200,
