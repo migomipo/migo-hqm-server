@@ -8,7 +8,6 @@ use std::env;
 mod hqm_behaviour_extra;
 mod hqm_faceoff_practice;
 mod hqm_match;
-mod hqm_multi_puck_match;
 mod hqm_russian;
 mod hqm_shootout;
 mod hqm_warmup;
@@ -19,7 +18,7 @@ use crate::hqm_behaviour_extra::{
 };
 use crate::hqm_faceoff_practice::HQMFaceoffPracticeBehaviour;
 use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration};
-use crate::hqm_multi_puck_match::{HQMMultiPuckMatchBehaviour, HQMMultiPuckMatchConfiguration};
+
 use crate::hqm_russian::HQMRussianBehaviour;
 use crate::hqm_shootout::HQMShootoutBehaviour;
 use crate::hqm_warmup::HQMPermanentWarmup;
@@ -35,7 +34,6 @@ enum HQMServerMode {
     PermanentWarmup,
     Russian,
     Shootout,
-    MultiPuckMatch,
     FaceoffPractice,
 }
 
@@ -90,7 +88,6 @@ async fn main() -> std::io::Result<()> {
                 "match" => HQMServerMode::Match,
                 "russian" => HQMServerMode::Russian,
                 "shootout" => HQMServerMode::Shootout,
-                "multipuckmatch" => HQMServerMode::MultiPuckMatch,
                 "faceoff" => HQMServerMode::FaceoffPractice,
                 _ => HQMServerMode::Match,
             });
@@ -372,54 +369,6 @@ async fn main() -> std::io::Result<()> {
                     server_public,
                     config,
                     HQMShootoutBehaviour::new(attempts, physics_config, dual_control),
-                )
-                .await
-            }
-            HQMServerMode::MultiPuckMatch => {
-                let periods =
-                    get_optional(game_section, "periods", 1, |x| x.parse::<u32>().unwrap());
-
-                let rules_time_period = get_optional(game_section, "time_period", 300, |x| {
-                    x.parse::<u32>().unwrap()
-                });
-                let rules_time_warmup = get_optional(game_section, "time_warmup", 300, |x| {
-                    x.parse::<u32>().unwrap()
-                });
-                let rule_time_intermission =
-                    get_optional(game_section, "time_intermission", 20, |x| {
-                        x.parse::<u32>().unwrap()
-                    });
-                let pucks = get_optional(game_section, "pucks", 5, |x| x.parse::<usize>().unwrap());
-
-                let mercy = get_optional(game_section, "mercy", 0, |x| x.parse::<u32>().unwrap());
-                let first_to =
-                    get_optional(game_section, "first", 0, |x| x.parse::<u32>().unwrap());
-
-                let spawn_point =
-                    get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
-                        "bench" => HQMSpawnPoint::Bench,
-                        _ => HQMSpawnPoint::Center,
-                    });
-
-                let match_config = HQMMultiPuckMatchConfiguration {
-                    time_period: rules_time_period,
-                    time_warmup: rules_time_warmup,
-                    time_intermission: rule_time_intermission,
-                    periods,
-                    mercy,
-                    first_to,
-                    dual_control,
-                    spawn_point,
-                    physics_config,
-                    team_max: server_team_max,
-                    pucks,
-                };
-
-                hqm_server::run_server(
-                    server_port,
-                    server_public,
-                    config,
-                    HQMMultiPuckMatchBehaviour::new(match_config),
                 )
                 .await
             }

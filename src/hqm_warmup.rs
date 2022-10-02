@@ -1,7 +1,7 @@
 use crate::hqm_behaviour_extra::HQMDualControlSetting;
 use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
 use migo_hqm_server::hqm_server::{
-    HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMSpawnPoint,
+    HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex, HQMSpawnPoint,
 };
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3};
@@ -30,7 +30,7 @@ impl HQMPermanentWarmup {
     fn update_players(&mut self, server: &mut HQMServer) {
         let mut spectating_players = vec![];
         let mut joining_team = vec![];
-        for (player_index, player) in server.players.iter().enumerate() {
+        for (player_index, player) in server.players.iter() {
             if let Some(player) = player {
                 let has_skater = player.object.is_some()
                     || server.get_dual_control_player(player_index).is_some();
@@ -56,7 +56,7 @@ impl HQMPermanentWarmup {
         fn internal_add(
             behaviour: &mut HQMPermanentWarmup,
             server: &mut HQMServer,
-            player_index: usize,
+            player_index: HQMServerPlayerIndex,
             team: HQMTeam,
             spawn_point: HQMSpawnPoint,
         ) {
@@ -66,8 +66,12 @@ impl HQMPermanentWarmup {
         fn find_empty_dual_control(
             server: &HQMServer,
             team: HQMTeam,
-        ) -> Option<(usize, Option<usize>, Option<usize>)> {
-            for (i, player) in server.players.iter().enumerate() {
+        ) -> Option<(
+            HQMServerPlayerIndex,
+            Option<HQMServerPlayerIndex>,
+            Option<HQMServerPlayerIndex>,
+        )> {
+            for (i, player) in server.players.iter() {
                 if let Some(player) = player {
                     if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                         if movement.is_none() || stick.is_none() {
@@ -86,7 +90,7 @@ impl HQMPermanentWarmup {
         fn internal_add_dual_control(
             behaviour: &mut HQMPermanentWarmup,
             server: &mut HQMServer,
-            player_index: usize,
+            player_index: HQMServerPlayerIndex,
             team: HQMTeam,
             spawn_point: HQMSpawnPoint,
         ) {
@@ -134,7 +138,7 @@ impl HQMServerBehaviour for HQMPermanentWarmup {
         _server: &mut HQMServer,
         _cmd: &str,
         _arg: &str,
-        _player_index: usize,
+        _player_index: HQMServerPlayerIndex,
     ) {
     }
 

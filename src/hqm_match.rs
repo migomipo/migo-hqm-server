@@ -10,7 +10,8 @@ use migo_hqm_server::hqm_game::{
     HQMRulesState, HQMSkater, HQMTeam,
 };
 use migo_hqm_server::hqm_server::{
-    HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerList, HQMSpawnPoint,
+    HQMObjectIndex, HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex,
+    HQMServerPlayerList, HQMSpawnPoint,
 };
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::hash_map::Entry;
@@ -42,8 +43,8 @@ pub struct HQMMatchConfiguration {
 
 #[derive(Debug, Clone)]
 pub struct HQMPuckTouch {
-    pub player_index: usize,
-    pub skater_index: usize,
+    pub player_index: HQMServerPlayerIndex,
+    pub skater_index: HQMObjectIndex,
     pub team: HQMTeam,
     pub puck_pos: Point3<f32>,
     pub puck_speed: f32,
@@ -59,14 +60,14 @@ pub struct HQMMatchBehaviour {
     next_faceoff_spot: HQMRinkFaceoffSpot,
     icing_status: HQMIcingStatus,
     offside_status: HQMOffsideStatus,
-    preferred_positions: HashMap<usize, String>,
-    team_switch_timer: HashMap<usize, u32>,
-    started_as_goalie: Vec<usize>,
+    preferred_positions: HashMap<HQMServerPlayerIndex, String>,
+    team_switch_timer: HashMap<HQMServerPlayerIndex, u32>,
+    started_as_goalie: Vec<HQMServerPlayerIndex>,
     faceoff_game_step: u32,
     step_where_period_ended: u32,
     too_late_printed_this_period: bool,
-    start_next_replay: Option<(u32, u32, Option<usize>)>,
-    puck_touches: HashMap<usize, VecDeque<HQMPuckTouch>>,
+    start_next_replay: Option<(u32, u32, Option<HQMServerPlayerIndex>)>,
+    puck_touches: HashMap<HQMObjectIndex, VecDeque<HQMPuckTouch>>,
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -79,10 +80,10 @@ pub enum HQMIcingStatus {
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum HQMOffsideStatus {
-    Neutral,                              // No offside
-    InOffensiveZone(HQMTeam),             // No offside, puck in offensive zone
-    Warning(HQMTeam, Point3<f32>, usize), // Warning, puck entered offensive zone in an offside situation but not touched yet
-    Offside(HQMTeam),                     // Offside has been called
+    Neutral,                                             // No offside
+    InOffensiveZone(HQMTeam),                            // No offside, puck in offensive zone
+    Warning(HQMTeam, Point3<f32>, HQMServerPlayerIndex), // Warning, puck entered offensive zone in an offside situation but not touched yet
+    Offside(HQMTeam),                                    // Offside has been called
 }
 
 impl HQMMatchBehaviour {
@@ -106,7 +107,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn get_last_touch(&self, puck_index: usize) -> Option<&HQMPuckTouch> {
+    fn get_last_touch(&self, puck_index: HQMObjectIndex) -> Option<&HQMPuckTouch> {
         self.puck_touches.get(&puck_index).and_then(|x| x.front())
     }
 
@@ -196,7 +197,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn call_goal(&mut self, server: &mut HQMServer, team: HQMTeam, puck_index: usize) {
+    fn call_goal(&mut self, server: &mut HQMServer, team: HQMTeam, puck_index: HQMObjectIndex) {
         let time_break = self.config.time_break * 100;
 
         match team {
@@ -345,7 +346,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn handle_puck_touch(&mut self, server: &mut HQMServer, player: usize, puck_index: usize) {
+    fn handle_puck_touch(
+        &mut self,
+        server: &mut HQMServer,
+        player: HQMObjectIndex,
+        puck_index: HQMObjectIndex,
+    ) {
         if let Some((player_index, touching_team, _)) = server.players.get_from_object_index(player)
         {
             if let Some(puck) = server.game.world.objects.get_puck_mut(puck_index) {
@@ -392,7 +398,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn handle_puck_entered_net(&mut self, server: &mut HQMServer, team: HQMTeam, puck: usize) {
+    fn handle_puck_entered_net(
+        &mut self,
+        server: &mut HQMServer,
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    ) {
         match &self.offside_status {
             HQMOffsideStatus::Warning(offside_team, p, _) if *offside_team == team => {
                 let copy = p.clone();
@@ -423,7 +434,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn puck_into_offside_zone(&mut self, server: &mut HQMServer, team: HQMTeam, puck_index: usize) {
+    fn puck_into_offside_zone(
+        &mut self,
+        server: &mut HQMServer,
+        team: HQMTeam,
+        puck_index: HQMObjectIndex,
+    ) {
         if self.offside_status == HQMOffsideStatus::InOffensiveZone(team) {
             return;
         }
@@ -470,7 +486,7 @@ impl HQMMatchBehaviour {
         &mut self,
         server: &mut HQMServer,
         team: HQMTeam,
-        puck: usize,
+        puck: HQMObjectIndex,
     ) {
         if !matches!(&self.offside_status, HQMOffsideStatus::Offside(_))
             && self.config.offside_line == HQMOffsideLineConfiguration::Center
@@ -488,7 +504,7 @@ impl HQMMatchBehaviour {
         &mut self,
         server: &mut HQMServer,
         team: HQMTeam,
-        puck: usize,
+        puck: HQMObjectIndex,
     ) {
         if !matches!(&self.offside_status, HQMOffsideStatus::Offside(_))
             && self.config.offside_line == HQMOffsideLineConfiguration::OffensiveBlue
@@ -510,9 +526,9 @@ impl HQMMatchBehaviour {
 
     fn handle_puck_reached_other_half(
         &mut self,
-        server: &mut HQMServer,
+        _server: &mut HQMServer,
         team: HQMTeam,
-        puck_index: usize,
+        puck_index: HQMObjectIndex,
     ) {
         if let Some(touch) = self.get_last_touch(puck_index) {
             if team == touch.team && self.icing_status == HQMIcingStatus::No {
@@ -610,7 +626,7 @@ impl HQMMatchBehaviour {
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
-        for (player_index, player) in server.players.iter().enumerate() {
+        for (player_index, player) in server.players.iter() {
             if let Some(player) = player {
                 self.team_switch_timer
                     .get_mut(&player_index)
@@ -660,7 +676,7 @@ impl HQMMatchBehaviour {
             let (red_player_count, blue_player_count) = {
                 let mut red_player_count = 0usize;
                 let mut blue_player_count = 0usize;
-                for player in server.players.iter() {
+                for (_, player) in server.players.iter() {
                     if let Some(player) = player {
                         if let Some((_, team)) = player.object {
                             if team == HQMTeam::Red {
@@ -678,7 +694,7 @@ impl HQMMatchBehaviour {
 
             fn add_player(
                 behaviour: &mut HQMMatchBehaviour,
-                player_index: usize,
+                player_index: HQMServerPlayerIndex,
                 player_name: Rc<String>,
                 server: &mut HQMServer,
                 team: HQMTeam,
@@ -711,7 +727,7 @@ impl HQMMatchBehaviour {
             }
             fn add_player_dual_control(
                 behaviour: &mut HQMMatchBehaviour,
-                player_index: usize,
+                player_index: HQMServerPlayerIndex,
                 player_name: Rc<String>,
                 server: &mut HQMServer,
                 team: HQMTeam,
@@ -830,7 +846,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn cheat(&mut self, server: &mut HQMServer, player_index: usize, arg: &str) {
+    fn cheat(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex, arg: &str) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 let split: Vec<&str> = arg.split_whitespace().collect();
@@ -848,7 +864,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_team_size(&mut self, server: &mut HQMServer, player_index: usize, size: &str) {
+    fn set_team_size(
+        &mut self,
+        server: &mut HQMServer,
+        player_index: HQMServerPlayerIndex,
+        size: &str,
+    ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 if let Ok(new_num) = size.parse::<usize>() {
@@ -870,7 +891,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_icing_rule(&mut self, server: &mut HQMServer, player_index: usize, rule: &str) {
+    fn set_icing_rule(
+        &mut self,
+        server: &mut HQMServer,
+        player_index: HQMServerPlayerIndex,
+        rule: &str,
+    ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 match rule {
@@ -909,7 +935,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_offside_line(&mut self, server: &mut HQMServer, player_index: usize, rule: &str) {
+    fn set_offside_line(
+        &mut self,
+        server: &mut HQMServer,
+        player_index: HQMServerPlayerIndex,
+        rule: &str,
+    ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 match rule {
@@ -943,7 +974,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_offside_rule(&mut self, server: &mut HQMServer, player_index: usize, rule: &str) {
+    fn set_offside_rule(
+        &mut self,
+        server: &mut HQMServer,
+        player_index: HQMServerPlayerIndex,
+        rule: &str,
+    ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 match rule {
@@ -979,7 +1015,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_goal_replay(&mut self, server: &mut HQMServer, player_index: usize, setting: &str) {
+    fn set_goal_replay(
+        &mut self,
+        server: &mut HQMServer,
+        player_index: HQMServerPlayerIndex,
+        setting: &str,
+    ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 match setting {
@@ -1001,7 +1042,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_first_to_rule(&mut self, server: &mut HQMServer, player_index: usize, num: &str) {
+    fn set_first_to_rule(
+        &mut self,
+        server: &mut HQMServer,
+        player_index: HQMServerPlayerIndex,
+        num: &str,
+    ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 let num = if num == "off" {
@@ -1037,7 +1083,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_mercy_rule(&mut self, server: &mut HQMServer, player_index: usize, num: &str) {
+    fn set_mercy_rule(
+        &mut self,
+        server: &mut HQMServer,
+        player_index: HQMServerPlayerIndex,
+        num: &str,
+    ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 let num = if num == "off" {
@@ -1073,7 +1124,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn faceoff(&mut self, server: &mut HQMServer, player_index: usize) {
+    fn faceoff(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if !server.game.game_over {
             if let Some(player) = server.players.get(player_index) {
                 if player.is_admin {
@@ -1093,7 +1144,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn reset_game(&mut self, server: &mut HQMServer, player_index: usize) {
+    fn reset_game(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 info!("{} ({}) reset game", player.player_name, player_index);
@@ -1108,7 +1159,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn start_game(&mut self, server: &mut HQMServer, player_index: usize) {
+    fn start_game(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 if server.game.period == 0 && server.game.time > 1 {
@@ -1125,7 +1176,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn pause(&mut self, server: &mut HQMServer, player_index: usize) {
+    fn pause(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 self.paused = true;
@@ -1143,7 +1194,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn unpause(&mut self, server: &mut HQMServer, player_index: usize) {
+    fn unpause(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 self.paused = false;
@@ -1162,7 +1213,7 @@ impl HQMMatchBehaviour {
         server: &mut HQMServer,
         input_minutes: u32,
         input_seconds: u32,
-        player_index: usize,
+        player_index: HQMServerPlayerIndex,
     ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
@@ -1186,7 +1237,7 @@ impl HQMMatchBehaviour {
         server: &mut HQMServer,
         input_team: HQMTeam,
         input_score: u32,
-        player_index: usize,
+        player_index: HQMServerPlayerIndex,
     ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
@@ -1219,7 +1270,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_period(&mut self, server: &mut HQMServer, input_period: u32, player_index: usize) {
+    fn set_period(
+        &mut self,
+        server: &mut HQMServer,
+        input_period: u32,
+        player_index: HQMServerPlayerIndex,
+    ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 server.game.period = input_period;
@@ -1237,7 +1293,12 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn set_period_num(&mut self, server: &mut HQMServer, input_period: u32, player_index: usize) {
+    fn set_period_num(
+        &mut self,
+        server: &mut HQMServer,
+        input_period: u32,
+        player_index: HQMServerPlayerIndex,
+    ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 self.config.periods = input_period;
@@ -1261,7 +1322,7 @@ impl HQMMatchBehaviour {
     fn set_preferred_faceoff_position(
         &mut self,
         server: &mut HQMServer,
-        player_index: usize,
+        player_index: HQMServerPlayerIndex,
         input_position: &str,
     ) {
         let input_position = input_position.to_uppercase();
@@ -1328,31 +1389,29 @@ impl HQMMatchBehaviour {
     fn force_player_off_ice(
         &mut self,
         server: &mut HQMServer,
-        admin_player_index: usize,
-        force_player_index: usize,
+        admin_player_index: HQMServerPlayerIndex,
+        force_player_index: HQMServerPlayerIndex,
     ) {
         if let Some(player) = server.players.get(admin_player_index) {
             if player.is_admin {
                 let admin_player_name = player.player_name.clone();
 
-                if force_player_index < server.players.len() {
-                    if let Some(force_player) = server.players.get(force_player_index) {
-                        let force_player_name = force_player.player_name.clone();
-                        if server.move_to_spectator(self, force_player_index) {
-                            let msg = format!(
-                                "{} forced off ice by {}",
-                                force_player_name, admin_player_name
-                            );
-                            info!(
-                                "{} ({}) forced {} ({}) off ice",
-                                admin_player_name,
-                                admin_player_index,
-                                force_player_name,
-                                force_player_index
-                            );
-                            server.add_server_chat_message(msg);
-                            self.team_switch_timer.insert(force_player_index, 500);
-                        }
+                if let Some(force_player) = server.players.get(force_player_index) {
+                    let force_player_name = force_player.player_name.clone();
+                    if server.move_to_spectator(self, force_player_index) {
+                        let msg = format!(
+                            "{} forced off ice by {}",
+                            force_player_name, admin_player_name
+                        );
+                        info!(
+                            "{} ({}) forced {} ({}) off ice",
+                            admin_player_name,
+                            admin_player_index,
+                            force_player_name,
+                            force_player_index
+                        );
+                        server.add_server_chat_message(msg);
+                        self.team_switch_timer.insert(force_player_index, 500);
                     }
                 }
             } else {
@@ -1365,15 +1424,15 @@ impl HQMMatchBehaviour {
 
 fn get_faceoff_positions(
     players: &HQMServerPlayerList,
-    preferred_positions: &HashMap<usize, String>,
+    preferred_positions: &HashMap<HQMServerPlayerIndex, String>,
     world: &HQMGameWorld,
-) -> HashMap<usize, (HQMTeam, String)> {
+) -> HashMap<HQMServerPlayerIndex, (HQMTeam, String)> {
     let allowed_positions = &world.rink.allowed_positions;
     let mut res = HashMap::new();
 
     let mut red_players = vec![];
     let mut blue_players = vec![];
-    for (player_index, player) in players.iter().enumerate() {
+    for (player_index, player) in players.iter() {
         if let Some(player) = player {
             let team = player.object.map(|x| x.1);
             let i = match &player.data {
@@ -1401,14 +1460,14 @@ fn get_faceoff_positions(
 fn has_players_in_offensive_zone(
     server: &HQMServer,
     team: HQMTeam,
-    ignore_player: Option<usize>,
+    ignore_player: Option<HQMServerPlayerIndex>,
 ) -> bool {
     let line = match team {
         HQMTeam::Red => &server.game.world.rink.red_lines_and_net.offensive_line,
         HQMTeam::Blue => &server.game.world.rink.blue_lines_and_net.offensive_line,
     };
 
-    for (player_index, player) in server.players.iter().enumerate() {
+    for (player_index, player) in server.players.iter() {
         if let Some(player) = player {
             if let Some((object_index, skater_team)) = player.object {
                 if skater_team == team && ignore_player != Some(player_index) {
@@ -1488,7 +1547,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         server: &mut HQMServer,
         command: &str,
         arg: &str,
-        player_index: usize,
+        player_index: HQMServerPlayerIndex,
     ) {
         match command {
             "set" => {
@@ -1601,7 +1660,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 self.set_preferred_faceoff_position(server, player_index, arg);
             }
             "fs" => {
-                if let Ok(force_player_index) = arg.parse::<usize>() {
+                if let Ok(force_player_index) = arg.parse::<HQMServerPlayerIndex>() {
                     self.force_player_off_ice(server, player_index, force_player_index);
                 }
             }
@@ -1678,7 +1737,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         game
     }
 
-    fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: usize) {
+    fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(x) = self
             .started_as_goalie
             .iter()
@@ -1696,8 +1755,8 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
 }
 
 fn setup_position(
-    positions: &mut HashMap<usize, (HQMTeam, String)>,
-    players: &[(usize, Option<&str>)],
+    positions: &mut HashMap<HQMServerPlayerIndex, (HQMTeam, String)>,
+    players: &[(HQMServerPlayerIndex, Option<&str>)],
     allowed_positions: &[String],
     team: HQMTeam,
 ) {
@@ -1765,8 +1824,12 @@ fn setup_position(
 fn find_empty_dual_control(
     server: &HQMServer,
     team: HQMTeam,
-) -> Option<(usize, Option<usize>, Option<usize>)> {
-    for (i, player) in server.players.iter().enumerate() {
+) -> Option<(
+    HQMServerPlayerIndex,
+    Option<HQMServerPlayerIndex>,
+    Option<HQMServerPlayerIndex>,
+)> {
+    for (i, player) in server.players.iter() {
         if let Some(player) = player {
             if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                 if movement.is_none() || stick.is_none() {
@@ -1786,6 +1849,7 @@ fn find_empty_dual_control(
 mod tests {
     use crate::hqm_match::setup_position;
     use migo_hqm_server::hqm_game::HQMTeam;
+    use migo_hqm_server::hqm_server::HQMServerPlayerIndex;
     use std::collections::HashMap;
 
     #[test]
@@ -1802,107 +1866,122 @@ mod tests {
         let rw = "RW";
         let g = "G";
         let mut res1 = HashMap::new();
-        let players = vec![(0usize, None)];
+        let players = vec![(HQMServerPlayerIndex(0), None)];
         setup_position(
             &mut res1,
             players.as_ref(),
             &allowed_positions,
             HQMTeam::Red,
         );
-        assert_eq!(res1[&0].1, "C");
+        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(0usize, Some(c))];
+        let players = vec![(HQMServerPlayerIndex(0), Some(c))];
         setup_position(
             &mut res1,
             players.as_ref(),
             &allowed_positions,
             HQMTeam::Red,
         );
-        assert_eq!(res1[&0].1, "C");
+        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(0usize, Some(lw))];
+        let players = vec![(HQMServerPlayerIndex(0), Some(lw))];
         setup_position(
             &mut res1,
             players.as_ref(),
             &allowed_positions,
             HQMTeam::Red,
         );
-        assert_eq!(res1[&0].1, "C");
+        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(0usize, Some(g))];
+        let players = vec![(HQMServerPlayerIndex(0), Some(g))];
         setup_position(
             &mut res1,
             players.as_ref(),
             &allowed_positions,
             HQMTeam::Red,
         );
-        assert_eq!(res1[&0].1, "C");
+        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(0usize, Some(c)), (1usize, Some(lw))];
+        let players = vec![
+            (HQMServerPlayerIndex(0usize), Some(c)),
+            (HQMServerPlayerIndex(1), Some(lw)),
+        ];
         setup_position(
             &mut res1,
             players.as_ref(),
             &allowed_positions,
             HQMTeam::Red,
         );
-        assert_eq!(res1[&0].1, "C");
-        assert_eq!(res1[&1].1, "LW");
+        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
+        assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
 
         let mut res1 = HashMap::new();
-        let players = vec![(0usize, None), (1usize, Some(lw))];
+        let players = vec![
+            (HQMServerPlayerIndex(0), None),
+            (HQMServerPlayerIndex(1), Some(lw)),
+        ];
         setup_position(
             &mut res1,
             players.as_ref(),
             &allowed_positions,
             HQMTeam::Red,
         );
-        assert_eq!(res1[&0].1, "C");
-        assert_eq!(res1[&1].1, "LW");
+        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
+        assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
 
         let mut res1 = HashMap::new();
-        let players = vec![(0usize, Some(rw)), (1usize, Some(lw))];
+        let players = vec![
+            (HQMServerPlayerIndex(0), Some(rw)),
+            (HQMServerPlayerIndex(1), Some(lw)),
+        ];
         setup_position(
             &mut res1,
             players.as_ref(),
             &allowed_positions,
             HQMTeam::Red,
         );
-        assert_eq!(res1[&0].1, "C");
-        assert_eq!(res1[&1].1, "LW");
+        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
+        assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
 
         let mut res1 = HashMap::new();
-        let players = vec![(0usize, Some(g)), (1usize, Some(lw))];
+        let players = vec![
+            (HQMServerPlayerIndex(0), Some(g)),
+            (HQMServerPlayerIndex(1), Some(lw)),
+        ];
         setup_position(
             &mut res1,
             players.as_ref(),
             &allowed_positions,
             HQMTeam::Red,
         );
-        assert_eq!(res1[&0].1, "G");
-        assert_eq!(res1[&1].1, "C");
+        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "G");
+        assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(0usize, Some(c)), (1usize, Some(c))];
+        let players = vec![
+            (HQMServerPlayerIndex(0usize), Some(c)),
+            (HQMServerPlayerIndex(1), Some(c)),
+        ];
         setup_position(
             &mut res1,
             players.as_ref(),
             &allowed_positions,
             HQMTeam::Red,
         );
-        assert_eq!(res1[&0].1, "C");
-        assert_eq!(res1[&1].1, "LW");
+        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
+        assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
     }
 }
 
 pub fn add_touch(
     puck: &HQMPuck,
-    entry: Entry<usize, VecDeque<HQMPuckTouch>>,
-    player_index: usize,
-    skater_index: usize,
+    entry: Entry<HQMObjectIndex, VecDeque<HQMPuckTouch>>,
+    player_index: HQMServerPlayerIndex,
+    skater_index: HQMObjectIndex,
     team: HQMTeam,
     time: u32,
 ) {

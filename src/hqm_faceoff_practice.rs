@@ -1,5 +1,5 @@
 use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
-use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour};
+use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
 
@@ -18,7 +18,7 @@ impl HQMFaceoffPracticeBehaviour {
         }
     }
 
-    fn start_new_round(&mut self, server: &mut HQMServer, player_index: usize) {
+    fn start_new_round(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         self.timer = 0;
         server.game.world.clear_pucks();
 
@@ -39,7 +39,7 @@ impl HQMServerBehaviour for HQMFaceoffPracticeBehaviour {
     fn before_tick(&mut self, server: &mut HQMServer) {
         let mut has_player_already = None;
         let mut wants_to_play = None;
-        for (player_index, player) in server.players.iter().enumerate() {
+        for (player_index, player) in server.players.iter() {
             if let Some(player) = player {
                 if player.object.is_some() {
                     has_player_already = Some(player_index);

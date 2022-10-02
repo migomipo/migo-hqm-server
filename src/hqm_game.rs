@@ -4,7 +4,10 @@ use std::borrow::Cow;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::hqm_server::{HQMObjectPacket, HQMPuckPacket, HQMSkaterPacket, ReplayTick};
+use crate::hqm_server::{
+    HQMObjectIndex, HQMObjectPacket, HQMPuckPacket, HQMServerPlayerIndex, HQMSkaterPacket,
+    ReplayTick,
+};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
@@ -23,32 +26,38 @@ pub struct HQMGameWorldObjectList {
 }
 
 impl HQMGameWorldObjectList {
-    pub fn get_puck(&self, object_index: usize) -> Option<&HQMPuck> {
-        if let HQMGameObject::Puck(puck) = &self.objects[object_index] {
+    pub fn get_puck(&self, HQMObjectIndex(object_index): HQMObjectIndex) -> Option<&HQMPuck> {
+        if let Some(HQMGameObject::Puck(puck)) = self.objects.get(object_index) {
             Some(puck)
         } else {
             None
         }
     }
 
-    pub fn get_puck_mut(&mut self, object_index: usize) -> Option<&mut HQMPuck> {
-        if let HQMGameObject::Puck(puck) = &mut self.objects[object_index] {
+    pub fn get_puck_mut(
+        &mut self,
+        HQMObjectIndex(object_index): HQMObjectIndex,
+    ) -> Option<&mut HQMPuck> {
+        if let Some(HQMGameObject::Puck(puck)) = self.objects.get_mut(object_index) {
             Some(puck)
         } else {
             None
         }
     }
 
-    pub fn get_skater(&self, object_index: usize) -> Option<&HQMSkater> {
-        if let HQMGameObject::Player(skater) = &self.objects[object_index] {
+    pub fn get_skater(&self, HQMObjectIndex(object_index): HQMObjectIndex) -> Option<&HQMSkater> {
+        if let Some(HQMGameObject::Player(skater)) = self.objects.get(object_index) {
             Some(skater)
         } else {
             None
         }
     }
 
-    pub fn get_skater_mut(&mut self, object_index: usize) -> Option<&mut HQMSkater> {
-        if let HQMGameObject::Player(skater) = &mut self.objects[object_index] {
+    pub fn get_skater_mut(
+        &mut self,
+        HQMObjectIndex(object_index): HQMObjectIndex,
+    ) -> Option<&mut HQMSkater> {
+        if let Some(HQMGameObject::Player(skater)) = self.objects.get_mut(object_index) {
             Some(skater)
         } else {
             None
@@ -63,35 +72,40 @@ impl HQMGameWorld {
         rot: Rotation3<f32>,
         hand: HQMSkaterHand,
         mass: f32,
-    ) -> Option<usize> {
+    ) -> Option<HQMObjectIndex> {
         let object_slot = self.find_empty_player_slot();
         if let Some(i) = object_slot {
-            self.objects.objects[i] = HQMGameObject::Player(HQMSkater::new(start, rot, hand, mass));
+            self.objects.objects[i.0] =
+                HQMGameObject::Player(HQMSkater::new(start, rot, hand, mass));
         }
         return object_slot;
     }
 
-    pub fn create_puck_object(&mut self, start: Point3<f32>, rot: Rotation3<f32>) -> Option<usize> {
+    pub fn create_puck_object(
+        &mut self,
+        start: Point3<f32>,
+        rot: Rotation3<f32>,
+    ) -> Option<HQMObjectIndex> {
         let object_slot = self.find_empty_puck_slot();
         if let Some(i) = object_slot {
-            self.objects.objects[i] = HQMGameObject::Puck(HQMPuck::new(start, rot));
+            self.objects.objects[i.0] = HQMGameObject::Puck(HQMPuck::new(start, rot));
         }
         return object_slot;
     }
 
-    fn find_empty_puck_slot(&self) -> Option<usize> {
+    fn find_empty_puck_slot(&self) -> Option<HQMObjectIndex> {
         for i in 0..self.puck_slots {
             if let HQMGameObject::None = self.objects.objects[i] {
-                return Some(i);
+                return Some(HQMObjectIndex(i));
             }
         }
         None
     }
 
-    fn find_empty_player_slot(&self) -> Option<usize> {
+    fn find_empty_player_slot(&self) -> Option<HQMObjectIndex> {
         for i in self.puck_slots..self.objects.objects.len() {
             if let HQMGameObject::None = self.objects.objects[i] {
-                return Some(i);
+                return Some(HQMObjectIndex(i));
             }
         }
         None
@@ -103,7 +117,7 @@ impl HQMGameWorld {
         }
     }
 
-    pub(crate) fn remove_player(&mut self, i: usize) -> bool {
+    pub(crate) fn remove_player(&mut self, HQMObjectIndex(i): HQMObjectIndex) -> bool {
         if let r @ HQMGameObject::Player(_) = &mut self.objects.objects[i] {
             *r = HQMGameObject::None;
             true
@@ -112,7 +126,7 @@ impl HQMGameWorld {
         }
     }
 
-    pub fn remove_puck(&mut self, i: usize) -> bool {
+    pub fn remove_puck(&mut self, HQMObjectIndex(i): HQMObjectIndex) -> bool {
         if let r @ HQMGameObject::Puck(_) = &mut self.objects.objects[i] {
             *r = HQMGameObject::None;
             true
@@ -974,17 +988,17 @@ pub(crate) enum HQMGameObject {
 pub enum HQMMessage {
     PlayerUpdate {
         player_name: Rc<String>,
-        object: Option<(usize, HQMTeam)>,
-        player_index: usize,
+        object: Option<(HQMObjectIndex, HQMTeam)>,
+        player_index: HQMServerPlayerIndex,
         in_server: bool,
     },
     Goal {
         team: HQMTeam,
-        goal_player_index: Option<usize>,
-        assist_player_index: Option<usize>,
+        goal_player_index: Option<HQMServerPlayerIndex>,
+        assist_player_index: Option<HQMServerPlayerIndex>,
     },
     Chat {
-        player_index: Option<usize>,
+        player_index: Option<HQMServerPlayerIndex>,
         message: Cow<'static, str>,
     },
 }

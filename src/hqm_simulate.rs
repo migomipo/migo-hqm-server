@@ -2,6 +2,7 @@ use crate::hqm_game::{
     HQMBody, HQMGameObject, HQMGameWorld, HQMPhysicsConfiguration, HQMPuck, HQMRink, HQMRinkNet,
     HQMSkater, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, LinesAndNet,
 };
+use crate::hqm_server::HQMObjectIndex;
 use nalgebra::{Point3, Rotation3, Vector2, Vector3};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
 use std::iter::FromIterator;
@@ -13,14 +14,38 @@ enum HQMCollision {
 
 #[derive(Debug, Copy, Clone)]
 pub enum HQMSimulationEvent {
-    PuckEnteredNet { team: HQMTeam, puck: usize },
-    PuckPassedGoalLine { team: HQMTeam, puck: usize },
-    PuckTouch { player: usize, puck: usize },
-    PuckEnteredOffensiveZone { team: HQMTeam, puck: usize },
-    PuckReachedRedLine { team: HQMTeam, puck: usize },
-    PuckFullyEnteredOffensiveHalf { team: HQMTeam, puck: usize },
-    PuckLeftOffensiveZone { team: HQMTeam, puck: usize },
-    PuckTouchedNet { team: HQMTeam, puck: usize },
+    PuckEnteredNet {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
+    PuckPassedGoalLine {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
+    PuckTouch {
+        player: HQMObjectIndex,
+        puck: HQMObjectIndex,
+    },
+    PuckEnteredOffensiveZone {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
+    PuckReachedRedLine {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
+    PuckFullyEnteredOffensiveHalf {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
+    PuckLeftOffensiveZone {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
+    PuckTouchedNet {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
 }
 
 fn replace_nan(v: f32, d: f32) -> f32 {
@@ -144,6 +169,7 @@ fn update_sticks_and_pucks(
             player.stick_pos += player.stick_velocity.scale(0.1);
         }
         for (puck_index, puck) in pucks.iter_mut() {
+            let puck_index = HQMObjectIndex(*puck_index);
             puck.body.pos += puck.body.linear_velocity.scale(0.1);
             let mut new_puck_linear_velocity = puck.body.linear_velocity.clone_owned();
             let mut new_puck_angular_velocity = puck.body.angular_velocity.clone_owned();
@@ -162,13 +188,14 @@ fn update_sticks_and_pucks(
             }
 
             for (player_index, player) in players.iter_mut() {
+                let player_index = HQMObjectIndex(*player_index);
                 if (&puck.body.pos - &player.stick_pos).norm() < 1.0 {
                     if let Some((lin, ang, stick)) =
                         do_puck_stick_forces(puck, player, &puck_vertices)
                     {
                         events.push(HQMSimulationEvent::PuckTouch {
-                            puck: *puck_index,
-                            player: *player_index,
+                            puck: puck_index,
+                            player: player_index,
                         });
                         new_puck_linear_velocity += lin;
                         new_puck_angular_velocity += ang;
@@ -210,13 +237,13 @@ fn update_sticks_and_pucks(
             if red_post_collision.is_some() | red_net_collision.is_some() {
                 events.push(HQMSimulationEvent::PuckTouchedNet {
                     team: HQMTeam::Red,
-                    puck: *puck_index,
+                    puck: puck_index,
                 })
             }
             if blue_post_collision.is_some() | blue_net_collision.is_some() {
                 events.push(HQMSimulationEvent::PuckTouchedNet {
                     team: HQMTeam::Blue,
-                    puck: *puck_index,
+                    puck: puck_index,
                 })
             }
         }
@@ -582,6 +609,7 @@ fn puck_detection(
     lines_and_net: &LinesAndNet,
     events: &mut Vec<HQMSimulationEvent>,
 ) {
+    let puck_index = HQMObjectIndex(puck_index);
     let offensive_line = &lines_and_net.offensive_line;
     let mid_line = &lines_and_net.mid_line;
     let net = &lines_and_net.net;

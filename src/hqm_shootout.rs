@@ -1,6 +1,7 @@
 use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
 use migo_hqm_server::hqm_server::{
-    HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMSpawnPoint,
+    HQMObjectIndex, HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex,
+    HQMSpawnPoint,
 };
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
@@ -34,7 +35,7 @@ pub struct HQMShootoutBehaviour {
     attempts: u32,
     status: HQMShootoutStatus,
     physics_config: HQMPhysicsConfiguration,
-    team_switch_timer: HashMap<usize, u32>,
+    team_switch_timer: HashMap<HQMServerPlayerIndex, u32>,
     team_max: usize,
     pub dual_control: HQMDualControlSetting,
 }
@@ -90,7 +91,7 @@ impl HQMShootoutBehaviour {
         let mut red_players = vec![];
         let mut blue_players = vec![];
 
-        for (player_index, player) in server.players.iter().enumerate() {
+        for (player_index, player) in server.players.iter() {
             if let Some(player) = player {
                 if let Some((_, team)) = player.object {
                     if team == HQMTeam::Red {
@@ -177,7 +178,7 @@ impl HQMShootoutBehaviour {
         let mut spectating_players = vec![];
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
-        for (player_index, player) in server.players.iter().enumerate() {
+        for (player_index, player) in server.players.iter() {
             if let Some(player) = player {
                 self.team_switch_timer
                     .get_mut(&player_index)
@@ -227,7 +228,7 @@ impl HQMShootoutBehaviour {
             let (red_player_count, blue_player_count) = {
                 let mut red_player_count = 0usize;
                 let mut blue_player_count = 0usize;
-                for player in server.players.iter() {
+                for (_, player) in server.players.iter() {
                     if let Some(player) = player {
                         if let Some((_, team)) = player.object {
                             if team == HQMTeam::Red {
@@ -245,7 +246,7 @@ impl HQMShootoutBehaviour {
 
             fn add_player(
                 behaviour: &mut HQMShootoutBehaviour,
-                player_index: usize,
+                player_index: HQMServerPlayerIndex,
                 player_name: Rc<String>,
                 server: &mut HQMServer,
                 team: HQMTeam,
@@ -269,7 +270,7 @@ impl HQMShootoutBehaviour {
             }
             fn add_player_dual_control(
                 behaviour: &mut HQMShootoutBehaviour,
-                player_index: usize,
+                player_index: HQMServerPlayerIndex,
                 player_name: Rc<String>,
                 server: &mut HQMServer,
                 team: HQMTeam,
@@ -411,7 +412,7 @@ impl HQMShootoutBehaviour {
         }
     }
 
-    fn reset_game(&mut self, server: &mut HQMServer, player_index: usize) {
+    fn reset_game(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 info!("{} ({}) reset game", player.player_name, player_index);
@@ -429,31 +430,29 @@ impl HQMShootoutBehaviour {
     fn force_player_off_ice(
         &mut self,
         server: &mut HQMServer,
-        admin_player_index: usize,
-        force_player_index: usize,
+        admin_player_index: HQMServerPlayerIndex,
+        force_player_index: HQMServerPlayerIndex,
     ) {
         if let Some(player) = server.players.get(admin_player_index) {
             if player.is_admin {
                 let admin_player_name = player.player_name.clone();
 
-                if force_player_index < server.players.len() {
-                    if let Some(force_player) = server.players.get(force_player_index) {
-                        let force_player_name = force_player.player_name.clone();
-                        if server.move_to_spectator(self, force_player_index) {
-                            let msg = format!(
-                                "{} forced off ice by {}",
-                                force_player_name, admin_player_name
-                            );
-                            info!(
-                                "{} ({}) forced {} ({}) off ice",
-                                admin_player_name,
-                                admin_player_index,
-                                force_player_name,
-                                force_player_index
-                            );
-                            server.add_server_chat_message(msg);
-                            self.team_switch_timer.insert(force_player_index, 500);
-                        }
+                if let Some(force_player) = server.players.get(force_player_index) {
+                    let force_player_name = force_player.player_name.clone();
+                    if server.move_to_spectator(self, force_player_index) {
+                        let msg = format!(
+                            "{} forced off ice by {}",
+                            force_player_name, admin_player_name
+                        );
+                        info!(
+                            "{} ({}) forced {} ({}) off ice",
+                            admin_player_name,
+                            admin_player_index,
+                            force_player_name,
+                            force_player_index
+                        );
+                        server.add_server_chat_message(msg);
+                        self.team_switch_timer.insert(force_player_index, 500);
                     }
                 }
             } else {
@@ -548,7 +547,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                 let (red_player_count, blue_player_count) = {
                     let mut red_player_count = 0usize;
                     let mut blue_player_count = 0usize;
-                    for player in server.players.iter() {
+                    for (_, player) in server.players.iter() {
                         if let Some(player) = player {
                             if let Some((_, team)) = player.object {
                                 if team == HQMTeam::Red {
@@ -583,7 +582,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                         server.game.time = 1; // A hack to avoid "Intermission" or "Game starting"
                         self.end_attempt(server, false);
                     } else {
-                        if let Some(puck) = server.game.world.objects.get_puck(0) {
+                        if let Some(puck) = server.game.world.objects.get_puck(HQMObjectIndex(0)) {
                             let puck_pos = &puck.body.pos;
                             let center_pos =
                                 &server.game.world.rink.center_faceoff_spot.center_position;
@@ -630,14 +629,14 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
         server: &mut HQMServer,
         cmd: &str,
         arg: &str,
-        player_index: usize,
+        player_index: HQMServerPlayerIndex,
     ) {
         match cmd {
             "reset" | "resetgame" => {
                 self.reset_game(server, player_index);
             }
             "fs" => {
-                if let Ok(force_player_index) = arg.parse::<usize>() {
+                if let Ok(force_player_index) = arg.parse::<HQMServerPlayerIndex>() {
                     self.force_player_off_ice(server, player_index, force_player_index);
                 }
             }
@@ -653,7 +652,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
         game
     }
 
-    fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: usize) {
+    fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         self.team_switch_timer.remove(&player_index);
     }
 
@@ -665,8 +664,12 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
 fn find_empty_dual_control(
     server: &HQMServer,
     team: HQMTeam,
-) -> Option<(usize, Option<usize>, Option<usize>)> {
-    for (i, player) in server.players.iter().enumerate() {
+) -> Option<(
+    HQMServerPlayerIndex,
+    Option<HQMServerPlayerIndex>,
+    Option<HQMServerPlayerIndex>,
+)> {
+    for (i, player) in server.players.iter() {
         if let Some(player) = player {
             if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
                 if movement.is_none() || stick.is_none() {

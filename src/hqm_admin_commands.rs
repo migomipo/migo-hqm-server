@@ -1,16 +1,18 @@
-use crate::hqm_server::{HQMMuteStatus, HQMServer, HQMServerBehaviour, HQMServerPlayerData};
+use crate::hqm_server::{
+    HQMMuteStatus, HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex,
+};
 
 use tracing::info;
 
 impl HQMServer {
-    pub fn admin_deny_message(&mut self, player_index: usize) {
+    pub fn admin_deny_message(&mut self, player_index: HQMServerPlayerIndex) {
         self.add_directed_server_chat_message_str(
             "Please log in before using that command",
             player_index,
         );
     }
 
-    pub(crate) fn set_allow_join(&mut self, player_index: usize, allowed: bool) {
+    pub(crate) fn set_allow_join(&mut self, player_index: HQMServerPlayerIndex, allowed: bool) {
         if let Some(player) = self.players.get(player_index) {
             if player.is_admin {
                 self.allow_join = allowed;
@@ -30,25 +32,26 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn mute_player(&mut self, admin_player_index: usize, mute_player_index: usize) {
+    pub(crate) fn mute_player(
+        &mut self,
+        admin_player_index: HQMServerPlayerIndex,
+        mute_player_index: HQMServerPlayerIndex,
+    ) {
         if let Some(admin_player) = self.players.get(admin_player_index) {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
-                if mute_player_index < self.players.len() {
-                    if let Some(mute_player) = self.players.get_mut(mute_player_index) {
-                        mute_player.is_muted = HQMMuteStatus::Muted;
-                        info!(
-                            "{} ({}) muted {} ({})",
-                            admin_player_name,
-                            admin_player_index,
-                            mute_player.player_name,
-                            mute_player_index
-                        );
-                        let msg =
-                            format!("{} muted by {}", mute_player.player_name, admin_player_name);
-                        self.add_server_chat_message(msg);
-                    }
+                if let Some(mute_player) = self.players.get_mut(mute_player_index) {
+                    mute_player.is_muted = HQMMuteStatus::Muted;
+                    info!(
+                        "{} ({}) muted {} ({})",
+                        admin_player_name,
+                        admin_player_index,
+                        mute_player.player_name,
+                        mute_player_index
+                    );
+                    let msg = format!("{} muted by {}", mute_player.player_name, admin_player_name);
+                    self.add_server_chat_message(msg);
                 }
             } else {
                 self.admin_deny_message(admin_player_index);
@@ -56,31 +59,33 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn unmute_player(&mut self, admin_player_index: usize, mute_player_index: usize) {
+    pub(crate) fn unmute_player(
+        &mut self,
+        admin_player_index: HQMServerPlayerIndex,
+        mute_player_index: HQMServerPlayerIndex,
+    ) {
         if let Some(admin_player) = self.players.get(admin_player_index) {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
-                if mute_player_index < self.players.len() {
-                    if let Some(mute_player) = self.players.get_mut(mute_player_index) {
-                        let old_status = mute_player.is_muted;
-                        mute_player.is_muted = HQMMuteStatus::NotMuted;
-                        info!(
-                            "{} ({}) unmuted {} ({})",
-                            admin_player_name,
-                            admin_player_index,
-                            mute_player.player_name,
-                            mute_player_index
-                        );
-                        let msg = format!(
-                            "{} unmuted by {}",
-                            mute_player.player_name, admin_player_name
-                        );
-                        if old_status == HQMMuteStatus::Muted {
-                            self.add_server_chat_message(msg);
-                        } else {
-                            self.add_directed_server_chat_message(msg, admin_player_index);
-                        }
+                if let Some(mute_player) = self.players.get_mut(mute_player_index) {
+                    let old_status = mute_player.is_muted;
+                    mute_player.is_muted = HQMMuteStatus::NotMuted;
+                    info!(
+                        "{} ({}) unmuted {} ({})",
+                        admin_player_name,
+                        admin_player_index,
+                        mute_player.player_name,
+                        mute_player_index
+                    );
+                    let msg = format!(
+                        "{} unmuted by {}",
+                        mute_player.player_name, admin_player_name
+                    );
+                    if old_status == HQMMuteStatus::Muted {
+                        self.add_server_chat_message(msg);
+                    } else {
+                        self.add_directed_server_chat_message(msg, admin_player_index);
                     }
                 }
             } else {
@@ -92,38 +97,36 @@ impl HQMServer {
     #[allow(dead_code)]
     pub(crate) fn shadowmute_player(
         &mut self,
-        admin_player_index: usize,
-        mute_player_index: usize,
+        admin_player_index: HQMServerPlayerIndex,
+        mute_player_index: HQMServerPlayerIndex,
     ) {
         if let Some(admin_player) = self.players.get(admin_player_index) {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
-                if mute_player_index < self.players.len() {
-                    if let Some(mute_player) = self.players.get_mut(mute_player_index) {
-                        let old_status = mute_player.is_muted;
-                        mute_player.is_muted = HQMMuteStatus::ShadowMuted;
-                        info!(
-                            "{} ({}) shadowmuted {} ({})",
-                            admin_player_name,
-                            admin_player_index,
-                            mute_player.player_name,
-                            mute_player_index
-                        );
+                if let Some(mute_player) = self.players.get_mut(mute_player_index) {
+                    let old_status = mute_player.is_muted;
+                    mute_player.is_muted = HQMMuteStatus::ShadowMuted;
+                    info!(
+                        "{} ({}) shadowmuted {} ({})",
+                        admin_player_name,
+                        admin_player_index,
+                        mute_player.player_name,
+                        mute_player_index
+                    );
+                    let msg = format!(
+                        "{} shadowmuted by {}",
+                        mute_player.player_name, admin_player_name
+                    );
+                    if old_status == HQMMuteStatus::Muted {
+                        // Fake "unmuting" message
                         let msg = format!(
-                            "{} shadowmuted by {}",
+                            "{} unmuted by {}",
                             mute_player.player_name, admin_player_name
                         );
-                        if old_status == HQMMuteStatus::Muted {
-                            // Fake "unmuting" message
-                            let msg = format!(
-                                "{} unmuted by {}",
-                                mute_player.player_name, admin_player_name
-                            );
-                            self.add_directed_server_chat_message(msg, mute_player_index);
-                        }
-                        self.add_directed_server_chat_message(msg, admin_player_index);
+                        self.add_directed_server_chat_message(msg, mute_player_index);
                     }
+                    self.add_directed_server_chat_message(msg, admin_player_index);
                 }
             } else {
                 self.admin_deny_message(admin_player_index);
@@ -131,7 +134,7 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn mute_chat(&mut self, player_index: usize) {
+    pub(crate) fn mute_chat(&mut self, player_index: HQMServerPlayerIndex) {
         if let Some(player) = self.players.get(player_index) {
             if player.is_admin {
                 self.is_muted = true;
@@ -145,7 +148,7 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn unmute_chat(&mut self, player_index: usize) {
+    pub(crate) fn unmute_chat(&mut self, player_index: HQMServerPlayerIndex) {
         if let Some(player) = self.players.get(player_index) {
             if player.is_admin {
                 self.is_muted = false;
@@ -160,7 +163,7 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn admin_login(&mut self, player_index: usize, password: &str) {
+    pub(crate) fn admin_login(&mut self, player_index: HQMServerPlayerIndex, password: &str) {
         if let Some(player) = self.players.get_mut(player_index) {
             let msg = if player.is_admin {
                 "You are already logged in as administrator"
@@ -181,7 +184,7 @@ impl HQMServer {
 
     pub(crate) fn kick_all_matching<B: HQMServerBehaviour>(
         &mut self,
-        admin_player_index: usize,
+        admin_player_index: HQMServerPlayerIndex,
         kick_player_name: &str,
         ban_player: bool,
         behaviour: &mut B,
@@ -226,8 +229,8 @@ impl HQMServer {
                 // Because we allow matching using wildcards, we use vectors for multiple instances found
                 let mut kick_player_list = Vec::new();
 
-                for (player_index, p) in self.players.iter().enumerate() {
-                    if let Some(player) = p {
+                for (player_index, player) in self.players.iter() {
+                    if let Some(player) = player {
                         if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
                             if match_f(&player.player_name) {
                                 kick_player_list.push((
@@ -317,8 +320,8 @@ impl HQMServer {
 
     pub(crate) fn kick_player<B: HQMServerBehaviour>(
         &mut self,
-        admin_player_index: usize,
-        kick_player_index: usize,
+        admin_player_index: HQMServerPlayerIndex,
+        kick_player_index: HQMServerPlayerIndex,
         ban_player: bool,
         behaviour: &mut B,
     ) {
@@ -327,42 +330,36 @@ impl HQMServer {
                 let admin_player_name = player.player_name.clone();
 
                 if kick_player_index != admin_player_index {
-                    if kick_player_index < self.players.len() {
-                        if let Some(kick_player) = self.players.get(kick_player_index) {
-                            if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
-                                let kick_player_name = kick_player.player_name.clone();
-                                let kick_ip = data.addr.ip().clone();
-                                self.remove_player(behaviour, kick_player_index, true);
+                    if let Some(kick_player) = self.players.get(kick_player_index) {
+                        if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
+                            let kick_player_name = kick_player.player_name.clone();
+                            let kick_ip = data.addr.ip().clone();
+                            self.remove_player(behaviour, kick_player_index, true);
 
-                                if ban_player {
-                                    self.ban_list.insert(kick_ip);
+                            if ban_player {
+                                self.ban_list.insert(kick_ip);
 
-                                    info!(
-                                        "{} ({}) banned {} ({})",
-                                        admin_player_name,
-                                        admin_player_index,
-                                        kick_player_name,
-                                        kick_player_name
-                                    );
-                                    let msg = format!(
-                                        "{} banned by {}",
-                                        kick_player_name, admin_player_name
-                                    );
-                                    self.add_server_chat_message(msg);
-                                } else {
-                                    info!(
-                                        "{} ({}) kicked {} ({})",
-                                        admin_player_name,
-                                        admin_player_index,
-                                        kick_player_name,
-                                        kick_player_name
-                                    );
-                                    let msg = format!(
-                                        "{} kicked by {}",
-                                        kick_player_name, admin_player_name
-                                    );
-                                    self.add_server_chat_message(msg);
-                                }
+                                info!(
+                                    "{} ({}) banned {} ({})",
+                                    admin_player_name,
+                                    admin_player_index,
+                                    kick_player_name,
+                                    kick_player_name
+                                );
+                                let msg =
+                                    format!("{} banned by {}", kick_player_name, admin_player_name);
+                                self.add_server_chat_message(msg);
+                            } else {
+                                info!(
+                                    "{} ({}) kicked {} ({})",
+                                    admin_player_name,
+                                    admin_player_index,
+                                    kick_player_name,
+                                    kick_player_name
+                                );
+                                let msg =
+                                    format!("{} kicked by {}", kick_player_name, admin_player_name);
+                                self.add_server_chat_message(msg);
                             }
                         }
                     }
@@ -386,7 +383,7 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn clear_bans(&mut self, player_index: usize) {
+    pub(crate) fn clear_bans(&mut self, player_index: HQMServerPlayerIndex) {
         if let Some(player) = self.players.get(player_index) {
             if player.is_admin {
                 self.ban_list.clear();
@@ -400,7 +397,7 @@ impl HQMServer {
         }
     }
 
-    pub fn set_replay(&mut self, player_index: usize, rule: &str) {
+    pub fn set_replay(&mut self, player_index: HQMServerPlayerIndex, rule: &str) {
         if let Some(player) = self.players.get(player_index) {
             if player.is_admin {
                 match rule {
