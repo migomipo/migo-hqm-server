@@ -5,8 +5,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use crate::hqm_server::{
-    HQMObjectIndex, HQMObjectPacket, HQMPuckPacket, HQMServerPlayerIndex, HQMSkaterPacket,
-    ReplayTick,
+    HQMObjectPacket, HQMPuckPacket, HQMServerPlayerIndex, HQMSkaterPacket, ReplayTick,
 };
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
@@ -1052,5 +1051,14 @@ fn get_position(bits: u32, v: f32) -> u32 {
         ((1 << bits) - 1) as u32
     } else {
         temp as u32
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct HQMObjectIndex(pub usize);
+
+impl std::fmt::Display for HQMObjectIndex {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }

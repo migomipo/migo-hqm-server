@@ -6,12 +6,12 @@ use crate::hqm_behaviour_extra::{
     HQMOffsideLineConfiguration,
 };
 use migo_hqm_server::hqm_game::{
-    HQMGame, HQMGameWorld, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot, HQMRinkSide,
-    HQMRulesState, HQMSkater, HQMTeam,
+    HQMGame, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot,
+    HQMRinkSide, HQMRulesState, HQMSkater, HQMTeam,
 };
 use migo_hqm_server::hqm_server::{
-    HQMObjectIndex, HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex,
-    HQMServerPlayerList, HQMSpawnPoint,
+    HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex, HQMServerPlayerList,
+    HQMSpawnPoint,
 };
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::hash_map::Entry;

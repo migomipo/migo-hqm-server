@@ -20,8 +20,8 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::hqm_game::{
-    HQMGame, HQMGameObject, HQMMessage, HQMPlayerInput, HQMRink, HQMRulesState, HQMSkater,
-    HQMSkaterHand, HQMTeam,
+    HQMGame, HQMGameObject, HQMMessage, HQMObjectIndex, HQMPlayerInput, HQMRink, HQMRulesState,
+    HQMSkater, HQMSkaterHand, HQMTeam,
 };
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter};
 use crate::hqm_simulate::HQMSimulationEvent;
@@ -72,15 +72,6 @@ impl std::str::FromStr for HQMServerPlayerIndex {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         s.parse().map(HQMServerPlayerIndex)
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct HQMObjectIndex(pub usize);
-
-impl std::fmt::Display for HQMObjectIndex {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 
