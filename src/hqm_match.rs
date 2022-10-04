@@ -1679,9 +1679,9 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 let offside_line_str = if self.config.offside != HQMOffsideConfiguration::Off
                     && self.config.offside_line == HQMOffsideLineConfiguration::Center
                 {
-                    ""
-                } else {
                     " (center line)"
+                } else {
+                    ""
                 };
                 let icing_str = match self.config.icing {
                     HQMIcingConfiguration::Off => "Icing disabled",
