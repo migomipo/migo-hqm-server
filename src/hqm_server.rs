@@ -608,7 +608,7 @@ impl HQMServer {
     }
 
     fn list_players(&mut self, player_index: HQMServerPlayerIndex, first_index: usize) {
-        let mut found = vec![];
+        let mut found = smallvec::SmallVec::<[_; 64]>::new();
         for player_index in first_index..self.players.len() {
             let player_index = HQMServerPlayerIndex(player_index);
             if let Some(player) = self.players.get(player_index) {
@@ -726,9 +726,12 @@ impl HQMServer {
         found
     }
 
-    pub fn player_search(&self, name: &str) -> Vec<(HQMServerPlayerIndex, Rc<String>)> {
+    pub fn player_search(
+        &self,
+        name: &str,
+    ) -> smallvec::SmallVec<[(HQMServerPlayerIndex, Rc<String>); 64]> {
         let name = name.to_lowercase();
-        let mut found = vec![];
+        let mut found = smallvec::SmallVec::<[_; 64]>::new();
         for (player_index, player) in self.players.iter() {
             if let Some(player) = player {
                 if player.player_name.to_lowercase().contains(&name) {
@@ -890,7 +893,7 @@ impl HQMServer {
         behaviour: &mut B,
         player_index: HQMServerPlayerIndex,
     ) {
-        let mut changes = vec![];
+        let mut changes = smallvec::SmallVec::<[_; 4]>::new();
         for (i, player) in self.players.iter() {
             if let Some(player) = player {
                 if let HQMServerPlayerData::DualControl { movement, stick } = &player.data {
@@ -1057,7 +1060,7 @@ impl HQMServer {
         stick: Option<HQMServerPlayerIndex>,
     ) {
         if movement.is_some() || stick.is_some() {
-            let mut changes = vec![];
+            let mut changes = smallvec::SmallVec::<[_; 4]>::new();
             for (player_index, player) in self.players.iter() {
                 if player_index == dual_control_player_index {
                     continue;
@@ -1226,7 +1229,7 @@ impl HQMServer {
                     message: Cow::Owned(message.to_owned()),
                 });
 
-                let mut matching_indices = vec![];
+                let mut matching_indices = smallvec::SmallVec::<[_; 32]>::new();
                 for (player_index, player) in self.players.iter() {
                     if let Some(player) = player {
                         if let Some((_, player_team)) = player.object {
@@ -1396,7 +1399,7 @@ impl HQMServer {
 
         behaviour.before_tick(self);
 
-        let mut dual_control_updates = vec![];
+        let mut dual_control_updates = smallvec::SmallVec::<[_; 64]>::new();
         for (player_index, player) in self.players.iter() {
             if let Some(player) = player {
                 if let HQMServerPlayerData::DualControl { movement, stick } = &player.data {
@@ -1446,7 +1449,7 @@ impl HQMServer {
         behaviour.after_tick(self, &events);
 
         if self.game.history_length > 0 {
-            let mut players = vec![];
+            let mut players = smallvec::SmallVec::<[ReplayTickPlayer; 64]>::new();
 
             for (_, player) in self.players.iter() {
                 if let Some(player) = player {
@@ -1491,9 +1494,9 @@ impl HQMServer {
     }
 
     fn remove_inactive_players<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
-        let mut chat_messages = vec![];
+        let mut chat_messages = smallvec::SmallVec::<[_; 16]>::new();
 
-        let inactive_players: Vec<(HQMServerPlayerIndex, Rc<String>)> = self
+        let inactive_players: smallvec::SmallVec<[_; 8]> = self
             .players
             .iter_mut()
             .filter_map(|(player_index, player)| {
@@ -1644,7 +1647,7 @@ impl HQMServer {
             });
         }
 
-        let mut messages = Vec::new();
+        let mut messages = smallvec::SmallVec::<[HQMMessage; 32]>::new();
         for (player_index, p) in self.players.players.iter_mut().enumerate() {
             let player_index = HQMServerPlayerIndex(player_index);
             if let Some(player) = p {
@@ -1689,8 +1692,8 @@ impl HQMServer {
 
 pub(crate) struct ReplayTick {
     game_step: u32,
-    packets: Vec<HQMObjectPacket>,
-    players: Vec<ReplayTickPlayer>,
+    packets: smallvec::SmallVec<[HQMObjectPacket; 32]>,
+    players: smallvec::SmallVec<[ReplayTickPlayer; 64]>,
 }
 
 pub(crate) struct ReplayTickPlayer {
@@ -1883,7 +1886,7 @@ fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage) {
 
 fn write_objects(
     writer: &mut HQMMessageWriter,
-    packets: &VecDeque<Vec<HQMObjectPacket>>,
+    packets: &VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
     current_packet: u32,
     known_packet: u32,
 ) {
@@ -1898,7 +1901,7 @@ fn write_objects(
         if let Some(diff) = diff {
             let index = diff as usize;
             if index < 192 && index > 0 {
-                packets.get(index).map(Vec::as_slice)
+                packets.get(index).map(smallvec::SmallVec::as_slice)
             } else {
                 None
             }
@@ -2024,7 +2027,7 @@ fn write_replay(game: &mut HQMGame, write_buf: &mut [u8]) {
 
 async fn send_updates(
     game_id: u32,
-    packets: &VecDeque<Vec<HQMObjectPacket>>,
+    packets: &VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
     game_step: u32,
     game_over: bool,
     red_score: u32,
@@ -2123,8 +2126,8 @@ async fn send_updates(
     }
 }
 
-fn get_packets(objects: &[HQMGameObject]) -> Vec<HQMObjectPacket> {
-    let mut packets: Vec<HQMObjectPacket> = Vec::with_capacity(32);
+fn get_packets(objects: &[HQMGameObject]) -> smallvec::SmallVec<[HQMObjectPacket; 32]> {
+    let mut packets = smallvec::SmallVec::<[HQMObjectPacket; 32]>::new();
     for i in 0usize..32 {
         let packet = match &objects[i] {
             HQMGameObject::Puck(puck) => HQMObjectPacket::Puck(puck.get_packet()),

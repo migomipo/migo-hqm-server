@@ -143,7 +143,7 @@ pub struct HQMGame {
     pub(crate) replay_msg_pos: usize,
     pub(crate) replay_last_packet: u32,
     pub(crate) replay_messages: Vec<Rc<HQMMessage>>,
-    pub(crate) saved_packets: VecDeque<Vec<HQMObjectPacket>>,
+    pub(crate) saved_packets: VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
     pub(crate) saved_pings: VecDeque<Instant>,
     pub(crate) saved_history: VecDeque<ReplayTick>,
     pub rules_state: HQMRulesState,

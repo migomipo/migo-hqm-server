@@ -623,9 +623,9 @@ impl HQMMatchBehaviour {
     }
 
     fn update_players(&mut self, server: &mut HQMServer) {
-        let mut spectating_players = vec![];
-        let mut joining_red = vec![];
-        let mut joining_blue = vec![];
+        let mut spectating_players = smallvec::SmallVec::<[_; 32]>::new();
+        let mut joining_red = smallvec::SmallVec::<[_; 32]>::new();
+        let mut joining_blue = smallvec::SmallVec::<[_; 32]>::new();
         for (player_index, player) in server.players.iter() {
             if let Some(player) = player {
                 self.team_switch_timer
@@ -1430,8 +1430,8 @@ fn get_faceoff_positions(
     let allowed_positions = &world.rink.allowed_positions;
     let mut res = HashMap::new();
 
-    let mut red_players = vec![];
-    let mut blue_players = vec![];
+    let mut red_players = smallvec::SmallVec::<[_; 32]>::new();
+    let mut blue_players = smallvec::SmallVec::<[_; 32]>::new();
     for (player_index, player) in players.iter() {
         if let Some(player) = player {
             let team = player.object.map(|x| x.1);

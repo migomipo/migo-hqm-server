@@ -3,6 +3,7 @@ use crate::hqm_game::{
     HQMRink, HQMRinkNet, HQMSkater, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, LinesAndNet,
 };
 use nalgebra::{Point3, Rotation3, Vector2, Vector3};
+use smallvec::SmallVec;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
 use std::iter::FromIterator;
 
@@ -55,11 +56,14 @@ fn replace_nan(v: f32, d: f32) -> f32 {
     }
 }
 
+type SimulationList = SmallVec<[HQMSimulationEvent; 16]>;
+type CollisionList = SmallVec<[HQMCollision; 32]>;
+
 impl HQMGameWorld {
-    pub(crate) fn simulate_step(&mut self) -> Vec<HQMSimulationEvent> {
-        let mut events = Vec::new();
-        let mut players = Vec::new();
-        let mut pucks = Vec::new();
+    pub(crate) fn simulate_step(&mut self) -> SimulationList {
+        let mut events: SimulationList = smallvec::SmallVec::new();
+        let mut players: SmallVec<[(usize, &mut HQMSkater); 32]> = smallvec::SmallVec::new();
+        let mut pucks: SmallVec<[(usize, &mut HQMPuck); 32]> = smallvec::SmallVec::new();
         for (i, o) in self.objects.objects.iter_mut().enumerate() {
             match o {
                 HQMGameObject::Player(player) => players.push((i, player)),
@@ -68,7 +72,7 @@ impl HQMGameWorld {
             }
         }
 
-        let mut collisions = vec![];
+        let mut collisions: CollisionList = smallvec::SmallVec::new();
         for (i, (_, player)) in players.iter_mut().enumerate() {
             update_player(i, player, &self.physics_config, &self.rink, &mut collisions);
         }
@@ -160,7 +164,7 @@ fn update_sticks_and_pucks(
     players: &mut [(usize, &mut HQMSkater)],
     pucks: &mut [(usize, &mut HQMPuck)],
     rink: &HQMRink,
-    events: &mut Vec<HQMSimulationEvent>,
+    events: &mut SimulationList,
     physics_config: &HQMPhysicsConfiguration,
 ) {
     for i in 0..10 {
@@ -360,7 +364,7 @@ fn update_player(
     player: &mut HQMSkater,
     physics_config: &HQMPhysicsConfiguration,
     rink: &HQMRink,
-    collisions: &mut Vec<HQMCollision>,
+    collisions: &mut CollisionList,
 ) {
     let mut new_player_linear_velocity = player.body.linear_velocity.clone_owned();
     let mut new_player_angular_velocity = player.body.angular_velocity.clone_owned();
@@ -550,13 +554,15 @@ fn get_projection(a: &Vector3<f32>, b: &Vector3<f32>) -> Vector3<f32> {
 
 fn apply_collisions(players: &mut [(usize, &mut HQMSkater)], collisions: &[HQMCollision]) {
     for _ in 0..16 {
-        let original_ball_velocities = Vec::from_iter(players.iter().map(|(_, skater)| {
-            let m = skater
-                .collision_balls
-                .iter()
-                .map(|x| x.velocity.clone_owned());
-            Vec::from_iter(m)
-        }));
+        let original_ball_velocities =
+            SmallVec::<[_; 32]>::from_iter(players.iter().map(|(_, skater)| {
+                SmallVec::<[_; 8]>::from_iter(
+                    skater
+                        .collision_balls
+                        .iter()
+                        .map(|x| x.velocity.clone_owned()),
+                )
+            }));
 
         for collision_event in collisions.iter() {
             match collision_event {
@@ -606,7 +612,7 @@ fn puck_detection(
     old_puck_pos: &Point3<f32>,
     team: HQMTeam,
     lines_and_net: &LinesAndNet,
-    events: &mut Vec<HQMSimulationEvent>,
+    events: &mut SimulationList,
 ) {
     let puck_index = HQMObjectIndex(puck_index);
     let offensive_line = &lines_and_net.offensive_line;
@@ -780,7 +786,7 @@ fn do_puck_rink_forces(
 
 fn get_stick_surfaces(
     player: &HQMSkater,
-) -> Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)> {
+) -> [(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>); 6] {
     let stick_size = Vector3::new(0.0625, 0.25, 0.5);
     let nnn = &player.stick_pos
         + &player.stick_rot * Vector3::new(-0.5, -0.5, -0.5).component_mul(&stick_size);
@@ -799,7 +805,7 @@ fn get_stick_surfaces(
     let ppp = &player.stick_pos
         + &player.stick_rot * Vector3::new(0.5, 0.5, 0.5).component_mul(&stick_size);
 
-    let res = vec![
+    let res = [
         (nnp.clone(), pnp.clone(), pnn.clone(), nnn.clone()),
         (npp.clone(), ppp.clone(), pnp.clone(), nnp.clone()),
         (npn.clone(), npp.clone(), nnp.clone(), nnn.clone()),
