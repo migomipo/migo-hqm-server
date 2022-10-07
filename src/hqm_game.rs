@@ -958,8 +958,8 @@ impl HQMPuck {
         }
     }
 
-    pub(crate) fn get_puck_vertices(&self) -> Vec<Point3<f32>> {
-        let mut res = Vec::with_capacity(48);
+    pub(crate) fn get_puck_vertices(&self) -> smallvec::SmallVec<[Point3<f32>; 48]> {
+        let mut res = smallvec::SmallVec::<[Point3<f32>; 48]>::new();
         for i in 0..16 {
             let (sin, cos) = ((i as f32) * PI / 8.0).sin_cos();
             for j in -1..=1 {
