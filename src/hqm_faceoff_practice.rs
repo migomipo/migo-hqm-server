@@ -112,7 +112,7 @@ impl HQMServerBehaviour for HQMFaceoffPracticeBehaviour {
 
                 let s = format!("{}.{:02} seconds ", seconds, centi);
 
-                server.add_server_chat_message(s);
+                server.messages.add_server_chat_message(s);
 
                 self.wait_timer = 300;
             }

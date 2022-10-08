@@ -138,11 +138,10 @@ impl HQMGameWorld {
 pub struct HQMGame {
     pub(crate) start_time: DateTime<Utc>,
 
-    pub(crate) persistent_messages: Vec<Rc<HQMMessage>>,
     pub(crate) replay_data: Vec<u8>,
     pub(crate) replay_msg_pos: usize,
     pub(crate) replay_last_packet: u32,
-    pub(crate) replay_messages: Vec<Rc<HQMMessage>>,
+
     pub(crate) saved_packets: VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
     pub(crate) saved_pings: VecDeque<Instant>,
     pub(crate) saved_history: VecDeque<ReplayTick>,
@@ -192,11 +191,10 @@ impl HQMGame {
         HQMGame {
             start_time: Utc::now(),
 
-            persistent_messages: vec![],
             replay_data: Vec::with_capacity(64 * 1024 * 1024),
             replay_msg_pos: 0,
             replay_last_packet: u32::MAX,
-            replay_messages: vec![],
+
             saved_packets: VecDeque::with_capacity(192),
             saved_pings: VecDeque::with_capacity(100),
             saved_history: VecDeque::new(),

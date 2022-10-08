@@ -284,13 +284,13 @@ impl HQMRussianBehaviour {
                 let remaining_attempts = self.attempts;
                 if remaining_attempts >= 2 {
                     let msg = format!("{} attempts left for {}", remaining_attempts, team);
-                    server.add_server_chat_message(msg);
+                    server.messages.add_server_chat_message(msg);
                 } else if remaining_attempts == 1 {
                     let msg = format!("Last attempt for {}", team);
-                    server.add_server_chat_message(msg);
+                    server.messages.add_server_chat_message(msg);
                 } else {
                     let msg = format!("Tie-breaker round for {}", team);
-                    server.add_server_chat_message(msg);
+                    server.messages.add_server_chat_message(msg);
                 }
             }
             HQMRussianStatus::Game { in_zone, round, .. } => {
@@ -303,13 +303,13 @@ impl HQMRussianBehaviour {
                     let remaining_attempts = self.attempts.saturating_sub(*round);
                     if remaining_attempts >= 2 {
                         let msg = format!("{} attempts left for {}", remaining_attempts, team);
-                        server.add_server_chat_message(msg);
+                        server.messages.add_server_chat_message(msg);
                     } else if remaining_attempts == 1 {
                         let msg = format!("Last attempt for {}", team);
-                        server.add_server_chat_message(msg);
+                        server.messages.add_server_chat_message(msg);
                     } else {
                         let msg = format!("Tie-breaker round for {}", team);
-                        server.add_server_chat_message(msg);
+                        server.messages.add_server_chat_message(msg);
                     }
                 }
             }
@@ -324,7 +324,7 @@ impl HQMRussianBehaviour {
         server.game.world.clear_pucks();
 
         let s = format!("Each team will get {} attempts", self.attempts);
-        server.add_server_chat_message(s);
+        server.messages.add_server_chat_message(s);
 
         let mut red_players = vec![];
         let mut blue_players = vec![];
@@ -386,7 +386,7 @@ impl HQMRussianBehaviour {
 
                 server.new_game(self.create_game());
 
-                server.add_server_chat_message(msg);
+                server.messages.add_server_chat_message(msg);
             } else {
                 server.admin_deny_message(player_index);
             }
@@ -417,7 +417,7 @@ impl HQMRussianBehaviour {
                             force_player_name,
                             force_player_index
                         );
-                        server.add_server_chat_message(msg);
+                        server.messages.add_server_chat_message(msg);
                         self.team_switch_timer.insert(force_player_index, 500);
                     }
                 }
@@ -532,7 +532,7 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                                 goal_scored: true,
                             };
                             server.game.goal_message_timer = 300;
-                            server.add_goal_message(*team, None, None);
+                            server.messages.add_goal_message(*team, None, None);
                             self.check_ending(&mut server.game);
                         }
                         HQMSimulationEvent::PuckTouch { player, .. } => {
