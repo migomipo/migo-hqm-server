@@ -1,16 +1,13 @@
 use crate::hqm_parse;
 use nalgebra::{Matrix3, Point3, Rotation3, Vector2, Vector3};
-use std::borrow::Cow;
+
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::hqm_server::{
-    HQMObjectPacket, HQMPuckPacket, HQMServerPlayerIndex, HQMSkaterPacket, ReplayTick,
-};
+use crate::hqm_server::{HQMObjectPacket, HQMPuckPacket, HQMSkaterPacket, ReplayTick};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
-use std::rc::Rc;
 use std::time::Instant;
 
 pub struct HQMGameWorld {
@@ -979,25 +976,6 @@ pub(crate) enum HQMGameObject {
     None,
     Player(HQMSkater),
     Puck(HQMPuck),
-}
-
-#[derive(Debug, Clone)]
-pub enum HQMMessage {
-    PlayerUpdate {
-        player_name: Rc<String>,
-        object: Option<(HQMObjectIndex, HQMTeam)>,
-        player_index: HQMServerPlayerIndex,
-        in_server: bool,
-    },
-    Goal {
-        team: HQMTeam,
-        goal_player_index: Option<HQMServerPlayerIndex>,
-        assist_player_index: Option<HQMServerPlayerIndex>,
-    },
-    Chat {
-        player_index: Option<HQMServerPlayerIndex>,
-        message: Cow<'static, str>,
-    },
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

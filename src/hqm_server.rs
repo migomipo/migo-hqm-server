@@ -20,8 +20,8 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::hqm_game::{
-    HQMGame, HQMGameObject, HQMMessage, HQMObjectIndex, HQMPlayerInput, HQMRink, HQMRulesState,
-    HQMSkater, HQMSkaterHand, HQMTeam,
+    HQMGame, HQMGameObject, HQMObjectIndex, HQMPlayerInput, HQMRink, HQMRulesState, HQMSkater,
+    HQMSkaterHand, HQMTeam,
 };
 use crate::hqm_parse::{HQMMessageReader, HQMMessageWriter};
 use crate::hqm_simulate::HQMSimulationEvent;
@@ -154,6 +154,25 @@ impl HQMServerPlayerList {
 enum HQMWaitingMessageReceiver {
     All,
     Specific(HQMServerPlayerIndex),
+}
+
+#[derive(Debug, Clone)]
+pub enum HQMMessage {
+    PlayerUpdate {
+        player_name: Rc<String>,
+        object: Option<(HQMObjectIndex, HQMTeam)>,
+        player_index: HQMServerPlayerIndex,
+        in_server: bool,
+    },
+    Goal {
+        team: HQMTeam,
+        goal_player_index: Option<HQMServerPlayerIndex>,
+        assist_player_index: Option<HQMServerPlayerIndex>,
+    },
+    Chat {
+        player_index: Option<HQMServerPlayerIndex>,
+        message: Cow<'static, str>,
+    },
 }
 
 pub struct HQMServerMessages {
@@ -760,7 +779,7 @@ impl HQMServer {
         for player_index in first_index..self.players.len() {
             let player_index = HQMServerPlayerIndex(player_index);
             if let Some(player) = self.players.get(player_index) {
-                let msg = format!("{}: {}", found_player_index, found_player_name);
+                let msg = format!("{}: {}", player_index, player.player_name);
                 self.messages
                     .add_directed_server_chat_message(msg, receiver_index);
                 found += 1;
