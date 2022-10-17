@@ -1521,12 +1521,12 @@ impl HQMServer {
 
         self.game
             .saved_packets
-            .truncate(self.game.saved_packets.capacity() - 1);
+            .truncate(192 - 1);
         self.game.saved_packets.push_front(packets);
         self.game.packet = self.game.packet.wrapping_add(1);
         self.game
             .saved_pings
-            .truncate(self.game.saved_pings.capacity() - 1);
+            .truncate(100 - 1);
         self.game.saved_pings.push_front(Instant::now());
 
         if self.config.replays_enabled {
@@ -1605,11 +1605,11 @@ impl HQMServer {
 
                         self.game
                             .saved_packets
-                            .truncate(self.game.saved_packets.capacity() - 1);
+                            .truncate(191 - 1);
                         self.game.saved_packets.push_front(packets);
                         self.game
                             .saved_pings
-                            .truncate(self.game.saved_pings.capacity() - 1);
+                            .truncate(100 - 1);
                         self.game.saved_pings.push_front(Instant::now());
 
                         self.game.packet = self.game.packet.wrapping_add(1);

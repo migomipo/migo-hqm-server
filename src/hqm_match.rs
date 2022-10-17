@@ -5,10 +5,7 @@ use crate::hqm_behaviour_extra::{
     HQMDualControlSetting, HQMIcingConfiguration, HQMOffsideConfiguration,
     HQMOffsideLineConfiguration,
 };
-use migo_hqm_server::hqm_game::{
-    HQMGame, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot,
-    HQMRinkSide, HQMRulesState, HQMSkater, HQMTeam,
-};
+use migo_hqm_server::hqm_game::{HQMFaceoffSpot, HQMGame, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot, HQMRinkSide, HQMRulesState, HQMSkater, HQMTeam};
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex, HQMServerPlayerList,
     HQMSpawnPoint,
