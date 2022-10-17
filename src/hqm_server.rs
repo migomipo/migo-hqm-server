@@ -178,7 +178,7 @@ pub enum HQMMessage {
 pub struct HQMServerMessages {
     persistent_messages: Vec<Rc<HQMMessage>>,
     replay_messages: Vec<Rc<HQMMessage>>,
-    waiting_messages: VecDeque<(HQMWaitingMessageReceiver, Rc<HQMMessage>)>,
+    waiting_messages: Vec<(HQMWaitingMessageReceiver, Rc<HQMMessage>)>,
 }
 
 impl HQMServerMessages {
@@ -186,7 +186,7 @@ impl HQMServerMessages {
         Self {
             persistent_messages: Vec::with_capacity(1024),
             replay_messages: Vec::with_capacity(1024),
-            waiting_messages: VecDeque::with_capacity(64),
+            waiting_messages: Vec::with_capacity(64),
         }
     }
 
@@ -302,13 +302,13 @@ impl HQMServerMessages {
             self.persistent_messages.push(rc.clone());
         }
         self.waiting_messages
-            .push_front((HQMWaitingMessageReceiver::All, rc));
+            .push((HQMWaitingMessageReceiver::All, rc));
     }
 
     fn add_directed_message(&mut self, message: HQMMessage, receiver: HQMServerPlayerIndex) {
         let rc = Rc::new(message);
         self.waiting_messages
-            .push_back((HQMWaitingMessageReceiver::Specific(receiver), rc));
+            .push((HQMWaitingMessageReceiver::Specific(receiver), rc));
     }
 }
 
