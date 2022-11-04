@@ -604,7 +604,7 @@ impl HQMShootoutBehaviour {
                     ..
                 } = &mut self.status
                 {
-                    *timer = (*timer).max(2000);
+                    *timer = (*timer).max(200);
                 }
                 info!("{} ({}) resumed game", player.player_name, player_index);
                 let msg = format!("Game resumed by {}", player.player_name);
