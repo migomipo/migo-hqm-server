@@ -93,6 +93,7 @@ impl HQMShootoutBehaviour {
             }
         }
         server.game.time = 2000;
+        server.game.goal_message_timer = 0;
         server.game.period = 1;
         server.game.world.clear_pucks();
 
