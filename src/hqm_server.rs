@@ -1520,14 +1520,10 @@ impl HQMServer {
             self.game.saved_history.clear();
         }
 
-        self.game
-            .saved_packets
-            .truncate(192 - 1);
+        self.game.saved_packets.truncate(192 - 1);
         self.game.saved_packets.push_front(packets);
         self.game.packet = self.game.packet.wrapping_add(1);
-        self.game
-            .saved_pings
-            .truncate(100 - 1);
+        self.game.saved_pings.truncate(100 - 1);
         self.game.saved_pings.push_front(Instant::now());
 
         if self.config.replays_enabled {
@@ -1591,16 +1587,11 @@ impl HQMServer {
                 };
 
                 if let Some((forced_view, tick)) = has_replay_data {
-
                     let game_step = tick.game_step;
                     let packets = tick.packets;
-                    self.game
-                        .saved_packets
-                        .truncate(192 - 1);
+                    self.game.saved_packets.truncate(192 - 1);
                     self.game.saved_packets.push_front(packets);
-                    self.game
-                        .saved_pings
-                        .truncate(100 - 1);
+                    self.game.saved_pings.truncate(100 - 1);
                     self.game.saved_pings.push_front(Instant::now());
 
                     self.game.packet = self.game.packet.wrapping_add(1);
@@ -1648,17 +1639,22 @@ impl HQMServer {
             .await;
 
             let game_step = self.game.game_step;
-            while let Some((start_step, end_step, force_view)) = self.requested_replays.pop_front() {
+            while let Some((start_step, end_step, force_view)) = self.requested_replays.pop_front()
+            {
                 let i_end = game_step.saturating_sub(end_step) as usize;
                 let i_start = game_step.saturating_sub(start_step) as usize;
                 if i_start <= i_end {
                     continue;
                 }
-                let data = self.game.saved_history.range(i_end..=i_start).rev().cloned().collect();
-                self.replay_queue.push_back(ReplayElement {
-                    data,
-                    force_view
-                })
+                let data = self
+                    .game
+                    .saved_history
+                    .range(i_end..=i_start)
+                    .rev()
+                    .cloned()
+                    .collect();
+                self.replay_queue
+                    .push_back(ReplayElement { data, force_view })
             }
         } else if self.game.active {
             info!("Game {} abandoned", self.game_id);
@@ -1738,7 +1734,8 @@ impl HQMServer {
             warn!("start_step must be less than or equal to end_step");
             return;
         }
-        self.requested_replays.push_back((start_step, end_step, force_view));
+        self.requested_replays
+            .push_back((start_step, end_step, force_view));
     }
 }
 
@@ -1777,7 +1774,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
         config,
         game_id: 1,
         replay_queue: VecDeque::new(),
-        requested_replays: VecDeque::new()
+        requested_replays: VecDeque::new(),
     };
     info!("Server started, new game {} started", 1);
 

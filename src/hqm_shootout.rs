@@ -18,15 +18,11 @@ enum HQMShootoutAttemptState {
 }
 
 enum HQMShootoutStatus {
-    Pause,
+    WaitingForGame,
     Game {
         state: HQMShootoutAttemptState,
         round: u32,
         team: HQMTeam,
-    },
-    GameOver {
-        timer: u32,
-        goal_scored: bool,
     },
 }
 
@@ -34,6 +30,7 @@ pub struct HQMShootoutBehaviour {
     attempts: u32,
     status: HQMShootoutStatus,
     physics_config: HQMPhysicsConfiguration,
+    paused: bool,
     team_switch_timer: HashMap<HQMServerPlayerIndex, u32>,
     team_max: usize,
     pub dual_control: HQMDualControlSetting,
@@ -47,8 +44,9 @@ impl HQMShootoutBehaviour {
     ) -> Self {
         HQMShootoutBehaviour {
             attempts,
-            status: HQMShootoutStatus::Pause,
+            status: HQMShootoutStatus::WaitingForGame,
             physics_config,
+            paused: false,
             team_switch_timer: Default::default(),
             team_max: 1,
             dual_control,
@@ -59,33 +57,26 @@ impl HQMShootoutBehaviour {
         self.start_next_attempt(server);
     }
 
-    fn start_next_attempt(&mut self, server: &mut HQMServer) {
-        let (next_team, next_round) = match &self.status {
-            HQMShootoutStatus::Pause => (HQMTeam::Red, 0),
-            HQMShootoutStatus::Game { team, round, .. } => (
-                team.get_other_team(),
-                if *team == HQMTeam::Blue {
-                    *round + 1
-                } else {
-                    *round
-                },
-            ),
-            HQMShootoutStatus::GameOver { .. } => panic!(),
+    fn start_attempt(&mut self, server: &mut HQMServer, round: u32, team: HQMTeam) {
+        self.status = HQMShootoutStatus::Game {
+            state: HQMShootoutAttemptState::Attack { progress: 0.0 },
+            round,
+            team,
         };
 
-        let remaining_attempts = self.attempts.saturating_sub(next_round);
+        let defending_team = team.get_other_team();
+
+        let remaining_attempts = self.attempts.saturating_sub(round);
         if remaining_attempts >= 2 {
-            let msg = format!("{} attempts left for {}", remaining_attempts, next_team);
+            let msg = format!("{} attempts left for {}", remaining_attempts, team);
             server.messages.add_server_chat_message(msg);
         } else if remaining_attempts == 1 {
-            let msg = format!("Last attempt for {}", next_team);
+            let msg = format!("Last attempt for {}", team);
             server.messages.add_server_chat_message(msg);
         } else {
-            let msg = format!("Tie-breaker round for {}", next_team);
+            let msg = format!("Tie-breaker round for {}", team);
             server.messages.add_server_chat_message(msg);
         }
-
-        let defending_team = next_team.get_other_team();
 
         let mut red_players = vec![];
         let mut blue_players = vec![];
@@ -120,7 +111,7 @@ impl HQMShootoutBehaviour {
         let red_goalie_pos = Point3::new(width / 2.0, 1.5, length - 5.0);
         let blue_goalie_pos = Point3::new(width / 2.0, 1.5, 5.0);
         let (attacking_players, defending_players, attacking_rot, defending_rot, goalie_pos) =
-            match next_team {
+            match team {
                 HQMTeam::Red => (
                     red_players,
                     blue_players,
@@ -143,7 +134,7 @@ impl HQMShootoutBehaviour {
                 };
                 pos += &attacking_rot * side;
             }
-            server.spawn_skater(self, player_index, next_team, pos, attacking_rot.clone());
+            server.spawn_skater(self, player_index, team, pos, attacking_rot.clone());
         }
         for (index, player_index) in defending_players.into_iter().enumerate() {
             let mut pos = goalie_pos.clone();
@@ -165,12 +156,22 @@ impl HQMShootoutBehaviour {
                 defending_rot.clone(),
             );
         }
+    }
 
-        self.status = HQMShootoutStatus::Game {
-            state: HQMShootoutAttemptState::Attack { progress: 0.0 },
-            round: next_round,
-            team: next_team,
-        }
+    fn start_next_attempt(&mut self, server: &mut HQMServer) {
+        let (next_team, next_round) = match &self.status {
+            HQMShootoutStatus::WaitingForGame => (HQMTeam::Red, 0),
+            HQMShootoutStatus::Game { team, round, .. } => (
+                team.get_other_team(),
+                if *team == HQMTeam::Blue {
+                    *round + 1
+                } else {
+                    *round
+                },
+            ),
+        };
+
+        self.start_attempt(server, next_round, next_team);
     }
 
     fn update_players(&mut self, server: &mut HQMServer) {
@@ -359,8 +360,39 @@ impl HQMShootoutBehaviour {
         }
     }
 
-    fn end_attempt(&mut self, server: &mut HQMServer, goal_scored: bool) {
+    fn update_gameover(&mut self, server: &mut HQMServer) {
         if let HQMShootoutStatus::Game { state, team, round } = &mut self.status {
+            let is_attempt_over = if matches!(state, HQMShootoutAttemptState::Over { .. }) {
+                1
+            } else {
+                0
+            };
+            let red_attempts_taken = *round + is_attempt_over;
+            let blue_attempts_taken = *round
+                + match team {
+                    HQMTeam::Red => 0,
+                    HQMTeam::Blue => is_attempt_over,
+                };
+            let attempts = self.attempts.max(red_attempts_taken);
+            let remaining_red_attempts = attempts - red_attempts_taken;
+            let remaining_blue_attempts = attempts - blue_attempts_taken;
+
+            server.game.game_over = if let Some(difference) =
+                server.game.red_score.checked_sub(server.game.blue_score)
+            {
+                remaining_blue_attempts < difference
+            } else if let Some(difference) =
+                server.game.blue_score.checked_sub(server.game.red_score)
+            {
+                remaining_red_attempts < difference
+            } else {
+                false
+            };
+        }
+    }
+
+    fn end_attempt(&mut self, server: &mut HQMServer, goal_scored: bool) {
+        if let HQMShootoutStatus::Game { state, team, .. } = &mut self.status {
             if goal_scored {
                 match team {
                     HQMTeam::Red => {
@@ -374,40 +406,11 @@ impl HQMShootoutBehaviour {
             } else {
                 server.messages.add_server_chat_message_str("Miss");
             }
-
-            let red_attempts_taken = *round + 1;
-            let blue_attempts_taken = *round
-                + match team {
-                    HQMTeam::Red => 0,
-                    HQMTeam::Blue => 1,
-                };
-            let attempts = self.attempts.max(red_attempts_taken);
-            let remaining_red_attempts = attempts - red_attempts_taken;
-            let remaining_blue_attempts = attempts - blue_attempts_taken;
-
-            let game_over = if let Some(difference) =
-                server.game.red_score.checked_sub(server.game.blue_score)
-            {
-                remaining_blue_attempts < difference
-            } else if let Some(difference) =
-                server.game.blue_score.checked_sub(server.game.red_score)
-            {
-                remaining_red_attempts < difference
-            } else {
-                false
+            *state = HQMShootoutAttemptState::Over {
+                timer: 500,
+                goal_scored,
             };
-            if game_over {
-                server.game.game_over = true;
-                self.status = HQMShootoutStatus::GameOver {
-                    timer: 500,
-                    goal_scored,
-                };
-            } else {
-                *state = HQMShootoutAttemptState::Over {
-                    timer: 500,
-                    goal_scored,
-                };
-            }
+            self.update_gameover(server);
         }
     }
 
@@ -457,6 +460,158 @@ impl HQMShootoutBehaviour {
             } else {
                 server.admin_deny_message(admin_player_index);
                 return;
+            }
+        }
+    }
+
+    fn set_score(
+        &mut self,
+        server: &mut HQMServer,
+        input_team: HQMTeam,
+        input_score: u32,
+        player_index: HQMServerPlayerIndex,
+    ) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                match input_team {
+                    HQMTeam::Red => {
+                        server.game.red_score = input_score;
+
+                        info!(
+                            "{} ({}) changed red score to {}",
+                            player.player_name, player_index, input_score
+                        );
+                        let msg = format!("Red score changed by {}", player.player_name);
+                        server.messages.add_server_chat_message(msg);
+                    }
+                    HQMTeam::Blue => {
+                        server.game.blue_score = input_score;
+
+                        info!(
+                            "{} ({}) changed blue score to {}",
+                            player.player_name, player_index, input_score
+                        );
+                        let msg = format!("Blue score changed by {}", player.player_name);
+                        server.messages.add_server_chat_message(msg);
+                    }
+                }
+                self.update_gameover(server);
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    fn set_round(
+        &mut self,
+        server: &mut HQMServer,
+        input_team: HQMTeam,
+        input_round: u32,
+        player_index: HQMServerPlayerIndex,
+    ) {
+        if input_round == 0 {
+            return;
+        }
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                if let HQMShootoutStatus::Game {
+                    state: _,
+                    round,
+                    team,
+                } = &mut self.status
+                {
+                    *round = input_round - 1;
+                    *team = input_team;
+
+                    info!(
+                        "{} ({}) changed round to {} for {}",
+                        player.player_name, player_index, input_round, input_team
+                    );
+                    let msg = format!(
+                        "Round changed to {} for {} by {}",
+                        input_round, input_team, player.player_name
+                    );
+                    server.messages.add_server_chat_message(msg);
+                }
+                self.update_gameover(server);
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    fn redo_round(
+        &mut self,
+        server: &mut HQMServer,
+        input_team: HQMTeam,
+        input_round: u32,
+        player_index: HQMServerPlayerIndex,
+    ) {
+        if input_round == 0 {
+            return;
+        }
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                if let HQMShootoutStatus::Game {
+                    state: _,
+                    round,
+                    team,
+                } = &mut self.status
+                {
+                    *round = input_round - 1;
+                    *team = input_team;
+                }
+                info!(
+                    "{} ({}) changed round to {} for {}",
+                    player.player_name, player_index, input_round, input_team
+                );
+                let msg = format!(
+                    "Round changed to {} for {} by {}",
+                    input_round, input_team, player.player_name
+                );
+                server.messages.add_server_chat_message(msg);
+                self.update_gameover(server);
+                self.paused = false;
+                if !server.game.game_over {
+                    self.start_attempt(server, input_round - 1, input_team);
+                }
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    fn pause(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                self.paused = true;
+
+                info!("{} ({}) paused game", player.player_name, player_index);
+                let msg = format!("Game paused by {}", player.player_name);
+                server.messages.add_server_chat_message(msg);
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    fn unpause(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                self.paused = false;
+                if let HQMShootoutStatus::Game {
+                    state: HQMShootoutAttemptState::Over { timer, .. },
+                    ..
+                } = &mut self.status
+                {
+                    *timer = (*timer).max(2000);
+                }
+                info!("{} ({}) resumed game", player.player_name, player_index);
+                let msg = format!("Game resumed by {}", player.player_name);
+
+                server.messages.add_server_chat_message(msg);
+            } else {
+                server.admin_deny_message(player_index);
             }
         }
     }
@@ -542,7 +697,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
         }
 
         match &mut self.status {
-            HQMShootoutStatus::Pause => {
+            HQMShootoutStatus::WaitingForGame => {
                 let (red_player_count, blue_player_count) = {
                     let mut red_player_count = 0usize;
                     let mut blue_player_count = 0usize;
@@ -559,7 +714,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                     }
                     (red_player_count, blue_player_count)
                 };
-                if red_player_count > 0 && blue_player_count > 0 {
+                if red_player_count > 0 && blue_player_count > 0 && !self.paused {
                     server.game.time = server.game.time.saturating_sub(1);
                     if server.game.time == 0 {
                         self.init(server);
@@ -569,55 +724,57 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                 }
             }
             HQMShootoutStatus::Game { state, team, .. } => {
-                if let HQMShootoutAttemptState::Over { timer, goal_scored } = state {
-                    *timer = timer.saturating_sub(1);
-                    server.game.goal_message_timer = if *goal_scored { *timer } else { 0 };
-                    if *timer == 0 {
-                        self.start_next_attempt(server);
-                    }
-                } else {
-                    server.game.time = server.game.time.saturating_sub(1);
-                    if server.game.time == 0 {
-                        server.game.time = 1; // A hack to avoid "Intermission" or "Game starting"
-                        self.end_attempt(server, false);
+                if !self.paused {
+                    if let HQMShootoutAttemptState::Over { timer, goal_scored } = state {
+                        *timer = timer.saturating_sub(1);
+                        server.game.goal_message_timer = if *goal_scored { *timer } else { 0 };
+                        if *timer == 0 {
+                            if server.game.game_over {
+                                let new_game = self.create_game();
+                                server.new_game(new_game);
+                            } else {
+                                self.start_next_attempt(server);
+                            }
+                        }
                     } else {
-                        if let Some(puck) = server.game.world.objects.get_puck(HQMObjectIndex(0)) {
-                            let puck_pos = &puck.body.pos;
-                            let center_pos =
-                                &server.game.world.rink.center_faceoff_spot.center_position;
-                            let pos_diff = puck_pos - center_pos;
-                            let normal = match *team {
-                                HQMTeam::Red => -Vector3::z(),
-                                HQMTeam::Blue => Vector3::z(),
-                            };
-                            let progress = pos_diff.dot(&normal);
-                            if let HQMShootoutAttemptState::Attack {
-                                progress: current_progress,
-                            } = state
+                        server.game.time = server.game.time.saturating_sub(1);
+                        if server.game.time == 0 {
+                            server.game.time = 1; // A hack to avoid "Intermission" or "Game starting"
+                            self.end_attempt(server, false);
+                        } else {
+                            if let Some(puck) =
+                                server.game.world.objects.get_puck(HQMObjectIndex(0))
                             {
-                                if progress > *current_progress {
-                                    *current_progress = progress;
-                                } else if progress - *current_progress < -0.5 {
-                                    // Too far back
-                                    self.end_attempt(server, false);
-                                }
-                            } else if let HQMShootoutAttemptState::NoMoreAttack { final_progress } =
-                                *state
-                            {
-                                if progress - final_progress < -5.0 {
-                                    self.end_attempt(server, false);
+                                let puck_pos = &puck.body.pos;
+                                let center_pos =
+                                    &server.game.world.rink.center_faceoff_spot.center_position;
+                                let pos_diff = puck_pos - center_pos;
+                                let normal = match *team {
+                                    HQMTeam::Red => -Vector3::z(),
+                                    HQMTeam::Blue => Vector3::z(),
+                                };
+                                let progress = pos_diff.dot(&normal);
+                                if let HQMShootoutAttemptState::Attack {
+                                    progress: current_progress,
+                                } = state
+                                {
+                                    if progress > *current_progress {
+                                        *current_progress = progress;
+                                    } else if progress - *current_progress < -0.5 {
+                                        // Too far back
+                                        self.end_attempt(server, false);
+                                    }
+                                } else if let HQMShootoutAttemptState::NoMoreAttack {
+                                    final_progress,
+                                } = *state
+                                {
+                                    if progress - final_progress < -5.0 {
+                                        self.end_attempt(server, false);
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            }
-            HQMShootoutStatus::GameOver { timer, goal_scored } => {
-                *timer = timer.saturating_sub(1);
-                server.game.goal_message_timer = if *goal_scored { *timer } else { 0 };
-                if *timer == 0 {
-                    let new_game = self.create_game();
-                    server.new_game(new_game);
                 }
             }
         }
@@ -639,12 +796,64 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                     self.force_player_off_ice(server, player_index, force_player_index);
                 }
             }
+            "set" => {
+                let args = arg.split(" ").collect::<Vec<&str>>();
+                if args.len() >= 2 {
+                    match args[0] {
+                        "redscore" => {
+                            if let Ok(input_score) = args[1].parse::<u32>() {
+                                self.set_score(server, HQMTeam::Red, input_score, player_index);
+                            }
+                        }
+                        "bluescore" => {
+                            if let Ok(input_score) = args[1].parse::<u32>() {
+                                self.set_score(server, HQMTeam::Blue, input_score, player_index);
+                            }
+                        }
+                        "round" => {
+                            if args.len() >= 3 {
+                                let team = match args[1] {
+                                    "r" | "R" => Some(HQMTeam::Red),
+                                    "b" | "B" => Some(HQMTeam::Blue),
+                                    _ => None,
+                                };
+                                let round = args[2].parse::<u32>();
+                                if let (Some(team), Ok(round)) = (team, round) {
+                                    self.set_round(server, team, round, player_index);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "redo" => {
+                let args = arg.split(" ").collect::<Vec<&str>>();
+                if args.len() >= 2 {
+                    let team = match args[0] {
+                        "r" | "R" => Some(HQMTeam::Red),
+                        "b" | "B" => Some(HQMTeam::Blue),
+                        _ => None,
+                    };
+                    let round = args[1].parse::<u32>();
+                    if let (Some(team), Ok(round)) = (team, round) {
+                        self.redo_round(server, team, round, player_index);
+                    }
+                }
+            }
+            "pause" | "pausegame" => {
+                self.pause(server, player_index);
+            }
+            "unpause" | "unpausegame" => {
+                self.unpause(server, player_index);
+            }
             _ => {}
         }
     }
 
     fn create_game(&mut self) -> HQMGame {
-        self.status = HQMShootoutStatus::Pause;
+        self.paused = false;
+        self.status = HQMShootoutStatus::WaitingForGame;
         let mut game = HQMGame::new(1, self.physics_config.clone(), -10.0);
 
         game.time = 1000;
