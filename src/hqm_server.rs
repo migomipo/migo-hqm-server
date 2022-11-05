@@ -1715,7 +1715,7 @@ impl HQMServer {
                         player_index,
                         in_server: false,
                     };
-                    self.messages.add_global_message(update, false, false);
+                    self.messages.add_global_message(update, true, true);
                     *p = None;
                 }
             }
