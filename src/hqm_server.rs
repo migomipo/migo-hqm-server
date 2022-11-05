@@ -1701,13 +1701,12 @@ impl HQMServer {
             });
         }
 
-        let mut messages = smallvec::SmallVec::<[HQMMessage; 32]>::new();
         for (player_index, p) in self.players.players.iter_mut().enumerate() {
             let player_index = HQMServerPlayerIndex(player_index);
             if let Some(player) = p {
                 if player.reset(player_index) {
                     let update = player.get_update_message(player_index);
-                    messages.push(update);
+                    self.messages.add_global_message(update, true, true);
                 } else {
                     let update = HQMMessage::PlayerUpdate {
                         player_name: player.player_name.clone(),
