@@ -1729,6 +1729,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
 
     fn create_game(&mut self) -> HQMGame {
         self.paused = false;
+        self.pause_timer = 0;
         self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
         self.icing_status = HQMIcingStatus::No;
         self.offside_status = HQMOffsideStatus::Neutral;
