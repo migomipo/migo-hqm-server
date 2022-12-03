@@ -1,4 +1,4 @@
-use crate::hqm_behaviour_extra::HQMDualControlSetting;
+use migo_hqm_server::hqm_behaviour_extra::HQMDualControlSetting;
 use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
 use migo_hqm_server::hqm_server::{
     HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex, HQMSpawnPoint,

@@ -5,19 +5,18 @@ extern crate ini;
 use ini::Ini;
 use std::env;
 
-mod hqm_behaviour_extra;
 mod hqm_faceoff_practice;
 mod hqm_match;
 mod hqm_russian;
 mod hqm_shootout;
 mod hqm_warmup;
 
-use crate::hqm_behaviour_extra::{
+use crate::hqm_faceoff_practice::HQMFaceoffPracticeBehaviour;
+use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration};
+use migo_hqm_server::hqm_behaviour_extra::{
     HQMDualControlSetting, HQMIcingConfiguration, HQMOffsideConfiguration,
     HQMOffsideLineConfiguration,
 };
-use crate::hqm_faceoff_practice::HQMFaceoffPracticeBehaviour;
-use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration};
 
 use crate::hqm_russian::HQMRussianBehaviour;
 use crate::hqm_shootout::HQMShootoutBehaviour;

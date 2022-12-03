@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::rc::Rc;
 
-use crate::hqm_behaviour_extra::HQMDualControlSetting;
+use migo_hqm_server::hqm_behaviour_extra::HQMDualControlSetting;
 use tracing::info;
 
 enum HQMShootoutAttemptState {
