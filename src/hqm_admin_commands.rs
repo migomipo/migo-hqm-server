@@ -3,6 +3,7 @@ use crate::hqm_server::{
 };
 
 use tracing::info;
+use systemctl::restart;
 
 impl HQMServer {
     pub fn admin_deny_message(&mut self, player_index: HQMServerPlayerIndex) {
@@ -183,6 +184,19 @@ impl HQMServer {
             };
             self.messages
                 .add_directed_server_chat_message_str(msg, player_index);
+        }
+    }
+    
+    pub(crate) fn restart_server(&mut self, player_index: HQMServerPlayerIndex) {
+        if let Some(player) = self.players.get(player_index) {
+            if player.is_admin {
+                let server_service = self.config.server_service.clone();
+                let msg = format!("{} started server restart", player.player_name);
+                self.messages.add_server_chat_message(msg);
+                restart(&server_service);
+            } else {
+                self.admin_deny_message(player_index);
+            }
         }
     }
 
