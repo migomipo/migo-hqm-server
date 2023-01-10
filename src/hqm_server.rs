@@ -668,6 +668,9 @@ impl HQMServer {
             "admin" => {
                 self.admin_login(player_index, arg);
             }
+            "serverrestart" => {
+                self.restart_server(player_index);
+            }
             "list" => {
                 if arg.is_empty() {
                     self.list_players(player_index, 0);
