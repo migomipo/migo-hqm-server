@@ -120,6 +120,8 @@ async fn main() -> std::io::Result<()> {
         ) -> U {
             section.and_then(|x| x.get(property)).map_or(default, f)
         }
+        
+        let server_service = server_section.get("service").unwrap().parse::<String>().unwrap();
 
         // Game
         let game_section = conf.section(Some("Game"));
@@ -138,6 +140,7 @@ async fn main() -> std::io::Result<()> {
             player_max: server_player_max,
             replays_enabled,
             server_name,
+            server_service,
         };
 
         // Physics

@@ -25,7 +25,8 @@ team_max               | Number of players allowed in each team.
 player_max             | Number of players allowed in the server.
 password               | Administrator password.
 welcome                | Welcome message that is sent to all players when they're joining. \n will create a new line. The client can only show 7 chat lines at a time, and it is not recommended to have more than three lines.
-replays                | (optional) If true, all matches that start will be saved as replays. Games that ended before the warmup ended will not be saved.               
+replays                | (optional) If true, all matches that start will be saved as replays. Games that ended before the warmup ended will not be saved.
+service                | Service name for Linux based systems. Command /serverrestart for restarting the service.        
 
 ### Game
 
@@ -116,5 +117,6 @@ Commands                 | Explanation
 /set goalreplay *on/off* | Enables/disabled goal replays.
 /kickall *S*             | Kicks all players with a player name equal to *S* (case-insensitive). % can be used as wildcards at the start and end of *S* to match players with similar names. For example, migo%, %mipo and %gomi% all match MigoMipo.
 /banall *S*              | Same as /kickall, but also IP-bans.
+/serverrestart           | Restarting the server service in Linux based OS (see "service" at "Server" section)
 
 
