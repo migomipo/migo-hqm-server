@@ -189,14 +189,18 @@ impl HQMServer {
     
     pub(crate) fn restart_server(&mut self, player_index: HQMServerPlayerIndex) {
         if let Some(player) = self.players.get(player_index) {
-            if player.is_admin {
-                let server_service = self.config.server_service.clone();
-                let msg = format!("{} started server restart", player.player_name);
-                self.messages.add_server_chat_message(msg);
-                restart(&server_service);
-            } else {
-                self.admin_deny_message(player_index);
+            if let Some(server_service) = self.config.server_service.as_deref() {
+                if player.is_admin {
+                    let msg = format!("{} started server restart", player.player_name);
+                    self.messages.add_server_chat_message(msg);
+                    if let Err(_) = restart(server_service) {
+                        self.messages.add_directed_server_chat_message_str("Restart failed", player_index);
+                    }
+                } else {
+                    self.admin_deny_message(player_index);
+                }
             }
+
         }
     }
 

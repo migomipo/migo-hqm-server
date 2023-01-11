@@ -2460,7 +2460,7 @@ pub struct HQMServerConfiguration {
 
     pub replays_enabled: bool,
     pub server_name: String,
-    pub server_service: String,
+    pub server_service: Option<String>,
 }
 
 pub trait HQMServerBehaviour {

@@ -121,7 +121,7 @@ async fn main() -> std::io::Result<()> {
             section.and_then(|x| x.get(property)).map_or(default, f)
         }
         
-        let server_service = server_section.get("service").unwrap().parse::<String>().unwrap();
+        let server_service = server_section.get("service").map(|x| x.to_owned());
 
         // Game
         let game_section = conf.section(Some("Game"));
