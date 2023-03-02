@@ -14,7 +14,6 @@ enum HQMCollision {
 
 #[derive(Debug, Copy, Clone)]
 pub enum HQMSimulationEvent {
-
     PuckTouch {
         player: HQMObjectIndex,
         puck: HQMObjectIndex,

@@ -1,7 +1,11 @@
 use nalgebra::{Point3, Rotation3, Vector3};
 use tracing::info;
 
-use migo_hqm_server::hqm_behaviour_extra::{add_touch, find_empty_dual_control, get_faceoff_positions, has_players_in_offensive_zone, HQMDualControlSetting, HQMIcingConfiguration, HQMIcingStatus, HQMOffsideConfiguration, HQMOffsideLineConfiguration, HQMOffsideStatus, HQMPass, HQMPassPosition, HQMPuckTouch};
+use migo_hqm_server::hqm_behaviour_extra::{
+    add_touch, find_empty_dual_control, get_faceoff_positions, has_players_in_offensive_zone,
+    HQMDualControlSetting, HQMIcingConfiguration, HQMIcingStatus, HQMOffsideConfiguration,
+    HQMOffsideLineConfiguration, HQMOffsideStatus, HQMPass, HQMPassPosition, HQMPuckTouch,
+};
 use migo_hqm_server::hqm_game::{
     HQMGame, HQMObjectIndex, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRinkSide,
     HQMRulesState, HQMTeam,
@@ -421,7 +425,7 @@ impl HQMMatchBehaviour {
         if let Some(HQMPass {
             team: pass_team,
             side,
-                        from: transition,
+            from: transition,
             player,
         }) = self.pass
         {
@@ -487,7 +491,6 @@ impl HQMMatchBehaviour {
         }
     }
 
-
     fn update_pass(&mut self, team: HQMTeam, p: HQMPassPosition) {
         if let Some(pass) = &mut self.pass {
             if pass.team == team && pass.from.is_none() {
@@ -510,7 +513,7 @@ impl HQMMatchBehaviour {
                 }
                 HQMSimulationEvent::PuckPassedDefensiveLine { team, puck: _ } => {
                     self.update_pass(team, HQMPassPosition::PassedOwnBlue);
-                    self.handle_puck_passed_defensive_line(server , team);
+                    self.handle_puck_passed_defensive_line(server, team);
                 }
                 HQMSimulationEvent::PuckReachedRedLine { team, puck: _ } => {
                     self.update_pass(team, HQMPassPosition::ReachedCenter);

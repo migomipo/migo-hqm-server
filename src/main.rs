@@ -120,7 +120,7 @@ async fn main() -> std::io::Result<()> {
         ) -> U {
             section.and_then(|x| x.get(property)).map_or(default, f)
         }
-        
+
         let server_service = server_section.get("service").map(|x| x.to_owned());
 
         // Game
