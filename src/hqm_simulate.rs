@@ -14,19 +14,16 @@ enum HQMCollision {
 
 #[derive(Debug, Copy, Clone)]
 pub enum HQMSimulationEvent {
-    PuckEnteredNet {
-        team: HQMTeam,
-        puck: HQMObjectIndex,
-    },
-    PuckPassedGoalLine {
-        team: HQMTeam,
-        puck: HQMObjectIndex,
-    },
+
     PuckTouch {
         player: HQMObjectIndex,
         puck: HQMObjectIndex,
     },
-    PuckEnteredOffensiveZone {
+    PuckReachedDefensiveLine {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
+    PuckPassedDefensiveLine {
         team: HQMTeam,
         puck: HQMObjectIndex,
     },
@@ -38,7 +35,20 @@ pub enum HQMSimulationEvent {
         team: HQMTeam,
         puck: HQMObjectIndex,
     },
-    PuckLeftOffensiveZone {
+    PuckReachedOffensiveZone {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
+    PuckEnteredOffensiveZone {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
+
+    PuckEnteredNet {
+        team: HQMTeam,
+        puck: HQMObjectIndex,
+    },
+    PuckPassedGoalLine {
         team: HQMTeam,
         puck: HQMObjectIndex,
     },
@@ -617,7 +627,28 @@ fn puck_detection(
     let puck_index = HQMObjectIndex(puck_index);
     let offensive_line = &lines_and_net.offensive_line;
     let mid_line = &lines_and_net.mid_line;
+    let defensive_line = &lines_and_net.defensive_line;
     let net = &lines_and_net.net;
+
+    if defensive_line.sphere_reached_line(&puck.body.pos, puck.radius)
+        && !defensive_line.sphere_reached_line(&old_puck_pos, puck.radius)
+    {
+        let event = HQMSimulationEvent::PuckReachedDefensiveLine {
+            team,
+            puck: puck_index,
+        };
+        events.push(event);
+    }
+    if defensive_line.sphere_past_leading_edge(&puck.body.pos, puck.radius)
+        && !defensive_line.sphere_past_leading_edge(&old_puck_pos, puck.radius)
+    {
+        let event = HQMSimulationEvent::PuckPassedDefensiveLine {
+            team,
+            puck: puck_index,
+        };
+        events.push(event);
+    }
+
     if mid_line.sphere_reached_line(&puck.body.pos, puck.radius)
         && !mid_line.sphere_reached_line(&old_puck_pos, puck.radius)
     {
@@ -636,15 +667,16 @@ fn puck_detection(
         };
         events.push(event);
     }
-    if !offensive_line.sphere_reached_line(&puck.body.pos, puck.radius)
-        && offensive_line.sphere_reached_line(old_puck_pos, puck.radius)
+    if offensive_line.sphere_reached_line(&puck.body.pos, puck.radius)
+        && !offensive_line.sphere_reached_line(old_puck_pos, puck.radius)
     {
-        let event = HQMSimulationEvent::PuckLeftOffensiveZone {
+        let event = HQMSimulationEvent::PuckReachedOffensiveZone {
             team,
             puck: puck_index,
         };
         events.push(event);
-    } else if offensive_line.sphere_past_leading_edge(&puck.body.pos, puck.radius)
+    }
+    if offensive_line.sphere_past_leading_edge(&puck.body.pos, puck.radius)
         && !offensive_line.sphere_past_leading_edge(old_puck_pos, puck.radius)
     {
         let event = HQMSimulationEvent::PuckEnteredOffensiveZone {

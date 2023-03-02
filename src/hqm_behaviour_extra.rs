@@ -1,4 +1,4 @@
-use crate::hqm_game::{HQMGameWorld, HQMObjectIndex, HQMPuck, HQMTeam};
+use crate::hqm_game::{HQMGameWorld, HQMObjectIndex, HQMPuck, HQMRinkSide, HQMTeam};
 use crate::hqm_server::{
     HQMServer, HQMServerPlayerData, HQMServerPlayerIndex, HQMServerPlayerList,
 };
@@ -33,20 +33,43 @@ pub enum HQMOffsideLineConfiguration {
     Center,
 }
 
-#[derive(PartialEq, Debug, Clone)]
-pub enum HQMIcingStatus {
-    No,                               // No icing
-    NotTouched(HQMTeam, Point3<f32>), // Puck has entered offensive half, but not reached the goal line
-    Warning(HQMTeam, Point3<f32>),    // Puck has reached the goal line, delayed icing
-    Icing(HQMTeam),                   // Icing has been called
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HQMPassPosition {
+    None,
+    ReachedOwnBlue,
+    PassedOwnBlue,
+    ReachedCenter,
+    PassedCenter,
+    ReachedOffensive,
+    PassedOffensive,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HQMPass {
+    pub team: HQMTeam,
+    pub side: HQMRinkSide,
+    pub from: Option<HQMPassPosition>,
+    pub player: HQMServerPlayerIndex,
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum HQMIcingStatus {
+    No,                            // No icing
+    Warning(HQMTeam, HQMRinkSide), // Puck has reached the goal line, delayed icing
+    Icing(HQMTeam),                // Icing has been called
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum HQMOffsideStatus {
-    Neutral,                                             // No offside
-    InOffensiveZone(HQMTeam),                            // No offside, puck in offensive zone
-    Warning(HQMTeam, Point3<f32>, HQMServerPlayerIndex), // Warning, puck entered offensive zone in an offside situation but not touched yet
-    Offside(HQMTeam),                                    // Offside has been called
+    Neutral,                  // No offside
+    InOffensiveZone(HQMTeam), // No offside, puck in offensive zone
+    Warning(
+        HQMTeam,
+        HQMRinkSide,
+        Option<HQMPassPosition>,
+        HQMServerPlayerIndex,
+    ), // Warning, puck entered offensive zone in an offside situation but not touched yet
+    Offside(HQMTeam),         // Offside has been called
 }
 
 #[derive(Debug, Clone)]

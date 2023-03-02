@@ -546,7 +546,7 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                             let other_team = team.get_other_team();
                             self.fix_status(server, other_team);
                         }
-                        HQMSimulationEvent::PuckLeftOffensiveZone { .. } => {
+                        HQMSimulationEvent::PuckPassedDefensiveLine { .. } => {
                             self.check_ending(&mut server.game);
                         }
                         HQMSimulationEvent::PuckPassedGoalLine { .. } => {
