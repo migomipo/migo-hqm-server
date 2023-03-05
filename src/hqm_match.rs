@@ -491,34 +491,15 @@ impl HQMMatchBehaviour {
             player: pass_player,
         }) = self.pass
         {
-            let is_regular_twoline_pass_active = self.config.twoline_pass
-                == HQMTwoLinePassConfiguration::Double
-                || self.config.twoline_pass == HQMTwoLinePassConfiguration::On;
-            if pass_team == team
-                && from <= HQMPassPosition::ReachedOwnBlue
-                && is_regular_twoline_pass_active
-            {
-                let line = match team {
-                    HQMTeam::Red => &server.game.world.rink.red_lines_and_net.mid_line,
-                    HQMTeam::Blue => &server.game.world.rink.blue_lines_and_net.mid_line,
-                };
-                let mut players_past_line = vec![];
-                for (player_index, player) in server.players.iter() {
-                    if player_index == pass_player {
-                        continue;
-                    }
-                    if let Some(player) = player {
-                        if is_past_line(server, player, team, line) {
-                            players_past_line.push(player_index);
-                        }
-                    }
-                }
-                if !players_past_line.is_empty() {
-                    self.twoline_pass_status =
-                        HQMTwoLinePassStatus::Warning(team, side, from, players_past_line);
-                    server
-                        .messages
-                        .add_server_chat_message_str("Two-line pass warning");
+            if self.twoline_pass_status == HQMTwoLinePassStatus::No {
+                let is_regular_twoline_pass_active = self.config.twoline_pass
+                    == HQMTwoLinePassConfiguration::Double
+                    || self.config.twoline_pass == HQMTwoLinePassConfiguration::On;
+                if pass_team == team
+                    && from <= HQMPassPosition::ReachedOwnBlue
+                    && is_regular_twoline_pass_active
+                {
+                    self.check_twoline_pass(server, team, side, from, pass_player, false);
                 }
             }
         }
@@ -537,38 +518,57 @@ impl HQMMatchBehaviour {
             player: pass_player,
         }) = self.pass
         {
-            let is_forward_twoline_pass_active = self.config.twoline_pass
-                == HQMTwoLinePassConfiguration::Double
-                || self.config.twoline_pass == HQMTwoLinePassConfiguration::Forward;
-            let is_threeline_pass_active =
-                self.config.twoline_pass == HQMTwoLinePassConfiguration::ThreeLine;
-            if pass_team == team
-                && ((from <= HQMPassPosition::ReachedCenter && is_forward_twoline_pass_active)
-                    || from <= HQMPassPosition::ReachedOwnBlue && is_threeline_pass_active)
-            {
-                let line = match team {
-                    HQMTeam::Red => &server.game.world.rink.red_lines_and_net.offensive_line,
-                    HQMTeam::Blue => &server.game.world.rink.blue_lines_and_net.offensive_line,
-                };
-                let mut players_past_line = vec![];
-                for (player_index, player) in server.players.iter() {
-                    if player_index == pass_player {
-                        continue;
-                    }
-                    if let Some(player) = player {
-                        if is_past_line(server, player, team, line) {
-                            players_past_line.push(player_index);
-                        }
-                    }
-                }
-                if !players_past_line.is_empty() {
-                    self.twoline_pass_status =
-                        HQMTwoLinePassStatus::Warning(team, side, from, players_past_line);
-                    server
-                        .messages
-                        .add_server_chat_message_str("Two-line pass warning");
+            if self.twoline_pass_status == HQMTwoLinePassStatus::No {
+                let is_forward_twoline_pass_active = self.config.twoline_pass
+                    == HQMTwoLinePassConfiguration::Double
+                    || self.config.twoline_pass == HQMTwoLinePassConfiguration::Forward;
+                let is_threeline_pass_active =
+                    self.config.twoline_pass == HQMTwoLinePassConfiguration::ThreeLine;
+                if pass_team == team
+                    && ((from <= HQMPassPosition::ReachedCenter && is_forward_twoline_pass_active)
+                        || from <= HQMPassPosition::ReachedOwnBlue && is_threeline_pass_active)
+                {
+                    self.check_twoline_pass(server, team, side, from, pass_player,true);
                 }
             }
+        }
+    }
+
+    fn check_twoline_pass(
+        &mut self,
+        server: &mut HQMServer,
+        team: HQMTeam,
+        side: HQMRinkSide,
+        from: HQMPassPosition,
+        pass_player: HQMServerPlayerIndex,
+        is_offensive_line: bool,
+    ) {
+        let team_line = match team {
+            HQMTeam::Red => &server.game.world.rink.red_lines_and_net,
+            HQMTeam::Blue => &server.game.world.rink.blue_lines_and_net,
+        };
+        let line = if is_offensive_line {
+            &team_line.offensive_line
+        } else {
+            &team_line.mid_line
+        };
+        let mut players_past_line = vec![];
+        for (player_index, player) in server.players.iter() {
+            if player_index == pass_player {
+                continue;
+            }
+            if let Some(player) = player {
+                if is_past_line(server, player, team, line) {
+                    players_past_line.push(player_index);
+                }
+            }
+        }
+        if !players_past_line.is_empty() {
+            self.twoline_pass_status =
+                HQMTwoLinePassStatus::Warning(team, side, from, players_past_line);
+            server
+                .messages
+                .add_server_chat_message_str("Two-line pass warning");
         }
     }
 
