@@ -491,14 +491,11 @@ impl HQMMatchBehaviour {
             player: pass_player,
         }) = self.pass
         {
-            if self.twoline_pass_status == HQMTwoLinePassStatus::No {
+            if self.twoline_pass_status == HQMTwoLinePassStatus::No && pass_team == team {
                 let is_regular_twoline_pass_active = self.config.twoline_pass
                     == HQMTwoLinePassConfiguration::Double
                     || self.config.twoline_pass == HQMTwoLinePassConfiguration::On;
-                if pass_team == team
-                    && from <= HQMPassPosition::ReachedOwnBlue
-                    && is_regular_twoline_pass_active
-                {
+                if from <= HQMPassPosition::ReachedOwnBlue && is_regular_twoline_pass_active {
                     self.check_twoline_pass(server, team, side, from, pass_player, false);
                 }
             }
@@ -518,17 +515,16 @@ impl HQMMatchBehaviour {
             player: pass_player,
         }) = self.pass
         {
-            if self.twoline_pass_status == HQMTwoLinePassStatus::No {
+            if self.twoline_pass_status == HQMTwoLinePassStatus::No && pass_team == team {
                 let is_forward_twoline_pass_active = self.config.twoline_pass
                     == HQMTwoLinePassConfiguration::Double
                     || self.config.twoline_pass == HQMTwoLinePassConfiguration::Forward;
                 let is_threeline_pass_active =
                     self.config.twoline_pass == HQMTwoLinePassConfiguration::ThreeLine;
-                if pass_team == team
-                    && ((from <= HQMPassPosition::ReachedCenter && is_forward_twoline_pass_active)
-                        || from <= HQMPassPosition::ReachedOwnBlue && is_threeline_pass_active)
+                if (from <= HQMPassPosition::ReachedCenter && is_forward_twoline_pass_active)
+                    || from <= HQMPassPosition::ReachedOwnBlue && is_threeline_pass_active
                 {
-                    self.check_twoline_pass(server, team, side, from, pass_player,true);
+                    self.check_twoline_pass(server, team, side, from, pass_player, true);
                 }
             }
         }
@@ -595,6 +591,17 @@ impl HQMMatchBehaviour {
         }
     }
 
+    fn check_wave_off_twoline(&mut self, team: HQMTeam) {
+        if let HQMTwoLinePassStatus::Warning(warning_team, _, _, _) = self.twoline_pass_status {
+            if team != warning_team {
+                self.twoline_pass_status = HQMTwoLinePassStatus::No;
+                server
+                    .messages
+                    .add_server_chat_message_str("Two-line pass waved off");
+            }
+        }
+    }
+
     fn handle_events(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
         for event in events {
             match *event {
@@ -605,6 +612,7 @@ impl HQMMatchBehaviour {
                     self.handle_puck_touch(server, player, puck);
                 }
                 HQMSimulationEvent::PuckReachedDefensiveLine { team, puck: _ } => {
+                    self.check_wave_off_twoline(team);
                     self.update_pass(team, HQMPassPosition::ReachedOwnBlue);
                 }
                 HQMSimulationEvent::PuckPassedDefensiveLine { team, puck: _ } => {
@@ -612,9 +620,9 @@ impl HQMMatchBehaviour {
                     self.handle_puck_passed_defensive_line(server, team);
                 }
                 HQMSimulationEvent::PuckReachedRedLine { team, puck: _ } => {
+                    self.check_wave_off_twoline(team);
                     self.update_pass(team, HQMPassPosition::ReachedCenter);
                 }
-
                 HQMSimulationEvent::PuckFullyEnteredOffensiveHalf { team, puck: _ } => {
                     self.update_pass(team, HQMPassPosition::PassedCenter);
                     self.handle_puck_entered_offensive_half(server, team);
