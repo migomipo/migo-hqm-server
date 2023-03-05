@@ -37,6 +37,7 @@ limit_jump_speed       | If true, nerfs jump speed, effectively nerfing double-j
 offside                | Offside setting. Allowed values are "off" (default, no offside), "on", (offside rule enabled) and "immediate", which will call offside immediately instead of warning when the puck has entered the offensive zone in an offside situation.
 offsideline            | Offside line setting. Allowed values are "blue" (default, offensive blue line), and "center" (center line)
 icing                  | Icing setting. Allowed values are "off" (default, no icing), "on" (touch icing rule enabled) and "notouch" (no-touch icing rule enabled)
+twolinepass            | Two-line pass setting. Allowed values are "off" (default, no two-line pass rule), "on" (passes through own blue and center red line disallowed), "forward" (passes through center red line and offensive blue line disallowed), "both" (both "on" and "forward" at the same time) and "three" (passes through all three lines disallowed)
 time_period            | (Match mode only) Period length in seconds.
 time_warmup            | (Match mode only) Warmup length in seconds.
 time_intermission      | (Match mode only) Intermission length in seconds.
@@ -110,6 +111,7 @@ Commands                 | Explanation
 /set icing *S*           | Sets icing rule. Allowed values are "off", "on" (touch icing" and "notouch" (no-touch icing)
 /set offside *S*         | Sets offside rule. Allowed values are "off", "on" (delayed offside) and "imm" or "immediate" (immediate offside, no offside warnings).
 /set offsideline *S*     | Sets offside line settings. Allowed values are "blue" (default, offensive blue line), and "center" (center line).
+/set twolinepass  *S*    | Two-line pass setting. Allowed values are "off" (default, no two-line pass rule), "on" (passes through own blue and center red line disallowed), "forward" (passes through center red line and offensive blue line disallowed), "both" (both "on" and "forward" at the same time) and "three" (passes through all three lines disallowed)
 /set teamsize *N*        | Sets team size.
 /set replay *on/off*     | Enables/disables server-side replays.
 /set mercy *N/off*       | Sets mercy rule setting. If 0 or off, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least N goals.
