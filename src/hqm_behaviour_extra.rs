@@ -1,6 +1,6 @@
-use crate::hqm_game::{HQMGameWorld, HQMObjectIndex, HQMPuck, HQMRinkSide, HQMTeam};
+use crate::hqm_game::{HQMGameWorld, HQMObjectIndex, HQMPuck, HQMRinkLine, HQMRinkSide, HQMTeam};
 use crate::hqm_server::{
-    HQMServer, HQMServerPlayerData, HQMServerPlayerIndex, HQMServerPlayerList,
+    HQMServer, HQMServerPlayer, HQMServerPlayerData, HQMServerPlayerIndex, HQMServerPlayerList,
 };
 use nalgebra::{Point3, Vector3};
 use std::collections::hash_map::Entry;
@@ -25,6 +25,15 @@ pub enum HQMOffsideConfiguration {
     Off,
     Delayed,
     Immediate,
+}
+
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum HQMTwoLinePassConfiguration {
+    Off,
+    On,
+    Forward,
+    Double,
+    ThreeLine,
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
@@ -70,6 +79,18 @@ pub enum HQMOffsideStatus {
         HQMServerPlayerIndex,
     ), // Warning, puck entered offensive zone in an offside situation but not touched yet
     Offside(HQMTeam),         // Offside has been called
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum HQMTwoLinePassStatus {
+    No, // No offside
+    Warning(
+        HQMTeam,
+        HQMRinkSide,
+        HQMPassPosition,
+        Vec<HQMServerPlayerIndex>,
+    ), // Warning, puck entered offensive zone in an offside situation but not touched yet
+    Offside(HQMTeam), // Offside has been called
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +176,29 @@ pub fn get_faceoff_positions(
     res
 }
 
+pub fn is_past_line(
+    server: &HQMServer,
+    player: &HQMServerPlayer,
+    team: HQMTeam,
+    line: &HQMRinkLine,
+) -> bool {
+    if let Some((object_index, skater_team)) = player.object {
+        if skater_team == team {
+            if let Some(skater) = server.game.world.objects.get_skater(object_index) {
+                let feet_pos =
+                    &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
+                let dot = (&feet_pos - &line.point).dot(&line.normal);
+                let leading_edge = -(line.width / 2.0);
+                if dot < leading_edge {
+                    // Player is past line
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 pub fn has_players_in_offensive_zone(
     server: &HQMServer,
     team: HQMTeam,
@@ -166,20 +210,12 @@ pub fn has_players_in_offensive_zone(
     };
 
     for (player_index, player) in server.players.iter() {
+        if Some(player_index) == ignore_player {
+            continue;
+        }
         if let Some(player) = player {
-            if let Some((object_index, skater_team)) = player.object {
-                if skater_team == team && ignore_player != Some(player_index) {
-                    if let Some(skater) = server.game.world.objects.get_skater(object_index) {
-                        let feet_pos = &skater.body.pos
-                            - (&skater.body.rot * Vector3::y().scale(skater.height));
-                        let dot = (&feet_pos - &line.point).dot(&line.normal);
-                        let leading_edge = -(line.width / 2.0);
-                        if dot < leading_edge {
-                            // Player is offside
-                            return true;
-                        }
-                    }
-                }
+            if is_past_line(server, player, team, line) {
+                return true;
             }
         }
     }

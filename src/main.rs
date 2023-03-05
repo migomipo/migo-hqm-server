@@ -15,7 +15,7 @@ use crate::hqm_faceoff_practice::HQMFaceoffPracticeBehaviour;
 use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration};
 use migo_hqm_server::hqm_behaviour_extra::{
     HQMDualControlSetting, HQMIcingConfiguration, HQMOffsideConfiguration,
-    HQMOffsideLineConfiguration,
+    HQMOffsideLineConfiguration, HQMTwoLinePassConfiguration,
 };
 
 use crate::hqm_russian::HQMRussianBehaviour;
@@ -276,6 +276,19 @@ async fn main() -> std::io::Result<()> {
                     },
                 );
 
+                let twoline_pass = get_optional(
+                    game_section,
+                    "twolinepass",
+                    HQMTwoLinePassConfiguration::Off,
+                    |x| match x {
+                        "on" => HQMTwoLinePassConfiguration::On,
+                        "forward" => HQMTwoLinePassConfiguration::Forward,
+                        "double" | "both" => HQMTwoLinePassConfiguration::Double,
+                        "blue" | "three" | "threeline" => HQMTwoLinePassConfiguration::ThreeLine,
+                        _ => HQMTwoLinePassConfiguration::Off,
+                    },
+                );
+
                 let spawn_point =
                     get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
                         "bench" => HQMSpawnPoint::Bench,
@@ -300,6 +313,7 @@ async fn main() -> std::io::Result<()> {
                     icing,
                     offside,
                     offside_line,
+                    twoline_pass,
                     warmup_pucks,
                     cheats_enabled,
                     use_mph,

@@ -3,8 +3,9 @@ use tracing::info;
 
 use migo_hqm_server::hqm_behaviour_extra::{
     add_touch, find_empty_dual_control, get_faceoff_positions, has_players_in_offensive_zone,
-    HQMDualControlSetting, HQMIcingConfiguration, HQMIcingStatus, HQMOffsideConfiguration,
-    HQMOffsideLineConfiguration, HQMOffsideStatus, HQMPass, HQMPassPosition, HQMPuckTouch,
+    is_past_line, HQMDualControlSetting, HQMIcingConfiguration, HQMIcingStatus,
+    HQMOffsideConfiguration, HQMOffsideLineConfiguration, HQMOffsideStatus, HQMPass,
+    HQMPassPosition, HQMPuckTouch, HQMTwoLinePassConfiguration, HQMTwoLinePassStatus,
 };
 use migo_hqm_server::hqm_game::{
     HQMGame, HQMObjectIndex, HQMPhysicsConfiguration, HQMRinkFaceoffSpot, HQMRinkSide,
@@ -29,6 +30,7 @@ pub struct HQMMatchConfiguration {
     pub offside: HQMOffsideConfiguration,
     pub icing: HQMIcingConfiguration,
     pub offside_line: HQMOffsideLineConfiguration,
+    pub twoline_pass: HQMTwoLinePassConfiguration,
     pub warmup_pucks: usize,
     pub physics_config: HQMPhysicsConfiguration,
     pub blue_line_location: f32,
@@ -48,6 +50,7 @@ pub struct HQMMatchBehaviour {
     next_faceoff_spot: HQMRinkFaceoffSpot,
     icing_status: HQMIcingStatus,
     offside_status: HQMOffsideStatus,
+    twoline_pass_status: HQMTwoLinePassStatus,
     pass: Option<HQMPass>,
     preferred_positions: HashMap<HQMServerPlayerIndex, String>,
     team_switch_timer: HashMap<HQMServerPlayerIndex, u32>,
@@ -69,6 +72,7 @@ impl HQMMatchBehaviour {
             next_faceoff_spot: HQMRinkFaceoffSpot::Center,
             icing_status: HQMIcingStatus::No,
             offside_status: HQMOffsideStatus::Neutral,
+            twoline_pass_status: HQMTwoLinePassStatus::No,
             pass: None,
             preferred_positions: HashMap::new(),
             team_switch_timer: Default::default(),
@@ -134,6 +138,7 @@ impl HQMMatchBehaviour {
         } else {
             HQMOffsideStatus::Neutral
         };
+        self.twoline_pass_status = HQMTwoLinePassStatus::No;
         self.pass = None;
 
         self.faceoff_game_step = server.game.game_step;
@@ -357,6 +362,19 @@ impl HQMMatchBehaviour {
                         return;
                     }
                 }
+                if let HQMTwoLinePassStatus::Warning(team, side, position, ref i) =
+                    self.twoline_pass_status
+                {
+                    if team == touching_team && i.contains(&player_index) {
+                        self.call_twoline_pass(server, touching_team, side, position);
+                        return;
+                    } else {
+                        self.twoline_pass_status = HQMTwoLinePassStatus::No;
+                        server
+                            .messages
+                            .add_server_chat_message_str("Two-line pass waved off");
+                    }
+                }
                 if let HQMIcingStatus::Warning(team, side) = self.icing_status {
                     if touching_team != team {
                         if self.started_as_goalie.contains(&player_index) {
@@ -457,14 +475,52 @@ impl HQMMatchBehaviour {
         if !matches!(&self.offside_status, HQMOffsideStatus::Offside(_))
             && self.config.offside_line == HQMOffsideLineConfiguration::Center
         {
-            if let HQMOffsideStatus::Warning(warning_team, _, _, _) = self.offside_status {
-                if warning_team != team {
+            self.puck_into_offside_zone(server, team);
+        }
+        if let HQMOffsideStatus::Warning(warning_team, _, _, _) = self.offside_status {
+            if warning_team != team {
+                server
+                    .messages
+                    .add_server_chat_message_str("Offside waved off");
+            }
+        }
+        if let Some(HQMPass {
+            team: pass_team,
+            side,
+            from: Some(from),
+            player: pass_player,
+        }) = self.pass
+        {
+            let is_regular_twoline_pass_active = self.config.twoline_pass
+                == HQMTwoLinePassConfiguration::Double
+                || self.config.twoline_pass == HQMTwoLinePassConfiguration::On;
+            if pass_team == team
+                && from <= HQMPassPosition::ReachedOwnBlue
+                && is_regular_twoline_pass_active
+            {
+                let line = match team {
+                    HQMTeam::Red => &server.game.world.rink.red_lines_and_net.mid_line,
+                    HQMTeam::Blue => &server.game.world.rink.blue_lines_and_net.mid_line,
+                };
+                let mut players_past_line = vec![];
+                for (player_index, player) in server.players.iter() {
+                    if player_index == pass_player {
+                        continue;
+                    }
+                    if let Some(player) = player {
+                        if is_past_line(server, player, team, line) {
+                            players_past_line.push(player_index);
+                        }
+                    }
+                }
+                if !players_past_line.is_empty() {
+                    self.twoline_pass_status =
+                        HQMTwoLinePassStatus::Warning(team, side, from, players_past_line);
                     server
                         .messages
-                        .add_server_chat_message_str("Offside waved off");
+                        .add_server_chat_message_str("Two-line pass warning");
                 }
             }
-            self.puck_into_offside_zone(server, team);
         }
     }
 
@@ -473,6 +529,46 @@ impl HQMMatchBehaviour {
             && self.config.offside_line == HQMOffsideLineConfiguration::OffensiveBlue
         {
             self.puck_into_offside_zone(server, team);
+        }
+        if let Some(HQMPass {
+            team: pass_team,
+            side,
+            from: Some(from),
+            player: pass_player,
+        }) = self.pass
+        {
+            let is_forward_twoline_pass_active = self.config.twoline_pass
+                == HQMTwoLinePassConfiguration::Double
+                || self.config.twoline_pass == HQMTwoLinePassConfiguration::Forward;
+            let is_threeline_pass_active =
+                self.config.twoline_pass == HQMTwoLinePassConfiguration::ThreeLine;
+            if pass_team == team
+                && ((from <= HQMPassPosition::ReachedCenter && is_forward_twoline_pass_active)
+                    || from <= HQMPassPosition::ReachedOwnBlue && is_threeline_pass_active)
+            {
+                let line = match team {
+                    HQMTeam::Red => &server.game.world.rink.red_lines_and_net.offensive_line,
+                    HQMTeam::Blue => &server.game.world.rink.blue_lines_and_net.offensive_line,
+                };
+                let mut players_past_line = vec![];
+                for (player_index, player) in server.players.iter() {
+                    if player_index == pass_player {
+                        continue;
+                    }
+                    if let Some(player) = player {
+                        if is_past_line(server, player, team, line) {
+                            players_past_line.push(player_index);
+                        }
+                    }
+                }
+                if !players_past_line.is_empty() {
+                    self.twoline_pass_status =
+                        HQMTwoLinePassStatus::Warning(team, side, from, players_past_line);
+                    server
+                        .messages
+                        .add_server_chat_message_str("Two-line pass warning");
+                }
+            }
         }
     }
 
@@ -525,9 +621,9 @@ impl HQMMatchBehaviour {
                 }
                 HQMSimulationEvent::PuckReachedOffensiveZone { team, puck: _ } => {
                     self.update_pass(team, HQMPassPosition::ReachedOffensive);
-                    self.handle_puck_entered_offensive_half(server, team);
                 }
                 HQMSimulationEvent::PuckEnteredOffensiveZone { team, puck: _ } => {
+                    self.update_pass(team, HQMPassPosition::PassedOffensive);
                     self.handle_puck_entered_offensive_zone(server, team);
                 }
                 HQMSimulationEvent::PuckPassedGoalLine { team, puck: _ } => {
@@ -571,6 +667,29 @@ impl HQMMatchBehaviour {
         self.pause_timer = time_break;
         self.offside_status = HQMOffsideStatus::Offside(team);
         server.messages.add_server_chat_message_str("Offside");
+    }
+
+    fn call_twoline_pass(
+        &mut self,
+        server: &mut HQMServer,
+        team: HQMTeam,
+        side: HQMRinkSide,
+        position: HQMPassPosition,
+    ) {
+        let time_break = self.config.time_break * 100;
+
+        let faceoff_spot = if position <= HQMPassPosition::ReachedOwnBlue {
+            HQMRinkFaceoffSpot::DefensiveZone(team, side)
+        } else if position <= HQMPassPosition::ReachedCenter {
+            HQMRinkFaceoffSpot::Offside(team, side)
+        } else {
+            HQMRinkFaceoffSpot::Center
+        };
+
+        self.next_faceoff_spot = faceoff_spot;
+        self.pause_timer = time_break;
+        self.twoline_pass_status = HQMTwoLinePassStatus::Offside(team);
+        server.messages.add_server_chat_message_str("Two-line pass");
     }
 
     fn call_icing(&mut self, server: &mut HQMServer, team: HQMTeam, side: HQMRinkSide) {
@@ -923,6 +1042,82 @@ impl HQMMatchBehaviour {
                         );
                         let msg =
                             format!("Center line set as offside line by {}", player.player_name);
+
+                        server.messages.add_server_chat_message(msg);
+                    }
+                    _ => {}
+                }
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    fn set_twoline_pass(
+        &mut self,
+        server: &mut HQMServer,
+        player_index: HQMServerPlayerIndex,
+        rule: &str,
+    ) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                match rule {
+                    "off" => {
+                        self.config.twoline_pass = HQMTwoLinePassConfiguration::Off;
+                        info!(
+                            "{} ({}) disabled two-line pass rule",
+                            player.player_name, player_index
+                        );
+                        let msg = format!("Two-line pass rule disabled by {}", player.player_name);
+
+                        server.messages.add_server_chat_message(msg);
+                    }
+                    "on" => {
+                        self.config.twoline_pass = HQMTwoLinePassConfiguration::On;
+                        info!(
+                            "{} ({}) enabled regular two-line pass rule",
+                            player.player_name, player_index
+                        );
+                        let msg = format!(
+                            "Regular two-line pass rule enabled by {}",
+                            player.player_name
+                        );
+
+                        server.messages.add_server_chat_message(msg);
+                    }
+                    "forward" => {
+                        self.config.twoline_pass = HQMTwoLinePassConfiguration::Forward;
+                        info!(
+                            "{} ({}) enabled forward two-line pass rule",
+                            player.player_name, player_index
+                        );
+                        let msg = format!(
+                            "Forward two-line pass rule enabled by {}",
+                            player.player_name
+                        );
+
+                        server.messages.add_server_chat_message(msg);
+                    }
+                    "double" | "both" => {
+                        self.config.twoline_pass = HQMTwoLinePassConfiguration::Double;
+                        info!(
+                            "{} ({}) enabled regular and forward two-line pass rule",
+                            player.player_name, player_index
+                        );
+                        let msg = format!(
+                            "Regular and forward two-line pass rule enabled by {}",
+                            player.player_name
+                        );
+
+                        server.messages.add_server_chat_message(msg);
+                    }
+                    "blue" | "three" | "threeline" => {
+                        self.config.twoline_pass = HQMTwoLinePassConfiguration::ThreeLine;
+                        info!(
+                            "{} ({}) enabled three-line pass rule",
+                            player.player_name, player_index
+                        );
+                        let msg = format!("Three-line pass rule enabled by {}", player.player_name);
 
                         server.messages.add_server_chat_message(msg);
                     }
@@ -1409,14 +1604,20 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                 }
             }
 
-            let rules_state = if let HQMOffsideStatus::Offside(_) = self.offside_status {
+            let rules_state = if matches!(self.offside_status, HQMOffsideStatus::Offside(_))
+                || matches!(self.twoline_pass_status, HQMTwoLinePassStatus::Offside(_))
+            {
                 HQMRulesState::Offside
-            } else if let HQMIcingStatus::Icing(_) = self.icing_status {
+            } else if matches!(self.icing_status, HQMIcingStatus::Icing(_)) {
                 HQMRulesState::Icing
             } else {
                 let icing_warning = matches!(self.icing_status, HQMIcingStatus::Warning(_, _));
                 let offside_warning =
-                    matches!(self.offside_status, HQMOffsideStatus::Warning(_, _, _, _));
+                    matches!(self.offside_status, HQMOffsideStatus::Warning(_, _, _, _))
+                        || matches!(
+                            self.twoline_pass_status,
+                            HQMTwoLinePassStatus::Warning(_, _, _, _)
+                        );
                 HQMRulesState::Regular {
                     offside_warning,
                     icing_warning,
@@ -1502,6 +1703,11 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                                 self.set_offside_rule(server, player_index, arg);
                             }
                         }
+                        "twolinepass" => {
+                            if let Some(arg) = args.get(1) {
+                                self.set_twoline_pass(server, player_index, arg);
+                            }
+                        }
                         "offsideline" => {
                             if let Some(arg) = args.get(1) {
                                 self.set_offside_line(server, player_index, arg);
@@ -1583,10 +1789,26 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                     HQMIcingConfiguration::Touch => "Icing enabled",
                     HQMIcingConfiguration::NoTouch => "No-touch icing enabled",
                 };
+
                 let msg = format!("{}{}, {}", offside_str, offside_line_str, icing_str);
                 server
                     .messages
                     .add_directed_server_chat_message(msg, player_index);
+                let twoline_str = match self.config.twoline_pass {
+                    HQMTwoLinePassConfiguration::Off => "",
+                    HQMTwoLinePassConfiguration::On => "Two-line pass rule enabled",
+                    HQMTwoLinePassConfiguration::Forward => "Forward two-line pass rule enabled",
+                    HQMTwoLinePassConfiguration::Double => {
+                        "Forward and regular two-line pass rule enabled"
+                    }
+                    HQMTwoLinePassConfiguration::ThreeLine => "Three-line pass rule enabled",
+                };
+                if !twoline_str.is_empty() {
+                    server
+                        .messages
+                        .add_directed_server_chat_message_str(twoline_str, player_index);
+                }
+
                 if self.config.mercy > 0 {
                     let msg = format!("Mercy rule when team leads by {} goals", self.config.mercy);
                     server
@@ -1615,6 +1837,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
         self.icing_status = HQMIcingStatus::No;
         self.offside_status = HQMOffsideStatus::Neutral;
+        self.twoline_pass_status = HQMTwoLinePassStatus::No;
 
         let warmup_pucks = self.config.warmup_pucks;
 
