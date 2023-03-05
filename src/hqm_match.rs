@@ -376,15 +376,8 @@ impl HQMMatchBehaviour {
                     }
                 }
                 if let HQMIcingStatus::Warning(team, side) = self.icing_status {
-                    if touching_team != team {
-                        if self.started_as_goalie.contains(&player_index) {
-                            self.icing_status = HQMIcingStatus::No;
-                            server
-                                .messages
-                                .add_server_chat_message_str("Icing waved off");
-                        } else {
-                            self.call_icing(server, other_team, side);
-                        }
+                    if touching_team != team && !self.started_as_goalie.contains(&player_index) {
+                        self.call_icing(server, other_team, side);
                     } else {
                         self.icing_status = HQMIcingStatus::No;
                         server
