@@ -7,6 +7,7 @@ use std::env;
 
 mod hqm_faceoff_practice;
 mod hqm_match;
+mod hqm_match_commands;
 mod hqm_russian;
 mod hqm_shootout;
 mod hqm_warmup;

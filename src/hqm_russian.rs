@@ -2,11 +2,9 @@ use nalgebra::{Point3, Rotation3};
 use std::collections::HashMap;
 use tracing::info;
 
-use migo_hqm_server::hqm_behaviour_extra::HQMDualControlSetting;
+use migo_hqm_server::hqm_behaviour_extra::{find_empty_dual_control, HQMDualControlSetting};
 use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
-use migo_hqm_server::hqm_server::{
-    HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex,
-};
+use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate;
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::f32::consts::FRAC_PI_2;
@@ -605,28 +603,4 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
     fn get_number_of_players(&self) -> u32 {
         self.team_max as u32
     }
-}
-
-fn find_empty_dual_control(
-    server: &HQMServer,
-    team: HQMTeam,
-) -> Option<(
-    HQMServerPlayerIndex,
-    Option<HQMServerPlayerIndex>,
-    Option<HQMServerPlayerIndex>,
-)> {
-    for (i, player) in server.players.iter() {
-        if let Some(player) = player {
-            if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
-                if movement.is_none() || stick.is_none() {
-                    if let Some((_, dual_control_team)) = player.object {
-                        if dual_control_team == team {
-                            return Some((i, movement, stick));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
 }
