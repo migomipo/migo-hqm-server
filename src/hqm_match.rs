@@ -619,11 +619,11 @@ impl HQMMatchBehaviour {
                     self.update_pass(team, HQMPassPosition::PassedOwnBlue);
                     self.handle_puck_passed_defensive_line(server, team);
                 }
-                HQMSimulationEvent::PuckReachedRedLine { team, puck: _ } => {
+                HQMSimulationEvent::PuckReachedCenterLine { team, puck: _ } => {
                     self.check_wave_off_twoline(server, team);
                     self.update_pass(team, HQMPassPosition::ReachedCenter);
                 }
-                HQMSimulationEvent::PuckFullyEnteredOffensiveHalf { team, puck: _ } => {
+                HQMSimulationEvent::PuckPassedCenterLine { team, puck: _ } => {
                     self.update_pass(team, HQMPassPosition::PassedCenter);
                     self.handle_puck_entered_offensive_half(server, team);
                 }

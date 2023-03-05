@@ -26,11 +26,11 @@ pub enum HQMSimulationEvent {
         team: HQMTeam,
         puck: HQMObjectIndex,
     },
-    PuckReachedRedLine {
+    PuckReachedCenterLine {
         team: HQMTeam,
         puck: HQMObjectIndex,
     },
-    PuckFullyEnteredOffensiveHalf {
+    PuckPassedCenterLine {
         team: HQMTeam,
         puck: HQMObjectIndex,
     },
@@ -651,7 +651,7 @@ fn puck_detection(
     if mid_line.sphere_reached_line(&puck.body.pos, puck.radius)
         && !mid_line.sphere_reached_line(&old_puck_pos, puck.radius)
     {
-        let event = HQMSimulationEvent::PuckReachedRedLine {
+        let event = HQMSimulationEvent::PuckReachedCenterLine {
             team,
             puck: puck_index,
         };
@@ -660,7 +660,7 @@ fn puck_detection(
     if mid_line.sphere_past_leading_edge(&puck.body.pos, puck.radius)
         && !mid_line.sphere_past_leading_edge(&old_puck_pos, puck.radius)
     {
-        let event = HQMSimulationEvent::PuckFullyEnteredOffensiveHalf {
+        let event = HQMSimulationEvent::PuckPassedCenterLine {
             team,
             puck: puck_index,
         };
