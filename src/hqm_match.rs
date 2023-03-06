@@ -632,6 +632,14 @@ impl HQMMatchBehaviour {
                 }
                 _ => {}
             }
+
+            if self.pause_timer > 0
+                || server.game.time == 0
+                || server.game.game_over
+                || server.game.period == 0
+            {
+                return;
+            }
         }
     }
 
