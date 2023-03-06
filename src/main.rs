@@ -22,7 +22,7 @@ use migo_hqm_server::hqm_behaviour_extra::{
 use crate::hqm_russian::HQMRussianBehaviour;
 use crate::hqm_shootout::HQMShootoutBehaviour;
 use crate::hqm_warmup::HQMPermanentWarmup;
-use ini::ini::Properties;
+use ini::Properties;
 use migo_hqm_server::hqm_game::HQMPhysicsConfiguration;
 use migo_hqm_server::hqm_server;
 use migo_hqm_server::hqm_server::{HQMServerConfiguration, HQMSpawnPoint};
