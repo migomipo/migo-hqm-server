@@ -72,7 +72,7 @@ impl HQMGameWorld {
         let object_slot = self.find_empty_player_slot();
         if let Some(i) = object_slot {
             self.objects.objects[i.0] =
-                HQMGameObject::Player(HQMSkater::new(start, rot, hand, mass));
+                HQMGameObject::Player(HQMSkater::new(start, rot.into(), hand, mass));
         }
         return object_slot;
     }
@@ -84,7 +84,8 @@ impl HQMGameWorld {
     ) -> Option<HQMObjectIndex> {
         let object_slot = self.find_empty_puck_slot();
         if let Some(i) = object_slot {
-            self.objects.objects[i.0] = HQMGameObject::Puck(HQMPuck::new(start, rot));
+            self.objects.objects[i.0] =
+                HQMGameObject::Puck(HQMPuck::new(start, rot.into()));
         }
         return object_slot;
     }
@@ -703,7 +704,7 @@ impl HQMRink {
 pub struct HQMBody {
     pub pos: Point3<f32>,               // Measured in meters
     pub linear_velocity: Vector3<f32>,  // Measured in meters per hundred of a second
-    pub rot: Rotation3<f32>,            // Rotation matrix
+    pub rot: Matrix3<f32>,              // Rotation matrix
     pub angular_velocity: Vector3<f32>, // Measured in radians per hundred of a second
     pub(crate) rot_mul: Vector3<f32>,
 }
@@ -713,7 +714,7 @@ pub struct HQMSkater {
     pub body: HQMBody,
     pub stick_pos: Point3<f32>,       // Measured in meters
     pub stick_velocity: Vector3<f32>, // Measured in meters per hundred of a second
-    pub stick_rot: Rotation3<f32>,    // Rotation matrix
+    pub stick_rot: Matrix3<f32>,      // Rotation matrix
     pub head_rot: f32,                // Radians
     pub body_rot: f32,                // Radians
     pub height: f32,
@@ -728,7 +729,7 @@ pub struct HQMSkater {
 impl HQMSkater {
     fn get_collision_balls(
         pos: &Point3<f32>,
-        rot: &Rotation3<f32>,
+        rot: &Matrix3<f32>,
         linear_velocity: &Vector3<f32>,
         mass: f32,
     ) -> Vec<HQMSkaterCollisionBall> {
@@ -784,12 +785,7 @@ impl HQMSkater {
         collision_balls
     }
 
-    pub(crate) fn new(
-        pos: Point3<f32>,
-        rot: Rotation3<f32>,
-        hand: HQMSkaterHand,
-        mass: f32,
-    ) -> Self {
+    pub(crate) fn new(pos: Point3<f32>, rot: Matrix3<f32>, hand: HQMSkaterHand, mass: f32) -> Self {
         let linear_velocity = Vector3::new(0.0, 0.0, 0.0);
         let collision_balls = HQMSkater::get_collision_balls(&pos, &rot, &linear_velocity, mass);
         HQMSkater {
@@ -802,7 +798,7 @@ impl HQMSkater {
             },
             stick_pos: pos.clone(),
             stick_velocity: Vector3::new(0.0, 0.0, 0.0),
-            stick_rot: Rotation3::identity(),
+            stick_rot: Rotation3::identity().into(),
             head_rot: 0.0,
             body_rot: 0.0,
             height: 0.75,
@@ -816,8 +812,8 @@ impl HQMSkater {
     }
 
     pub(crate) fn get_packet(&self) -> HQMSkaterPacket {
-        let rot = hqm_parse::convert_matrix_to_network(31, &self.body.rot.matrix());
-        let stick_rot = hqm_parse::convert_matrix_to_network(25, &self.stick_rot.matrix());
+        let rot = hqm_parse::convert_matrix_to_network(31, &self.body.rot);
+        let stick_rot = hqm_parse::convert_matrix_to_network(25, &self.stick_rot);
 
         HQMSkaterPacket {
             pos: (
@@ -851,7 +847,7 @@ impl HQMSkaterCollisionBall {
     fn from_skater(
         offset: Vector3<f32>,
         skater_pos: &Point3<f32>,
-        skater_rot: &Rotation3<f32>,
+        skater_rot: &Matrix3<f32>,
         velocity: &Vector3<f32>,
         radius: f32,
         mass: f32,
@@ -927,7 +923,7 @@ pub struct HQMPuck {
 }
 
 impl HQMPuck {
-    fn new(pos: Point3<f32>, rot: Rotation3<f32>) -> Self {
+    fn new(pos: Point3<f32>, rot: Matrix3<f32>) -> Self {
         HQMPuck {
             body: HQMBody {
                 pos,
@@ -942,7 +938,7 @@ impl HQMPuck {
     }
 
     pub(crate) fn get_packet(&self) -> HQMPuckPacket {
-        let rot = hqm_parse::convert_matrix_to_network(31, &self.body.rot.matrix());
+        let rot = hqm_parse::convert_matrix_to_network(31, &self.body.rot);
         HQMPuckPacket {
             pos: (
                 get_position(17, 1024.0 * self.body.pos.x),
