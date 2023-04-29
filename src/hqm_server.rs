@@ -1201,7 +1201,7 @@ impl HQMServer {
         if let Some(player) = self.players.get_mut(player_index) {
             if let Some((object_index, _)) = player.object {
                 if let Some(skater) = self.game.world.objects.get_skater_mut(object_index) {
-                    *skater = HQMSkater::new(pos, rot.into(), player.hand, player.mass);
+                    *skater = HQMSkater::new(pos, rot, player.hand, player.mass);
                     let object = Some((object_index, team));
                     player.object = object;
                     let update = player.get_update_message(player_index);
