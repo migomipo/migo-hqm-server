@@ -30,6 +30,18 @@ pub struct HQMMatchConfiguration {
     pub goal_replay: bool,
 }
 
+pub enum HQMMatchEvent {
+    Goal {
+        team: HQMTeam,
+        goal: Option<HQMServerPlayerIndex>,
+        assist: Option<HQMServerPlayerIndex>,
+        speed: Option<f32>, // Raw meter/game tick (so meter per 1/100 of a second)
+        speed_across_line: f32,
+        time: u32,
+        period: u32,
+    },
+}
+
 pub struct HQMMatch {
     pub config: HQMMatchConfiguration,
     pub paused: bool,
@@ -170,7 +182,12 @@ impl HQMMatch {
         }
     }
 
-    fn call_goal(&mut self, server: &mut HQMServer, team: HQMTeam, puck_index: HQMObjectIndex) {
+    fn call_goal(
+        &mut self,
+        server: &mut HQMServer,
+        team: HQMTeam,
+        puck_index: HQMObjectIndex,
+    ) -> HQMMatchEvent {
         let time_break = self.config.time_break * 100;
 
         match team {
@@ -236,7 +253,7 @@ impl HQMMatch {
                 last_touch,
             )
         } else {
-            return;
+            (None, None, 0.0, None, None)
         };
 
         server
@@ -251,17 +268,21 @@ impl HQMMatch {
             }
         }
 
-        let (puck_speed_across_line, puck_speed_unit) =
+        let (puck_speed_across_line_converted, puck_speed_unit) =
             convert(puck_speed_across_line, self.config.use_mph);
 
         let str1 = format!(
             "Goal scored, {:.1} {} across line",
-            puck_speed_across_line, puck_speed_unit
+            puck_speed_across_line_converted, puck_speed_unit
         );
 
         let str2 = if let Some(puck_speed_from_stick) = puck_speed_from_stick {
-            let (puck_speed, puck_speed_unit) = convert(puck_speed_from_stick, self.config.use_mph);
-            format!(", {:.1} {} from stick", puck_speed, puck_speed_unit)
+            let (puck_speed_converted, puck_speed_unit) =
+                convert(puck_speed_from_stick, self.config.use_mph);
+            format!(
+                ", {:.1} {} from stick",
+                puck_speed_converted, puck_speed_unit
+            )
         } else {
             "".to_owned()
         };
@@ -294,6 +315,15 @@ impl HQMMatch {
             ));
 
             self.pause_timer = self.pause_timer.saturating_sub(800).max(400);
+        }
+        HQMMatchEvent::Goal {
+            team,
+            time: server.game.time,
+            period: server.game.period,
+            goal: goal_scorer_index,
+            assist: assist_index,
+            speed: puck_speed_from_stick,
+            speed_across_line: puck_speed_across_line,
         }
     }
 
@@ -389,6 +419,7 @@ impl HQMMatch {
     fn handle_puck_entered_net(
         &mut self,
         server: &mut HQMServer,
+        events: &mut Vec<HQMMatchEvent>,
         team: HQMTeam,
         puck: HQMObjectIndex,
     ) {
@@ -398,7 +429,7 @@ impl HQMMatch {
             }
             HQMOffsideStatus::Offside(_) => {}
             _ => {
-                self.call_goal(server, team, puck);
+                events.push(self.call_goal(server, team, puck));
             }
         }
     }
@@ -592,11 +623,16 @@ impl HQMMatch {
         }
     }
 
-    fn handle_events(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
+    fn handle_events(
+        &mut self,
+        server: &mut HQMServer,
+        events: &[HQMSimulationEvent],
+        match_events: &mut Vec<HQMMatchEvent>,
+    ) {
         for event in events {
             match *event {
                 HQMSimulationEvent::PuckEnteredNet { team, puck } => {
-                    self.handle_puck_entered_net(server, team, puck);
+                    self.handle_puck_entered_net(server, match_events, team, puck);
                 }
                 HQMSimulationEvent::PuckTouch { player, puck, .. } => {
                     self.handle_puck_touch(server, player, puck);
@@ -707,7 +743,12 @@ impl HQMMatch {
         server.messages.add_server_chat_message_str("Icing");
     }
 
-    pub fn after_tick(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
+    pub fn after_tick(
+        &mut self,
+        server: &mut HQMServer,
+        events: &[HQMSimulationEvent],
+    ) -> Vec<HQMMatchEvent> {
+        let mut match_events = vec![];
         if server.game.time == 0 && server.game.period > 1 {
             self.handle_events_end_of_period(server, events);
         } else if self.pause_timer > 0
@@ -718,7 +759,7 @@ impl HQMMatch {
         {
             // Nothing
         } else {
-            self.handle_events(server, events);
+            self.handle_events(server, events, &mut match_events);
 
             if let HQMOffsideStatus::Warning(team, _, _, _) = self.offside_status {
                 if !has_players_in_offensive_zone(server, team, None) {
@@ -761,6 +802,7 @@ impl HQMMatch {
                 self.start_next_replay = None;
             }
         }
+        match_events
     }
 
     fn update_clock(&mut self, server: &mut HQMServer) {
