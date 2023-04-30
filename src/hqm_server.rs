@@ -403,7 +403,6 @@ impl HQMServer {
             if let Some(player) = player {
                 let is_actual_player = match player.data {
                     HQMServerPlayerData::NetworkPlayer { .. } => true,
-                    HQMServerPlayerData::DualControl { .. } => false,
                 };
                 if is_actual_player {
                     player_count += 1;
@@ -585,21 +584,9 @@ impl HQMServer {
                 }
             }
 
-            if let Some((dual_control_index, _, stick)) = self.get_dual_control_player(player_index)
-            {
-                if stick == Some(player_index) {
-                    if let Some(dual_control_player) = self.players.get_mut(dual_control_index) {
-                        dual_control_player.hand = hand;
-                        if let Some((object_index, _)) = dual_control_player.object {
-                            change_skater(self, object_index, player_index, hand);
-                        }
-                    }
-                }
-            } else {
-                if let Some(object_index) = object_index {
-                    change_skater(self, object_index, player_index, hand);
-                }
-            };
+            if let Some(object_index) = object_index {
+                change_skater(self, object_index, player_index, hand);
+            }
         }
     }
 
@@ -750,9 +737,6 @@ impl HQMServer {
                     }
                 }
             }
-            "swap" => {
-                self.swap_dual_control(player_index);
-            }
             "t" => {
                 self.add_user_team_message(arg, player_index);
             }
@@ -760,13 +744,7 @@ impl HQMServer {
         }
     }
 
-    fn swap_dual_control(&mut self, player_index: HQMServerPlayerIndex) {
-        if let Some((dual_control_player_index, movement, stick)) =
-            self.get_dual_control_player(player_index)
-        {
-            self.update_dual_control_internal(dual_control_player_index, stick, movement);
-        }
-    }
+
 
     fn list_players(&mut self, receiver_index: HQMServerPlayerIndex, first_index: usize) {
         let mut found = 0;
@@ -806,10 +784,10 @@ impl HQMServer {
     ) {
         if let Some(view_player) = self.players.get(view_player_index) {
             let view_player_name = view_player.player_name.clone();
-            let has_dual_control_player = self.get_dual_control_player(player_index).is_some();
+
             if let Some(player) = self.players.get_mut(player_index) {
                 if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
-                    if player.object.is_some() || has_dual_control_player {
+                    if player.object.is_some() {
                         self.messages.add_directed_server_chat_message_str(
                             "You must be a spectator to change view",
                             player_index,
@@ -1011,22 +989,6 @@ impl HQMServer {
                 self.game.world.remove_player(object_index);
             }
 
-            match &player.data {
-                HQMServerPlayerData::NetworkPlayer { .. } => {
-                    self.remove_player_from_dual_control(player_index);
-                }
-                HQMServerPlayerData::DualControl { movement, stick } => {
-                    let movement = *movement;
-                    let stick = *stick;
-                    if let Some(movement) = movement {
-                        set_view_player_index(movement, &mut self.players, movement)
-                    }
-                    if let Some(stick) = stick {
-                        set_view_player_index(stick, &mut self.players, stick)
-                    }
-                }
-            }
-
             let update = HQMMessage::PlayerUpdate {
                 player_name,
                 object: None,
@@ -1051,38 +1013,10 @@ impl HQMServer {
         }
     }
 
-    pub fn remove_player_from_dual_control(&mut self, player_index: HQMServerPlayerIndex) {
-        let mut changes = smallvec::SmallVec::<[_; 4]>::new();
-        for (i, player) in self.players.iter() {
-            if let Some(player) = player {
-                if let HQMServerPlayerData::DualControl { movement, stick } = &player.data {
-                    let new_movement = if *movement == Some(player_index) {
-                        None
-                    } else {
-                        *movement
-                    };
-                    let new_stick = if *stick == Some(player_index) {
-                        None
-                    } else {
-                        *stick
-                    };
-                    if new_movement != *movement || new_stick != *stick {
-                        changes.push((i, new_movement, new_stick));
-                    }
-                }
-            }
-        }
-        for (i, movement, stick) in changes {
-            self.update_dual_control_internal(i, movement, stick)
-        }
-    }
 
     pub fn move_to_spectator(&mut self, player_index: HQMServerPlayerIndex) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
-            if let HQMServerPlayerData::DualControl { .. } = player.data {
-                self.remove_player(player_index, true);
-                return true;
-            } else {
+
                 if let Some((object_index, _)) = player.object {
                     if self.game.world.remove_player(object_index) {
                         player.object = None;
@@ -1092,7 +1026,7 @@ impl HQMServer {
                         return true;
                     }
                 }
-            }
+
         }
         false
     }
@@ -1105,64 +1039,6 @@ impl HQMServer {
     ) -> Option<HQMObjectIndex> {
         let (pos, rot) = get_spawnpoint(&self.game.world.rink, team, spawn_point);
         self.spawn_skater(player_index, team, pos, rot)
-    }
-
-    pub fn spawn_dual_control_skater_at_spawnpoint(
-        &mut self,
-        team: HQMTeam,
-        spawn_point: HQMSpawnPoint,
-        movement: Option<HQMServerPlayerIndex>,
-        stick: Option<HQMServerPlayerIndex>,
-    ) -> Option<(HQMServerPlayerIndex, HQMObjectIndex)> {
-        let (pos, rot) = get_spawnpoint(&self.game.world.rink, team, spawn_point);
-        self.spawn_dual_control_skater(team, pos, rot, movement, stick)
-    }
-
-    pub fn spawn_dual_control_skater(
-        &mut self,
-        team: HQMTeam,
-        pos: Point3<f32>,
-        rot: Rotation3<f32>,
-        movement: Option<HQMServerPlayerIndex>,
-        stick: Option<HQMServerPlayerIndex>,
-    ) -> Option<(HQMServerPlayerIndex, HQMObjectIndex)> {
-        if movement.is_none() && stick.is_none() {
-            return None;
-        }
-
-        let player_index = self.find_empty_player_slot();
-        match player_index {
-            Some(player_index) => {
-                if let Some(skater) =
-                    self.game
-                        .world
-                        .create_player_object(pos, rot, HQMSkaterHand::Right, 1.0)
-                {
-                    let new_player = HQMServerPlayer {
-                        player_name: Rc::new("?/?".to_owned()),
-                        object: Some((skater, team)),
-                        id: Uuid::new_v4(),
-                        data: HQMServerPlayerData::DualControl {
-                            movement: None,
-                            stick: None,
-                        },
-                        is_admin: false,
-                        is_muted: HQMMuteStatus::NotMuted,
-                        hand: HQMSkaterHand::Right,
-                        mass: 1.0,
-                        input: Default::default(),
-                    };
-                    self.players.add_player(player_index, new_player);
-
-                    self.update_dual_control_internal(player_index, movement, stick);
-
-                    Some((player_index, skater))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
     }
 
     pub fn spawn_skater(
@@ -1195,7 +1071,6 @@ impl HQMServer {
                     player.object = object;
                     let update = player.get_update_message(player_index);
                     self.messages.add_global_message(update, true, true);
-                    self.remove_player_from_dual_control(player_index);
                     return Some(skater);
                 }
             }
@@ -1203,155 +1078,10 @@ impl HQMServer {
         None
     }
 
-    pub fn update_dual_control(
-        &mut self,
-        dual_control_player_index: HQMServerPlayerIndex,
-        movement: Option<HQMServerPlayerIndex>,
-        stick: Option<HQMServerPlayerIndex>,
-    ) {
-        if movement.is_some() || stick.is_some() {
-            let mut changes = smallvec::SmallVec::<[_; 4]>::new();
-            for (player_index, player) in self.players.iter() {
-                if player_index == dual_control_player_index {
-                    continue;
-                }
-                if let Some(player) = player {
-                    if let HQMServerPlayerData::DualControl {
-                        movement: m,
-                        stick: s,
-                    } = player.data
-                    {
-                        let mut changed = false;
-                        let mut new_movement = m;
-                        let mut new_stick = s;
-                        if m.is_some() && (m == movement || m == stick) {
-                            new_movement = None;
-                            changed = true;
-                        }
-                        if s.is_some() && (s == movement || s == stick) {
-                            new_stick = None;
-                            changed = true;
-                        }
-                        if changed {
-                            changes.push((player_index, new_movement, new_stick));
-                        }
-                    }
-                }
-            }
-            for (i, new_movement, new_stick) in changes {
-                self.update_dual_control_internal(i, new_movement, new_stick);
-            }
-        }
-
-        self.update_dual_control_internal(dual_control_player_index, movement, stick);
-    }
-
-    fn update_dual_control_internal(
-        &mut self,
-        dual_control_player_index: HQMServerPlayerIndex,
-        movement: Option<HQMServerPlayerIndex>,
-        stick: Option<HQMServerPlayerIndex>,
-    ) {
-        let player_name = Rc::new(get_dual_control_name(&self.players, movement, stick));
-        let hand = stick
-            .and_then(|x| self.players.get(x))
-            .map(|player| player.hand);
-
-        let player = self.players.get_mut(dual_control_player_index);
-
-        if let Some(player) = player {
-            if let HQMServerPlayerData::DualControl {
-                movement: m,
-                stick: s,
-            } = &mut player.data
-            {
-                let old_movement = *m;
-                let old_stick = *s;
-
-                if movement.is_none() && stick.is_none() {
-                    self.remove_player(dual_control_player_index, true);
-                } else {
-                    *m = movement;
-                    *s = stick;
-                    player.player_name = player_name.clone();
-                    player.id = Uuid::new_v4();
-                    if let Some(hand) = hand {
-                        player.hand = hand;
-                    }
-                    let update = player.get_update_message(dual_control_player_index);
-                    self.messages.add_global_message(update, true, true);
-                    if let Some(old_movement) = old_movement {
-                        set_view_player_index(old_movement, &mut self.players, old_movement);
-                    }
-                    if let Some(old_stick) = old_stick {
-                        set_view_player_index(old_stick, &mut self.players, old_stick);
-                    }
-                    if let Some(movement) = movement {
-                        set_view_player_index(
-                            movement,
-                            &mut self.players,
-                            dual_control_player_index,
-                        );
-                        self.move_to_spectator(movement);
-                    }
-                    if let Some(stick) = stick {
-                        set_view_player_index(stick, &mut self.players, dual_control_player_index);
-                        self.move_to_spectator(stick);
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn get_dual_control_player(
-        &self,
-        player_index: HQMServerPlayerIndex,
-    ) -> Option<(
-        HQMServerPlayerIndex,
-        Option<HQMServerPlayerIndex>,
-        Option<HQMServerPlayerIndex>,
-    )> {
-        for (i, player) in self.players.iter() {
-            if let Some(player) = player {
-                if let HQMServerPlayerData::DualControl { movement, stick } = player.data {
-                    if movement == Some(player_index) || stick == Some(player_index) {
-                        return Some((i, movement, stick));
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    pub fn swap_team(&mut self, player_index: HQMServerPlayerIndex, team: HQMTeam) -> bool {
-        if let Some(player) = self.players.get_mut(player_index) {
-            if let Some((object_index, _)) = player.object {
-                let object = Some((object_index, team));
-                player.object = object;
-                let update = player.get_update_message(player_index);
-                self.messages.add_global_message(update, true, true);
-                return true;
-            }
-        }
-        false
-    }
-
     fn add_user_team_message(&mut self, message: &str, sender_index: HQMServerPlayerIndex) {
         if let Some(player) = self.players.get(sender_index) {
             let team = if let Some((_, team)) = player.object {
                 Some(team)
-            } else if let Some((dual_control_player_index, _, _)) =
-                self.get_dual_control_player(sender_index)
-            {
-                if let Some(dual_control_player) = self.players.get(dual_control_player_index) {
-                    if let Some((_, team)) = dual_control_player.object {
-                        Some(team)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
             } else {
                 None
             };
@@ -1383,14 +1113,7 @@ impl HQMServer {
                     if let Some(player) = player {
                         if let Some((_, player_team)) = player.object {
                             if player_team == team {
-                                if let HQMServerPlayerData::DualControl { movement, stick } =
-                                    player.data
-                                {
-                                    movement.map(|i| matching_indices.push(i));
-                                    stick.map(|i| matching_indices.push(i));
-                                } else {
-                                    matching_indices.push(player_index);
-                                }
+                                matching_indices.push(player_index);
                             }
                         }
                     }
@@ -1431,39 +1154,6 @@ impl HQMServer {
         self.game.game_step = self.game.game_step.wrapping_add(1);
 
         behaviour.before_tick(self);
-
-        let mut dual_control_updates = smallvec::SmallVec::<[_; 64]>::new();
-        for (player_index, player) in self.players.iter() {
-            if let Some(player) = player {
-                if let HQMServerPlayerData::DualControl { movement, stick } = &player.data {
-                    let mut current_input = player.input.clone();
-                    let movement = movement
-                        .and_then(|x| self.players.get(x))
-                        .map(|x| x.input.clone());
-                    let stick = stick
-                        .and_then(|x| self.players.get(x))
-                        .map(|x| x.input.clone());
-                    if let Some(movement) = movement {
-                        current_input.fwbw = movement.fwbw;
-                        current_input.keys = movement.keys & 0x13;
-                        current_input.turn = movement.turn;
-                        current_input.head_rot = movement.head_rot;
-                        current_input.body_rot = movement.body_rot;
-                    }
-                    if let Some(stick) = stick {
-                        current_input.stick = stick.stick;
-                        current_input.stick_angle = stick.stick_angle;
-                    }
-                    dual_control_updates.push((player_index, current_input))
-                }
-            }
-        }
-
-        for (player_index, new_input) in dual_control_updates {
-            self.players
-                .get_mut(player_index)
-                .map(|x| x.input = new_input);
-        }
 
         for (_, player) in self.players.iter() {
             if let Some(player) = player {
@@ -2188,23 +1878,6 @@ async fn get_master_server() -> Result<SocketAddr, Box<dyn Error>> {
     Ok(SocketAddr::new(addr, port))
 }
 
-fn set_view_player_index(
-    i: HQMServerPlayerIndex,
-    players: &mut HQMServerPlayerList,
-    val: HQMServerPlayerIndex,
-) {
-    if let Some(player) = players.get_mut(i) {
-        if let HQMServerPlayerData::NetworkPlayer {
-            data: HQMNetworkPlayerData {
-                view_player_index, ..
-            },
-        } = &mut player.data
-        {
-            *view_player_index = val;
-        }
-    }
-}
-
 pub fn get_spawnpoint(
     rink: &HQMRink,
     team: HQMTeam,
@@ -2242,21 +1915,7 @@ pub fn get_spawnpoint(
     }
 }
 
-fn get_dual_control_name(
-    players: &HQMServerPlayerList,
-    movement: Option<HQMServerPlayerIndex>,
-    stick: Option<HQMServerPlayerIndex>,
-) -> String {
-    let s1 = movement
-        .and_then(|i| players.get(i))
-        .map(|player| player.player_name.as_str())
-        .unwrap_or("?");
-    let s2 = stick
-        .and_then(|i| players.get(i))
-        .map(|player| player.player_name.as_str())
-        .unwrap_or("?");
-    format!("{}+{}", s1, s2)
-}
+
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum HQMMuteStatus {
@@ -2281,10 +1940,6 @@ pub struct HQMNetworkPlayerData {
 pub enum HQMServerPlayerData {
     NetworkPlayer {
         data: HQMNetworkPlayerData,
-    },
-    DualControl {
-        movement: Option<HQMServerPlayerIndex>,
-        stick: Option<HQMServerPlayerIndex>,
     },
 }
 
@@ -2342,8 +1997,6 @@ impl HQMServerPlayer {
             data.known_packet = u32::MAX;
             data.messages.clear();
             data.view_player_index = player_index;
-        } else if let HQMServerPlayerData::DualControl { .. } = &mut self.data {
-            return false;
         }
         return true;
     }
@@ -2373,7 +2026,6 @@ impl HQMServerPlayer {
             HQMServerPlayerData::NetworkPlayer {
                 data: HQMNetworkPlayerData { addr, .. },
             } => Some(addr),
-            _ => None,
         }
     }
 
@@ -2406,7 +2058,6 @@ impl HQMServerPlayer {
                     deviation: dev,
                 })
             }
-            _ => None,
         }
     }
 }
