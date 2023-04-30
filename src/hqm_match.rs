@@ -115,7 +115,7 @@ impl HQMMatchBehaviour {
                 HQMTeam::Red => next_faceoff_spot.red_player_positions[&faceoff_position].clone(),
                 HQMTeam::Blue => next_faceoff_spot.blue_player_positions[&faceoff_position].clone(),
             };
-            server.spawn_skater(self, player_index, team, player_position, player_rotation);
+            server.spawn_skater(player_index, team, player_position, player_rotation);
             if faceoff_position == "G" {
                 self.started_as_goalie.push(player_index);
             }
@@ -757,8 +757,8 @@ impl HQMMatchBehaviour {
         }
         for (player_index, player_name) in spectating_players {
             info!("{} ({}) is spectating", player_name, player_index);
-            server.remove_player_from_dual_control(self, player_index);
-            server.move_to_spectator(self, player_index);
+            server.remove_player_from_dual_control(player_index);
+            server.move_to_spectator(player_index);
         }
         if !joining_red.is_empty() || !joining_blue.is_empty() {
             let (red_player_count, blue_player_count) = {
@@ -795,7 +795,7 @@ impl HQMMatchBehaviour {
                 }
 
                 if server
-                    .spawn_skater_at_spawnpoint(behaviour, player_index, team, spawn_point)
+                    .spawn_skater_at_spawnpoint(player_index, team, spawn_point)
                     .is_some()
                 {
                     info!(
@@ -827,17 +827,16 @@ impl HQMMatchBehaviour {
 
                 match current_empty {
                     Some((index, movement @ Some(_), None)) => {
-                        server.update_dual_control(behaviour, index, movement, Some(player_index));
+                        server.update_dual_control(index, movement, Some(player_index));
                     }
                     Some((index, None, stick @ Some(_))) => {
-                        server.update_dual_control(behaviour, index, Some(player_index), stick);
+                        server.update_dual_control(index, Some(player_index), stick);
                     }
                     _ => {
                         if *player_count >= team_max {}
 
                         if let Some((dual_control_player_index, _)) = server
                             .spawn_dual_control_skater_at_spawnpoint(
-                                behaviour,
                                 team,
                                 spawn_point,
                                 Some(player_index),
@@ -1176,6 +1175,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         self.icing_status = HQMIcingStatus::No;
         self.offside_status = HQMOffsideStatus::Neutral;
         self.twoline_pass_status = HQMTwoLinePassStatus::No;
+        self.start_next_replay = None;
 
         let warmup_pucks = self.config.warmup_pucks;
 

@@ -621,7 +621,7 @@ impl HQMMatchBehaviour {
 
                 if let Some(force_player) = server.players.get(force_player_index) {
                     let force_player_name = force_player.player_name.clone();
-                    if server.move_to_spectator(self, force_player_index) {
+                    if server.move_to_spectator(force_player_index) {
                         let msg = format!(
                             "{} forced off ice by {}",
                             force_player_name, admin_player_name

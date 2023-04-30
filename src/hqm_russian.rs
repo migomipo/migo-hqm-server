@@ -98,8 +98,8 @@ impl HQMRussianBehaviour {
         }
         for (player_index, player_name) in spectating_players {
             info!("{} ({}) is spectating", player_name, player_index);
-            server.remove_player_from_dual_control(self, player_index);
-            server.move_to_spectator(self, player_index);
+            server.remove_player_from_dual_control(player_index);
+            server.move_to_spectator(player_index);
         }
         if !joining_red.is_empty() || !joining_blue.is_empty() {
             let (red_player_count, blue_player_count) = {
@@ -122,7 +122,6 @@ impl HQMRussianBehaviour {
             let mut new_blue_player_count = blue_player_count;
 
             fn add_player(
-                behaviour: &mut HQMRussianBehaviour,
                 player_index: HQMServerPlayerIndex,
                 player_name: Rc<String>,
                 server: &mut HQMServer,
@@ -143,7 +142,7 @@ impl HQMRussianBehaviour {
                 }
 
                 if server
-                    .spawn_skater(behaviour, player_index, team, pos.clone(), rot.clone())
+                    .spawn_skater(player_index, team, pos.clone(), rot.clone())
                     .is_some()
                 {
                     info!(
@@ -154,7 +153,6 @@ impl HQMRussianBehaviour {
                 }
             }
             fn add_player_dual_control(
-                behaviour: &mut HQMRussianBehaviour,
                 player_index: HQMServerPlayerIndex,
                 player_name: Rc<String>,
                 server: &mut HQMServer,
@@ -173,10 +171,10 @@ impl HQMRussianBehaviour {
 
                 match current_empty {
                     Some((index, movement @ Some(_), None)) => {
-                        server.update_dual_control(behaviour, index, movement, Some(player_index));
+                        server.update_dual_control(index, movement, Some(player_index));
                     }
                     Some((index, None, stick @ Some(_))) => {
-                        server.update_dual_control(behaviour, index, Some(player_index), stick);
+                        server.update_dual_control(index, Some(player_index), stick);
                     }
                     _ => {
                         if *player_count >= team_max {
@@ -185,7 +183,6 @@ impl HQMRussianBehaviour {
 
                         if server
                             .spawn_dual_control_skater(
-                                behaviour,
                                 team,
                                 pos.clone(),
                                 rot.clone(),
@@ -207,7 +204,6 @@ impl HQMRussianBehaviour {
             for (player_index, player_name, dual_control) in joining_red {
                 if dual_control {
                     add_player_dual_control(
-                        self,
                         player_index,
                         player_name,
                         server,
@@ -217,7 +213,6 @@ impl HQMRussianBehaviour {
                     );
                 } else {
                     add_player(
-                        self,
                         player_index,
                         player_name,
                         server,
@@ -230,7 +225,6 @@ impl HQMRussianBehaviour {
             for (player_index, player_name, dual_control) in joining_blue {
                 if dual_control {
                     add_player_dual_control(
-                        self,
                         player_index,
                         player_name,
                         server,
@@ -240,7 +234,6 @@ impl HQMRussianBehaviour {
                     );
                 } else {
                     add_player(
-                        self,
                         player_index,
                         player_name,
                         server,
@@ -345,12 +338,12 @@ impl HQMRussianBehaviour {
         for (index, player_index) in red_players.into_iter().enumerate() {
             let z = (server.game.world.rink.length / 2.0) + (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
-            server.spawn_skater(self, player_index, HQMTeam::Red, pos, rot.clone());
+            server.spawn_skater(player_index, HQMTeam::Red, pos, rot.clone());
         }
         for (index, player_index) in blue_players.into_iter().enumerate() {
             let z = (server.game.world.rink.length / 2.0) - (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
-            server.spawn_skater(self, player_index, HQMTeam::Blue, pos, rot.clone());
+            server.spawn_skater(player_index, HQMTeam::Blue, pos, rot.clone());
         }
     }
 
@@ -403,7 +396,7 @@ impl HQMRussianBehaviour {
 
                 if let Some(force_player) = server.players.get(force_player_index) {
                     let force_player_name = force_player.player_name.clone();
-                    if server.move_to_spectator(self, force_player_index) {
+                    if server.move_to_spectator(force_player_index) {
                         let msg = format!(
                             "{} forced off ice by {}",
                             force_player_name, admin_player_name

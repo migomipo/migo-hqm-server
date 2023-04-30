@@ -267,7 +267,8 @@ impl HQMServer {
                 if !kick_player_list.is_empty() {
                     for (player_index, player_name, player_addr) in kick_player_list {
                         if player_index != admin_player_index {
-                            self.remove_player(behaviour, player_index, true);
+                            behaviour.before_player_exit(self, player_index);
+                            self.remove_player(player_index, true);
 
                             if ban_player {
                                 self.ban_list.insert(player_addr.ip());
@@ -360,7 +361,8 @@ impl HQMServer {
                         if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
                             let kick_player_name = kick_player.player_name.clone();
                             let kick_ip = data.addr.ip().clone();
-                            self.remove_player(behaviour, kick_player_index, true);
+                            behaviour.before_player_exit(self, kick_player_index);
+                            self.remove_player(kick_player_index, true);
 
                             if ban_player {
                                 self.ban_list.insert(kick_ip);

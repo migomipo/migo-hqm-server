@@ -28,7 +28,7 @@ impl HQMFaceoffPracticeBehaviour {
 
         let pos = center_pos + Vector3::new(0.0, 1.5, 2.75);
         let rot = Rotation3::identity();
-        server.spawn_skater(self, player_index, HQMTeam::Red, pos, rot);
+        server.spawn_skater(player_index, HQMTeam::Red, pos, rot);
 
         let pos = center_pos + Vector3::new(0.0, 1.5, 0.0);
         let rot = Rotation3::identity();
@@ -52,7 +52,7 @@ impl HQMServerBehaviour for HQMFaceoffPracticeBehaviour {
         if let Some(player_index) = has_player_already {
             if let Some(player) = server.players.get(player_index) {
                 if player.input.spectate() {
-                    server.move_to_spectator(self, player_index);
+                    server.move_to_spectator(player_index);
                     has_player_already = None;
                 }
             }
@@ -75,7 +75,7 @@ impl HQMServerBehaviour for HQMFaceoffPracticeBehaviour {
 
                 let pos = Point3::new(center_x, 0.0, center_z) + Vector3::new(0.0, 1.5, 2.75);
                 let rot = Rotation3::identity();
-                server.spawn_skater(self, wants_to_play, HQMTeam::Red, pos, rot);
+                server.spawn_skater(wants_to_play, HQMTeam::Red, pos, rot);
                 self.wait_timer = 300;
             }
         }

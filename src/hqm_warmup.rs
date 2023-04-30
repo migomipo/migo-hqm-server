@@ -49,18 +49,17 @@ impl HQMPermanentWarmup {
             }
         }
         for player_index in spectating_players {
-            server.remove_player_from_dual_control(self, player_index);
-            server.move_to_spectator(self, player_index);
+            server.remove_player_from_dual_control(player_index);
+            server.move_to_spectator(player_index);
         }
 
         fn internal_add(
-            behaviour: &mut HQMPermanentWarmup,
             server: &mut HQMServer,
             player_index: HQMServerPlayerIndex,
             team: HQMTeam,
             spawn_point: HQMSpawnPoint,
         ) {
-            server.spawn_skater_at_spawnpoint(behaviour, player_index, team, spawn_point);
+            server.spawn_skater_at_spawnpoint(player_index, team, spawn_point);
         }
 
         fn find_empty_dual_control(
@@ -88,7 +87,6 @@ impl HQMPermanentWarmup {
         }
 
         fn internal_add_dual_control(
-            behaviour: &mut HQMPermanentWarmup,
             server: &mut HQMServer,
             player_index: HQMServerPlayerIndex,
             team: HQMTeam,
@@ -98,14 +96,13 @@ impl HQMPermanentWarmup {
 
             match current_empty {
                 Some((index, movement @ Some(_), None)) => {
-                    server.update_dual_control(behaviour, index, movement, Some(player_index));
+                    server.update_dual_control(index, movement, Some(player_index));
                 }
                 Some((index, None, stick @ Some(_))) => {
-                    server.update_dual_control(behaviour, index, Some(player_index), stick);
+                    server.update_dual_control(index, Some(player_index), stick);
                 }
                 _ => {
                     server.spawn_dual_control_skater_at_spawnpoint(
-                        behaviour,
                         team,
                         spawn_point,
                         Some(player_index),
@@ -116,9 +113,9 @@ impl HQMPermanentWarmup {
         }
         for (player_index, team, dual_control) in joining_team {
             if dual_control {
-                internal_add_dual_control(self, server, player_index, team, self.spawn_point);
+                internal_add_dual_control(server, player_index, team, self.spawn_point);
             } else {
-                internal_add(self, server, player_index, team, self.spawn_point);
+                internal_add(server, player_index, team, self.spawn_point);
             }
         }
     }
