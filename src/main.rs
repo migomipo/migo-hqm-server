@@ -7,23 +7,24 @@ use std::env;
 
 mod hqm_faceoff_practice;
 mod hqm_match;
-mod hqm_match_commands;
+
 mod hqm_russian;
 mod hqm_shootout;
 mod hqm_warmup;
 
 use crate::hqm_faceoff_practice::HQMFaceoffPracticeBehaviour;
-use crate::hqm_match::{HQMMatchBehaviour, HQMMatchConfiguration};
-use migo_hqm_server::hqm_behaviour_extra::{
-    HQMDualControlSetting, HQMIcingConfiguration, HQMOffsideConfiguration,
-    HQMOffsideLineConfiguration, HQMTwoLinePassConfiguration,
-};
+use crate::hqm_match::HQMMatchBehaviour;
+use migo_hqm_server::hqm_behaviour_extra::HQMDualControlSetting;
 
 use crate::hqm_russian::HQMRussianBehaviour;
 use crate::hqm_shootout::HQMShootoutBehaviour;
 use crate::hqm_warmup::HQMPermanentWarmup;
 use ini::Properties;
 use migo_hqm_server::hqm_game::HQMPhysicsConfiguration;
+use migo_hqm_server::hqm_match_util::{
+    HQMIcingConfiguration, HQMMatchConfiguration, HQMOffsideConfiguration,
+    HQMOffsideLineConfiguration, HQMTwoLinePassConfiguration,
+};
 use migo_hqm_server::hqm_server;
 use migo_hqm_server::hqm_server::{HQMServerConfiguration, HQMSpawnPoint};
 use tracing_appender;
@@ -318,11 +319,8 @@ async fn main() -> std::io::Result<()> {
                     warmup_pucks,
                     cheats_enabled,
                     use_mph,
-                    dual_control,
                     goal_replay,
-                    spawn_point,
                     physics_config,
-                    team_max: server_team_max,
                     blue_line_location,
                     periods,
                 };
@@ -331,7 +329,12 @@ async fn main() -> std::io::Result<()> {
                     server_port,
                     server_public,
                     config,
-                    HQMMatchBehaviour::new(match_config),
+                    HQMMatchBehaviour::new(
+                        match_config,
+                        server_team_max,
+                        dual_control,
+                        spawn_point,
+                    ),
                 )
                 .await
             }

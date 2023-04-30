@@ -1,18 +1,13 @@
-use crate::hqm_match::HQMMatchBehaviour;
-use migo_hqm_server::hqm_behaviour_extra::{
-    HQMIcingConfiguration, HQMOffsideConfiguration, HQMOffsideLineConfiguration,
+use crate::hqm_game::HQMTeam;
+use crate::hqm_match_util::{
+    HQMIcingConfiguration, HQMMatch, HQMOffsideConfiguration, HQMOffsideLineConfiguration,
     HQMTwoLinePassConfiguration,
 };
-use migo_hqm_server::hqm_game::HQMTeam;
-use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMServerPlayerIndex};
+use crate::hqm_server::{HQMServer, HQMServerPlayerIndex};
 use tracing::info;
 
-impl HQMMatchBehaviour {
-    pub(crate) fn reset_game(
-        &mut self,
-        server: &mut HQMServer,
-        player_index: HQMServerPlayerIndex,
-    ) {
+impl HQMMatch {
+    pub fn reset_game(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 info!("{} ({}) reset game", player.player_name, player_index);
@@ -27,11 +22,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn start_game(
-        &mut self,
-        server: &mut HQMServer,
-        player_index: HQMServerPlayerIndex,
-    ) {
+    pub fn start_game(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 if server.game.period == 0 && server.game.time > 1 {
@@ -48,7 +39,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn pause(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
+    pub fn pause(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 self.paused = true;
@@ -66,7 +57,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn unpause(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
+    pub fn unpause(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 self.paused = false;
@@ -80,7 +71,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_clock(
+    pub fn set_clock(
         &mut self,
         server: &mut HQMServer,
         input_minutes: u32,
@@ -104,7 +95,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_score(
+    pub fn set_score(
         &mut self,
         server: &mut HQMServer,
         input_team: HQMTeam,
@@ -142,7 +133,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_period(
+    pub fn set_period(
         &mut self,
         server: &mut HQMServer,
         input_period: u32,
@@ -165,7 +156,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_period_num(
+    pub fn set_period_num(
         &mut self,
         server: &mut HQMServer,
         input_period: u32,
@@ -191,68 +182,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn cheat_gravity(&mut self, server: &mut HQMServer, split: &[&str]) {
-        if split.len() >= 2 {
-            let gravity = split[1].parse::<f32>();
-            if let Ok(gravity) = gravity {
-                let converted_gravity = gravity / 10000.0;
-                self.config.physics_config.gravity = converted_gravity;
-                server.game.world.physics_config.gravity = converted_gravity;
-            }
-        }
-    }
-
-    pub(crate) fn cheat(
-        &mut self,
-        server: &mut HQMServer,
-        player_index: HQMServerPlayerIndex,
-        arg: &str,
-    ) {
-        if let Some(player) = server.players.get(player_index) {
-            if player.is_admin {
-                let split: Vec<&str> = arg.split_whitespace().collect();
-                if let Some(&command) = split.get(0) {
-                    match command {
-                        "gravity" => {
-                            self.cheat_gravity(server, &split);
-                        }
-                        _ => {}
-                    }
-                }
-            } else {
-                server.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    pub(crate) fn set_team_size(
-        &mut self,
-        server: &mut HQMServer,
-        player_index: HQMServerPlayerIndex,
-        size: &str,
-    ) {
-        if let Some(player) = server.players.get(player_index) {
-            if player.is_admin {
-                if let Ok(new_num) = size.parse::<usize>() {
-                    if new_num > 0 && new_num <= 15 {
-                        self.config.team_max = new_num;
-
-                        info!(
-                            "{} ({}) set team size to {}",
-                            player.player_name, player_index, new_num
-                        );
-                        let msg = format!("Team size set to {} by {}", new_num, player.player_name);
-
-                        server.messages.add_server_chat_message(msg);
-                    }
-                }
-            } else {
-                server.admin_deny_message(player_index);
-            }
-        }
-    }
-
-    pub(crate) fn set_icing_rule(
+    pub fn set_icing_rule(
         &mut self,
         server: &mut HQMServer,
         player_index: HQMServerPlayerIndex,
@@ -296,7 +226,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_offside_line(
+    pub fn set_offside_line(
         &mut self,
         server: &mut HQMServer,
         player_index: HQMServerPlayerIndex,
@@ -335,7 +265,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_twoline_pass(
+    pub fn set_twoline_pass(
         &mut self,
         server: &mut HQMServer,
         player_index: HQMServerPlayerIndex,
@@ -411,7 +341,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_offside_rule(
+    pub fn set_offside_rule(
         &mut self,
         server: &mut HQMServer,
         player_index: HQMServerPlayerIndex,
@@ -452,7 +382,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_goal_replay(
+    pub fn set_goal_replay(
         &mut self,
         server: &mut HQMServer,
         player_index: HQMServerPlayerIndex,
@@ -479,7 +409,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_first_to_rule(
+    pub fn set_first_to_rule(
         &mut self,
         server: &mut HQMServer,
         player_index: HQMServerPlayerIndex,
@@ -520,7 +450,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_mercy_rule(
+    pub fn set_mercy_rule(
         &mut self,
         server: &mut HQMServer,
         player_index: HQMServerPlayerIndex,
@@ -561,7 +491,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn faceoff(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
+    pub fn faceoff(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if !server.game.game_over {
             if let Some(player) = server.players.get(player_index) {
                 if player.is_admin {
@@ -581,7 +511,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn set_preferred_faceoff_position(
+    pub fn set_preferred_faceoff_position(
         &mut self,
         server: &mut HQMServer,
         player_index: HQMServerPlayerIndex,
@@ -609,42 +539,7 @@ impl HQMMatchBehaviour {
         }
     }
 
-    pub(crate) fn force_player_off_ice(
-        &mut self,
-        server: &mut HQMServer,
-        admin_player_index: HQMServerPlayerIndex,
-        force_player_index: HQMServerPlayerIndex,
-    ) {
-        if let Some(player) = server.players.get(admin_player_index) {
-            if player.is_admin {
-                let admin_player_name = player.player_name.clone();
-
-                if let Some(force_player) = server.players.get(force_player_index) {
-                    let force_player_name = force_player.player_name.clone();
-                    if server.move_to_spectator(force_player_index) {
-                        let msg = format!(
-                            "{} forced off ice by {}",
-                            force_player_name, admin_player_name
-                        );
-                        info!(
-                            "{} ({}) forced {} ({}) off ice",
-                            admin_player_name,
-                            admin_player_index,
-                            force_player_name,
-                            force_player_index
-                        );
-                        server.messages.add_server_chat_message(msg);
-                        self.team_switch_timer.insert(force_player_index, 500);
-                    }
-                }
-            } else {
-                server.admin_deny_message(admin_player_index);
-                return;
-            }
-        }
-    }
-
-    pub(crate) fn msg_rules(&self, server: &mut HQMServer, receiver_index: HQMServerPlayerIndex) {
+    pub fn msg_rules(&self, server: &mut HQMServer, receiver_index: HQMServerPlayerIndex) {
         let offside_str = match self.config.offside {
             HQMOffsideConfiguration::Off => "Offside disabled",
             HQMOffsideConfiguration::Delayed => "Offside enabled",
