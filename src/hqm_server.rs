@@ -1002,7 +1002,7 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn remove_player(&mut self, player_index: HQMServerPlayerIndex, on_replay: bool) {
+    pub fn remove_player(&mut self, player_index: HQMServerPlayerIndex, on_replay: bool) {
         if let Some(player) = self.players.get(player_index) {
             let player_name = player.player_name.clone();
             let is_admin = player.is_admin;
