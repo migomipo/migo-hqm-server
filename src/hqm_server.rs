@@ -744,8 +744,6 @@ impl HQMServer {
         }
     }
 
-
-
     fn list_players(&mut self, receiver_index: HQMServerPlayerIndex, first_index: usize) {
         let mut found = 0;
 
@@ -1013,20 +1011,17 @@ impl HQMServer {
         }
     }
 
-
     pub fn move_to_spectator(&mut self, player_index: HQMServerPlayerIndex) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
+            if let Some((object_index, _)) = player.object {
+                if self.game.world.remove_player(object_index) {
+                    player.object = None;
+                    let update = player.get_update_message(player_index);
+                    self.messages.add_global_message(update, true, true);
 
-                if let Some((object_index, _)) = player.object {
-                    if self.game.world.remove_player(object_index) {
-                        player.object = None;
-                        let update = player.get_update_message(player_index);
-                        self.messages.add_global_message(update, true, true);
-
-                        return true;
-                    }
+                    return true;
                 }
-
+            }
         }
         false
     }
@@ -1915,8 +1910,6 @@ pub fn get_spawnpoint(
     }
 }
 
-
-
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum HQMMuteStatus {
     NotMuted,
@@ -1938,9 +1931,7 @@ pub struct HQMNetworkPlayerData {
 }
 
 pub enum HQMServerPlayerData {
-    NetworkPlayer {
-        data: HQMNetworkPlayerData,
-    },
+    NetworkPlayer { data: HQMNetworkPlayerData },
 }
 
 pub struct HQMServerPlayer {

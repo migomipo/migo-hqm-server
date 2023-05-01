@@ -35,10 +35,7 @@ pub struct HQMShootoutBehaviour {
 }
 
 impl HQMShootoutBehaviour {
-    pub fn new(
-        attempts: u32,
-        physics_config: HQMPhysicsConfiguration,
-    ) -> Self {
+    pub fn new(attempts: u32, physics_config: HQMPhysicsConfiguration) -> Self {
         HQMShootoutBehaviour {
             attempts,
             status: HQMShootoutStatus::WaitingForGame,
@@ -182,17 +179,10 @@ impl HQMShootoutBehaviour {
                             .get(&player_index)
                             .map_or(true, |x| *x == 0)
                     {
-
                         if player.input.join_red() {
-                            joining_red.push((
-                                player_index,
-                                player.player_name.clone(),
-                            ));
+                            joining_red.push((player_index, player.player_name.clone()));
                         } else if player.input.join_blue() {
-                            joining_blue.push((
-                                player_index,
-                                player.player_name.clone(),
-                            ));
+                            joining_blue.push((player_index, player.player_name.clone()));
                         }
                     }
                 } else if player.input.spectate() {
@@ -252,18 +242,15 @@ impl HQMShootoutBehaviour {
                 }
             }
 
-
             for (player_index, player_name) in joining_red {
-
-                    add_player(
-                        player_index,
-                        player_name,
-                        server,
-                        HQMTeam::Red,
-                        &mut new_red_player_count,
-                        self.team_max,
-                    );
-
+                add_player(
+                    player_index,
+                    player_name,
+                    server,
+                    HQMTeam::Red,
+                    &mut new_red_player_count,
+                    self.team_max,
+                );
             }
             for (player_index, player_name) in joining_blue {
                 add_player(

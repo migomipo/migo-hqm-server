@@ -17,11 +17,7 @@ pub struct HQMMatchBehaviour {
 }
 
 impl HQMMatchBehaviour {
-    pub fn new(
-        config: HQMMatchConfiguration,
-        team_max: usize,
-        spawn_point: HQMSpawnPoint,
-    ) -> Self {
+    pub fn new(config: HQMMatchConfiguration, team_max: usize, spawn_point: HQMSpawnPoint) -> Self {
         HQMMatchBehaviour {
             m: HQMMatch::new(config),
             spawn_point,
@@ -48,15 +44,9 @@ impl HQMMatchBehaviour {
                             .map_or(true, |x| *x == 0)
                     {
                         if player.input.join_red() {
-                            joining_red.push((
-                                player_index,
-                                player.player_name.clone(),
-                            ));
+                            joining_red.push((player_index, player.player_name.clone()));
                         } else if player.input.join_blue() {
-                            joining_blue.push((
-                                player_index,
-                                player.player_name.clone(),
-                            ));
+                            joining_blue.push((player_index, player.player_name.clone()));
                         }
                     }
                 } else if player.input.spectate() {
@@ -93,32 +83,28 @@ impl HQMMatchBehaviour {
             let mut new_blue_player_count = blue_player_count;
 
             for (player_index, player_name) in joining_red {
-
-                    add_player(
-                        &mut self.m,
-                        player_index,
-                        player_name,
-                        server,
-                        HQMTeam::Red,
-                        self.spawn_point,
-                        &mut new_red_player_count,
-                        self.team_max,
-                    )
-
+                add_player(
+                    &mut self.m,
+                    player_index,
+                    player_name,
+                    server,
+                    HQMTeam::Red,
+                    self.spawn_point,
+                    &mut new_red_player_count,
+                    self.team_max,
+                )
             }
             for (player_index, player_name) in joining_blue {
-
-                    add_player(
-                        &mut self.m,
-                        player_index,
-                        player_name,
-                        server,
-                        HQMTeam::Blue,
-                        self.spawn_point,
-                        &mut new_blue_player_count,
-                        self.team_max,
-                    )
-
+                add_player(
+                    &mut self.m,
+                    player_index,
+                    player_name,
+                    server,
+                    HQMTeam::Blue,
+                    self.spawn_point,
+                    &mut new_blue_player_count,
+                    self.team_max,
+                )
             }
 
             if server.game.period == 0
@@ -387,4 +373,3 @@ fn add_player(
         m.clear_started_goalie(player_index);
     }
 }
-

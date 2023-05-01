@@ -65,15 +65,9 @@ impl HQMRussianBehaviour {
                             .map_or(true, |x| *x == 0)
                     {
                         if player.input.join_red() {
-                            joining_red.push((
-                                player_index,
-                                player.player_name.clone(),
-                            ));
+                            joining_red.push((player_index, player.player_name.clone()));
                         } else if player.input.join_blue() {
-                            joining_blue.push((
-                                player_index,
-                                player.player_name.clone(),
-                            ));
+                            joining_blue.push((player_index, player.player_name.clone()));
                         }
                     }
                 } else if player.input.spectate() {
@@ -140,7 +134,6 @@ impl HQMRussianBehaviour {
                     *player_count += 1
                 }
             }
-
 
             for (player_index, player_name) in joining_red {
                 add_player(

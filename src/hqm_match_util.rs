@@ -2,9 +2,7 @@ use crate::hqm_game::{
     HQMGame, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot,
     HQMRinkLine, HQMRinkSide, HQMRulesState, HQMTeam,
 };
-use crate::hqm_server::{
-    HQMServer, HQMServerPlayer, HQMServerPlayerIndex, HQMServerPlayerList,
-};
+use crate::hqm_server::{HQMServer, HQMServerPlayer, HQMServerPlayerIndex, HQMServerPlayerList};
 use crate::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
 use std::collections::hash_map::Entry;

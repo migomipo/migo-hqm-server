@@ -202,7 +202,6 @@ async fn main() -> std::io::Result<()> {
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
         tracing_subscriber::fmt().with_writer(non_blocking).init();
 
-
         return match mode {
             HQMServerMode::Match => {
                 let periods =
@@ -314,11 +313,7 @@ async fn main() -> std::io::Result<()> {
                     server_port,
                     server_public,
                     config,
-                    HQMMatchBehaviour::new(
-                        match_config,
-                        server_team_max,
-                        spawn_point,
-                    ),
+                    HQMMatchBehaviour::new(match_config, server_team_max, spawn_point),
                 )
                 .await
             }
@@ -337,11 +332,7 @@ async fn main() -> std::io::Result<()> {
                     server_port,
                     server_public,
                     config,
-                    HQMPermanentWarmup::new(
-                        physics_config,
-                        warmup_pucks,
-                        spawn_point,
-                    ),
+                    HQMPermanentWarmup::new(physics_config, warmup_pucks, spawn_point),
                 )
                 .await
             }
