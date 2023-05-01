@@ -3,7 +3,7 @@ use crate::hqm_game::{
     HQMRinkLine, HQMRinkSide, HQMRulesState, HQMTeam,
 };
 use crate::hqm_server::{
-    HQMServer, HQMServerPlayer, HQMServerPlayerData, HQMServerPlayerIndex, HQMServerPlayerList,
+    HQMServer, HQMServerPlayer, HQMServerPlayerIndex, HQMServerPlayerList,
 };
 use crate::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
@@ -1029,13 +1029,8 @@ pub fn get_faceoff_positions(
     for (player_index, player) in players.iter() {
         if let Some(player) = player {
             let team = player.object.map(|x| x.1);
-            let i = match &player.data {
-                HQMServerPlayerData::DualControl { movement, stick } => {
-                    movement.or(*stick).unwrap_or(player_index)
-                }
-                _ => player_index,
-            };
-            let preferred_position = preferred_positions.get(&i).map(String::as_str);
+
+            let preferred_position = preferred_positions.get(&player_index).map(String::as_str);
 
             if team == Some(HQMTeam::Red) {
                 red_players.push((player_index, preferred_position));

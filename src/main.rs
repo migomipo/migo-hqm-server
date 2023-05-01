@@ -14,7 +14,6 @@ mod hqm_warmup;
 
 use crate::hqm_faceoff_practice::HQMFaceoffPracticeBehaviour;
 use crate::hqm_match::HQMMatchBehaviour;
-use migo_hqm_server::hqm_behaviour_extra::HQMDualControlSetting;
 
 use crate::hqm_russian::HQMRussianBehaviour;
 use crate::hqm_shootout::HQMShootoutBehaviour;
@@ -203,20 +202,6 @@ async fn main() -> std::io::Result<()> {
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
         tracing_subscriber::fmt().with_writer(non_blocking).init();
 
-        let dual_control = get_optional(
-            game_section,
-            "dual_control",
-            HQMDualControlSetting::No,
-            |s| {
-                if s.eq_ignore_ascii_case("true") {
-                    HQMDualControlSetting::Yes
-                } else if s.eq_ignore_ascii_case("combined") || s.eq_ignore_ascii_case("both") {
-                    HQMDualControlSetting::Combined
-                } else {
-                    HQMDualControlSetting::No
-                }
-            },
-        );
 
         return match mode {
             HQMServerMode::Match => {
@@ -332,7 +317,6 @@ async fn main() -> std::io::Result<()> {
                     HQMMatchBehaviour::new(
                         match_config,
                         server_team_max,
-                        dual_control,
                         spawn_point,
                     ),
                 )
@@ -357,7 +341,6 @@ async fn main() -> std::io::Result<()> {
                         physics_config,
                         warmup_pucks,
                         spawn_point,
-                        dual_control,
                     ),
                 )
                 .await
@@ -375,7 +358,6 @@ async fn main() -> std::io::Result<()> {
                         server_team_max,
                         physics_config,
                         blue_line_location,
-                        dual_control,
                     ),
                 )
                 .await
@@ -388,7 +370,7 @@ async fn main() -> std::io::Result<()> {
                     server_port,
                     server_public,
                     config,
-                    HQMShootoutBehaviour::new(attempts, physics_config, dual_control),
+                    HQMShootoutBehaviour::new(attempts, physics_config),
                 )
                 .await
             }
