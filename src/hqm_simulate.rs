@@ -414,7 +414,8 @@ fn update_player(
             };
             skate_direction[1] = 0.0;
             skate_direction.normalize_mut();
-            let new_acceleration = skate_direction.scale(0.05) - &player.body.linear_velocity;
+            let new_acceleration = skate_direction.scale(physics_config.max_player_speed)
+                - &player.body.linear_velocity;
 
             player.body.linear_velocity += limit_vector_length(&new_acceleration, max_acceleration);
         }
@@ -441,13 +442,16 @@ fn update_player(
         let mut velocity_adjustment = &player.body.rot * Vector3::x();
         velocity_adjustment[1] = 0.0;
         velocity_adjustment.normalize_mut();
-        velocity_adjustment.scale_mut(0.0333333 * turn);
+        velocity_adjustment.scale_mut(physics_config.max_player_shift_speed * turn);
         velocity_adjustment -= &player.body.linear_velocity;
-        player.body.linear_velocity += limit_vector_length(&velocity_adjustment, 0.00027777);
-        turn_change.scale_mut(-turn * 5.6 / 14400.0);
+        player.body.linear_velocity += limit_vector_length(
+            &velocity_adjustment,
+            physics_config.player_shift_acceleration,
+        );
+        turn_change.scale_mut(-turn * physics_config.player_shift_turning);
         player.body.angular_velocity += turn_change;
     } else {
-        turn_change.scale_mut(turn * 6.0 / 14400.0);
+        turn_change.scale_mut(turn * physics_config.player_turning);
         player.body.angular_velocity += turn_change;
     }
 
@@ -546,7 +550,7 @@ fn update_player(
 
         if !player.input.shift() {
             let axis = &player.body.rot * Vector3::z();
-            let temp = -player.body.linear_velocity.dot(&axis) / 0.05;
+            let temp = -player.body.linear_velocity.dot(&axis) / physics_config.max_player_speed;
             rotate_vector_around_axis(&mut unit, &axis, 0.225 * turn * temp);
         }
 
