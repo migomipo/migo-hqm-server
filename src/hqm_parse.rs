@@ -1,6 +1,10 @@
+use crate::hqm_game::HQMPlayerInput;
+use crate::hqm_server::HQMClientVersion;
+use bytes::{BufMut, BytesMut};
 use nalgebra::storage::Storage;
-use nalgebra::{Matrix3, Vector3, U1, U3};
+use nalgebra::{Matrix3, Vector2, Vector3, U1, U3};
 use std::cmp::min;
+use std::io::Error;
 
 const UXP: Vector3<f32> = Vector3::new(1.0, 0.0, 0.0);
 const UXN: Vector3<f32> = Vector3::new(-1.0, 0.0, 0.0);
@@ -19,6 +23,145 @@ const TABLE: [[&'static Vector3<f32>; 3]; 8] = [
     [&UXP, &UZN, &UYN],
     [&UZN, &UXN, &UYN],
 ];
+
+const GAME_HEADER: &[u8] = b"Hock";
+
+pub enum HQMClientToServerMessage {
+    Join {
+        version: u32,
+        player_name: Vec<u8>,
+    },
+    Update {
+        current_game_id: u32,
+        input: HQMPlayerInput,
+        deltatime: Option<u32>,
+        new_known_packet: u32,
+        known_msg_pos: usize,
+        chat: Option<(u8, Vec<u8>)>,
+        version: HQMClientVersion,
+    },
+    Exit,
+    ServerInfo {
+        version: u32,
+        ping: u32,
+    },
+}
+
+pub struct HQMMessageCodec;
+
+impl HQMMessageCodec {
+    pub fn parse_message(
+        &self,
+        src: &[u8],
+    ) -> Result<HQMClientToServerMessage, HQMClientToServerMessageDecoderError> {
+        let mut parser = HQMMessageReader::new(&src);
+        let header = parser.read_bytes_aligned(4);
+        if header != GAME_HEADER {
+            return Err(HQMClientToServerMessageDecoderError::WrongHeader);
+        }
+
+        let command = parser.read_byte_aligned();
+        match command {
+            0 => self.parse_request_info(&mut parser),
+            2 => self.parse_player_join(&mut parser),
+            4 => self.parse_player_update(&mut parser, HQMClientVersion::Vanilla),
+            8 => self.parse_player_update(&mut parser, HQMClientVersion::Ping),
+            0x10 => self.parse_player_update(&mut parser, HQMClientVersion::PingRules),
+            7 => Ok(HQMClientToServerMessage::Exit),
+            _ => Err(HQMClientToServerMessageDecoderError::UnknownType),
+        }
+    }
+
+    fn parse_request_info(
+        &self,
+        parser: &mut HQMMessageReader,
+    ) -> Result<HQMClientToServerMessage, HQMClientToServerMessageDecoderError> {
+        let version = parser.read_bits(8);
+        let ping = parser.read_u32_aligned();
+        Ok(HQMClientToServerMessage::ServerInfo { version, ping })
+    }
+
+    fn parse_player_join(
+        &self,
+        parser: &mut HQMMessageReader,
+    ) -> Result<HQMClientToServerMessage, HQMClientToServerMessageDecoderError> {
+        let version = parser.read_bits(8);
+        let player_name = parser.read_bytes_aligned(32);
+        Ok(HQMClientToServerMessage::Join {
+            version,
+            player_name,
+        })
+    }
+
+    fn parse_player_update(
+        &self,
+        parser: &mut HQMMessageReader,
+        client_version: HQMClientVersion,
+    ) -> Result<HQMClientToServerMessage, HQMClientToServerMessageDecoderError> {
+        let current_game_id = parser.read_u32_aligned();
+
+        let input_stick_angle = parser.read_f32_aligned();
+        let input_turn = parser.read_f32_aligned();
+        let _input_unknown = parser.read_f32_aligned();
+        let input_fwbw = parser.read_f32_aligned();
+        let input_stick_rot_1 = parser.read_f32_aligned();
+        let input_stick_rot_2 = parser.read_f32_aligned();
+        let input_head_rot = parser.read_f32_aligned();
+        let input_body_rot = parser.read_f32_aligned();
+        let input_keys = parser.read_u32_aligned();
+        let input = HQMPlayerInput {
+            stick_angle: input_stick_angle,
+            turn: input_turn,
+            fwbw: input_fwbw,
+            stick: Vector2::new(input_stick_rot_1, input_stick_rot_2),
+            head_rot: input_head_rot,
+            body_rot: input_body_rot,
+            keys: input_keys,
+        };
+
+        let deltatime = if client_version.has_ping() {
+            Some(parser.read_u32_aligned())
+        } else {
+            None
+        };
+
+        let new_known_packet = parser.read_u32_aligned();
+        let known_msg_pos = parser.read_u16_aligned() as usize;
+
+        let chat = {
+            let has_chat_msg = parser.read_bits(1) == 1;
+            if has_chat_msg {
+                let rep = parser.read_bits(3) as u8;
+                let byte_num = parser.read_bits(8) as usize;
+                let message = parser.read_bytes_aligned(byte_num);
+                Some((rep, message))
+            } else {
+                None
+            }
+        };
+
+        Ok(HQMClientToServerMessage::Update {
+            current_game_id,
+            input,
+            deltatime,
+            new_known_packet,
+            known_msg_pos,
+            chat,
+            version: client_version,
+        })
+    }
+}
+pub enum HQMClientToServerMessageDecoderError {
+    IoError(std::io::Error),
+    WrongHeader,
+    UnknownType,
+}
+
+impl From<std::io::Error> for HQMClientToServerMessageDecoderError {
+    fn from(value: Error) -> Self {
+        HQMClientToServerMessageDecoderError::IoError(value)
+    }
+}
 
 pub fn convert_matrix_to_network(b: u8, v: &Matrix3<f32>) -> (u32, u32) {
     let r1 = convert_rot_column_to_network(b, &v.column(1));
@@ -125,57 +268,33 @@ fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(
 }
 
 pub struct HQMMessageWriter<'a> {
-    buf: &'a mut [u8],
-    pos: usize,
+    buf: &'a mut BytesMut,
     bit_pos: u8,
 }
 
 impl<'a> HQMMessageWriter<'a> {
-    pub fn get_bytes_written(&self) -> usize {
-        return if self.bit_pos > 0 {
-            self.pos + 1
-        } else {
-            self.pos
-        };
-    }
-
-    pub fn get_pos(&self) -> usize {
-        self.pos
-    }
-
     pub fn write_byte_aligned(&mut self, v: u8) {
         self.align();
-        self.buf[self.pos] = v;
-        self.pos += 1;
+        self.buf.put_u8(v);
     }
 
     pub fn write_bytes_aligned(&mut self, v: &[u8]) {
         self.align();
-        for b in v {
-            self.buf[self.pos] = *b;
-            self.pos += 1;
-        }
+        self.buf.put_slice(v);
     }
 
     pub fn write_bytes_aligned_padded(&mut self, n: usize, v: &[u8]) {
         self.align();
         let m = min(n, v.len());
-        self.write_bytes_aligned(&v[0..m]);
+        self.buf.put_slice(&v[0..m]);
         if n > m {
-            for _ in 0..(n - m) {
-                self.buf[self.pos] = 0;
-                self.pos += 1;
-            }
+            self.buf.put_bytes(0, n - m);
         }
     }
 
     pub fn write_u32_aligned(&mut self, v: u32) {
         self.align();
-        self.buf[self.pos] = (v & 0xff) as u8;
-        self.buf[self.pos + 1] = ((v >> 8) & 0xff) as u8;
-        self.buf[self.pos + 2] = ((v >> 16) & 0xff) as u8;
-        self.buf[self.pos + 3] = ((v >> 24) & 0xff) as u8;
-        self.pos += 4;
+        self.buf.put_u32_le(v);
     }
 
     #[allow(dead_code)]
@@ -214,14 +333,13 @@ impl<'a> HQMMessageWriter<'a> {
             let a = ((to_write >> p) & mask) as u8;
 
             if self.bit_pos == 0 {
-                self.buf[self.pos] = a;
+                self.buf.put_u8(a);
             } else {
-                self.buf[self.pos] |= a << self.bit_pos;
+                *(self.buf.last_mut().unwrap()) |= a << self.bit_pos;
             }
 
             if bits_remaining >= bits_possible_to_write {
                 bits_remaining -= bits_possible_to_write;
-                self.pos += 1;
                 self.bit_pos = 0;
                 p += bits;
             } else {
@@ -232,18 +350,17 @@ impl<'a> HQMMessageWriter<'a> {
     }
 
     fn align(&mut self) {
-        if self.bit_pos > 0 {
-            self.bit_pos = 0;
-            self.pos += 1;
+        self.bit_pos = 0;
+    }
+
+    pub fn replay_fix(&mut self) {
+        if self.bit_pos == 0 {
+            self.buf.put_u8(0);
         }
     }
 
-    pub fn new(buf: &'a mut [u8]) -> Self {
-        HQMMessageWriter {
-            buf,
-            pos: 0,
-            bit_pos: 0,
-        }
+    pub fn new(buf: &'a mut BytesMut) -> Self {
+        HQMMessageWriter { buf, bit_pos: 0 }
     }
 }
 
