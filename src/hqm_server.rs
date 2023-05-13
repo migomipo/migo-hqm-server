@@ -421,7 +421,7 @@ impl HQMServer {
         deltatime: Option<u32>,
         new_known_packet: u32,
         known_msgpos: usize,
-        chat: Option<(u8, Vec<u8>)>,
+        chat: Option<(u8, String)>,
         client_version: HQMClientVersion,
         behaviour: &mut B,
     ) {
@@ -479,7 +479,7 @@ impl HQMServer {
         &mut self,
         addr: SocketAddr,
         player_version: u32,
-        player_name_bytes: Vec<u8>,
+        name: String,
         behaviour: &mut B,
     ) {
         let player_count = self.player_count();
@@ -505,21 +505,15 @@ impl HQMServer {
             return;
         }
 
-        let player_name = get_player_name(player_name_bytes);
-        match player_name {
-            Some(name) => {
-                if let Some(player_index) = self.add_player(name.clone(), addr) {
-                    behaviour.after_player_join(self, player_index);
-                    info!(
-                        "{} ({}) joined server from address {:?}",
-                        name, player_index, addr
-                    );
-                    let msg = format!("{} joined", name);
-                    self.messages.add_server_chat_message(msg);
-                }
-            }
-            _ => {}
-        };
+        if let Some(player_index) = self.add_player(name.clone(), addr) {
+            behaviour.after_player_join(self, player_index);
+            info!(
+                "{} ({}) joined server from address {:?}",
+                name, player_index, addr
+            );
+            let msg = format!("{} joined", name);
+            self.messages.add_server_chat_message(msg);
+        }
     }
 
     pub fn set_hand(&mut self, hand: HQMSkaterHand, player_index: HQMServerPlayerIndex) {
@@ -852,15 +846,10 @@ impl HQMServer {
 
     fn process_message<B: HQMServerBehaviour>(
         &mut self,
-        bytes: Vec<u8>,
+        msg: String,
         player_index: HQMServerPlayerIndex,
         behaviour: &mut B,
     ) {
-        let msg = match String::from_utf8(bytes) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-
         if self.players.get(player_index).is_some() {
             if msg.starts_with("/") {
                 let split: Vec<&str> = msg.splitn(2, " ").collect();
@@ -1799,24 +1788,6 @@ fn get_packets(objects: &[HQMGameObject]) -> smallvec::SmallVec<[HQMObjectPacket
         packets.push(packet);
     }
     packets
-}
-
-fn get_player_name(bytes: Vec<u8>) -> Option<String> {
-    let first_null = bytes.iter().position(|x| *x == 0);
-
-    let bytes = match first_null {
-        Some(x) => &bytes[0..x],
-        None => &bytes[..],
-    }
-    .to_vec();
-    return match String::from_utf8(bytes) {
-        Ok(s) => {
-            let s = s.trim();
-            let s = if s.is_empty() { "Noname" } else { s };
-            Some(String::from(s))
-        }
-        Err(_) => None,
-    };
 }
 
 async fn get_master_server() -> Result<SocketAddr, Box<dyn Error>> {

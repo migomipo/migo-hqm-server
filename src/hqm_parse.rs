@@ -5,6 +5,7 @@ use nalgebra::storage::Storage;
 use nalgebra::{Matrix3, Vector2, Vector3, U1, U3};
 use std::cmp::min;
 use std::io::Error;
+use std::string::FromUtf8Error;
 
 const UXP: Vector3<f32> = Vector3::new(1.0, 0.0, 0.0);
 const UXN: Vector3<f32> = Vector3::new(-1.0, 0.0, 0.0);
@@ -29,7 +30,7 @@ const GAME_HEADER: &[u8] = b"Hock";
 pub enum HQMClientToServerMessage {
     Join {
         version: u32,
-        player_name: Vec<u8>,
+        player_name: String,
     },
     Update {
         current_game_id: u32,
@@ -37,7 +38,7 @@ pub enum HQMClientToServerMessage {
         deltatime: Option<u32>,
         new_known_packet: u32,
         known_msg_pos: usize,
-        chat: Option<(u8, Vec<u8>)>,
+        chat: Option<(u8, String)>,
         version: HQMClientVersion,
     },
     Exit,
@@ -87,6 +88,7 @@ impl HQMMessageCodec {
     ) -> Result<HQMClientToServerMessage, HQMClientToServerMessageDecoderError> {
         let version = parser.read_bits(8);
         let player_name = parser.read_bytes_aligned(32);
+        let player_name = get_player_name(player_name)?;
         Ok(HQMClientToServerMessage::Join {
             version,
             player_name,
@@ -134,7 +136,8 @@ impl HQMMessageCodec {
                 let rep = parser.read_bits(3) as u8;
                 let byte_num = parser.read_bits(8) as usize;
                 let message = parser.read_bytes_aligned(byte_num);
-                Some((rep, message))
+                let msg = String::from_utf8(message)?;
+                Some((rep, msg))
             } else {
                 None
             }
@@ -155,12 +158,35 @@ pub enum HQMClientToServerMessageDecoderError {
     IoError(std::io::Error),
     WrongHeader,
     UnknownType,
+    StringDecoding(FromUtf8Error),
 }
 
 impl From<std::io::Error> for HQMClientToServerMessageDecoderError {
     fn from(value: Error) -> Self {
         HQMClientToServerMessageDecoderError::IoError(value)
     }
+}
+
+impl From<FromUtf8Error> for HQMClientToServerMessageDecoderError {
+    fn from(value: FromUtf8Error) -> Self {
+        HQMClientToServerMessageDecoderError::StringDecoding(value)
+    }
+}
+
+fn get_player_name(bytes: Vec<u8>) -> Result<String, FromUtf8Error> {
+    let first_null = bytes.iter().position(|x| *x == 0);
+
+    let bytes = match first_null {
+        Some(x) => &bytes[0..x],
+        None => &bytes[..],
+    }
+    .to_vec();
+    let name = String::from_utf8(bytes)?;
+    Ok(if name.is_empty() {
+        "Noname".to_owned()
+    } else {
+        name
+    })
 }
 
 pub fn convert_matrix_to_network(b: u8, v: &Matrix3<f32>) -> (u32, u32) {
