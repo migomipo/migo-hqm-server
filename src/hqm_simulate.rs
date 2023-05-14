@@ -87,10 +87,10 @@ impl HQMGameWorld {
         }
 
         for i in 0..players.len() {
-            for j in i + 1..players.len() {
-                let (a, b) = players.split_at_mut(j);
-                let (_, p1) = &mut a[i];
-                let (_, p2) = &mut b[0];
+            let (a, b) = players.split_at_mut(i + 1);
+            let (_, ref mut p1) = &mut a[i];
+
+            for (j, (_, p2)) in ((i + 1)..).zip(b.iter_mut()) {
                 for (ib, p1_collision_ball) in p1.collision_balls.iter().enumerate() {
                     for (jb, p2_collision_ball) in p2.collision_balls.iter().enumerate() {
                         let pos_diff = &p1_collision_ball.pos - &p2_collision_ball.pos;
