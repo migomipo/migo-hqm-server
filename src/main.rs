@@ -25,7 +25,7 @@ use migo_hqm_server::hqm_match_util::{
     HQMOffsideLineConfiguration, HQMTwoLinePassConfiguration,
 };
 use migo_hqm_server::hqm_server;
-use migo_hqm_server::hqm_server::{HQMServerConfiguration, HQMSpawnPoint};
+use migo_hqm_server::hqm_server::{HQMServerConfiguration, HQMSpawnPoint, ReplaySaving};
 use tracing_appender;
 use tracing_subscriber;
 
@@ -113,6 +113,13 @@ async fn main() -> std::io::Result<()> {
             .filter(|x| !x.is_empty())
             .collect();
 
+        let replay_saving =
+            server_section
+                .get("replay_endpoint")
+                .map_or(ReplaySaving::File, |url| ReplaySaving::Endpoint {
+                    url: url.to_string(),
+                });
+
         fn get_optional<U, F: FnOnce(&str) -> U>(
             section: Option<&Properties>,
             property: &str,
@@ -140,6 +147,7 @@ async fn main() -> std::io::Result<()> {
             password: server_password,
             player_max: server_player_max,
             replays_enabled,
+            replay_saving,
             server_name,
             server_service,
         };

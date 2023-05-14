@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use nalgebra::{Point3, Rotation3};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
@@ -323,6 +323,7 @@ pub struct HQMServer {
     requested_replays: VecDeque<(u32, u32, Option<HQMServerPlayerIndex>)>,
     game_id: u32,
     pub is_muted: bool,
+    pub reqwest_client: reqwest::Client,
 }
 
 impl HQMServer {
@@ -1278,40 +1279,54 @@ impl HQMServer {
     }
 
     pub fn new_game(&mut self, new_game: HQMGame) {
-        let game_id = self.game_id;
         let old_game = std::mem::replace(&mut self.game, new_game);
         self.game_id += 1;
         self.messages.clear();
         info!("New game {} started", self.game_id);
 
         if self.config.replays_enabled && old_game.period != 0 {
+            let size = old_game.replay_data.len();
+            let mut replay_data = BytesMut::with_capacity(size + 8);
+            replay_data.put_u32_le(0u32);
+            replay_data.put_u32_le(size as u32);
+            replay_data.put_slice(&old_game.replay_data);
+            let replay_data = replay_data.freeze();
             let time = old_game.start_time.format("%Y-%m-%dT%H%M%S").to_string();
-            let file_name = format!("{}.{}.hrp", self.config.server_name, time);
-            let replay_data = old_game.replay_data;
+            match self.config.replay_saving {
+                ReplaySaving::File => {
+                    let file_name = format!("{}.{}.hrp", self.config.server_name, time);
 
-            tokio::spawn(async move {
-                if tokio::fs::create_dir_all("replays").await.is_err() {
-                    return;
-                };
-                let path: PathBuf = ["replays", &file_name].iter().collect();
+                    tokio::spawn(async move {
+                        if tokio::fs::create_dir_all("replays").await.is_err() {
+                            return;
+                        };
+                        let path: PathBuf = ["replays", &file_name].iter().collect();
 
-                let mut file_handle = match File::create(path).await {
-                    Ok(file) => file,
-                    Err(e) => {
-                        println!("{:?}", e);
-                        return;
-                    }
-                };
+                        let mut file_handle = match File::create(path).await {
+                            Ok(file) => file,
+                            Err(e) => {
+                                println!("{:?}", e);
+                                return;
+                            }
+                        };
 
-                let size = replay_data.len() as u32;
+                        let _x = file_handle.write(&replay_data).await;
+                        let _x = file_handle.sync_all().await;
+                    });
+                }
+                ReplaySaving::Endpoint { ref url } => {
+                    let client = self.reqwest_client.clone();
+                    let bytes: Vec<u8> = replay_data.into();
+                    let form = reqwest::multipart::Form::new()
+                        .text("time", time)
+                        .part("replay", reqwest::multipart::Part::bytes(bytes));
 
-                let _x = file_handle.write_all(&0u32.to_le_bytes()).await;
-                let _x = file_handle.write_all(&size.to_le_bytes()).await;
-                let _x = file_handle.write_all(&replay_data).await;
-                let _x = file_handle.sync_all().await;
-
-                info!("Replay of game {} saved as {}", game_id, file_name);
-            });
+                    let request = client.post(url).multipart(form);
+                    tokio::spawn(async move {
+                        let _x = request.send().await;
+                    });
+                }
+            }
         }
 
         for (player_index, p) in self.players.players.iter_mut().enumerate() {
@@ -1374,6 +1389,8 @@ pub async fn run_server<B: HQMServerBehaviour>(
     }
     let first_game = behaviour.create_game();
 
+    let reqwest_client = reqwest::Client::new();
+
     let mut server = HQMServer {
         players: HQMServerPlayerList {
             players: player_vec,
@@ -1387,6 +1404,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
         game_id: 1,
         replay_queue: VecDeque::new(),
         requested_replays: VecDeque::new(),
+        reqwest_client: reqwest_client.clone(),
     };
     info!("Server started, new game {} started", 1);
 
@@ -1406,9 +1424,10 @@ pub async fn run_server<B: HQMServerBehaviour>(
 
     if public {
         let socket = socket.clone();
+        let reqwest_client = reqwest_client.clone();
         tokio::spawn(async move {
             loop {
-                let master_server = get_master_server().await.ok();
+                let master_server = get_master_server(&reqwest_client).await.ok();
                 if let Some(addr) = master_server {
                     for _ in 0..60 {
                         let msg = b"Hock\x20";
@@ -1790,8 +1809,10 @@ fn get_packets(objects: &[HQMGameObject]) -> smallvec::SmallVec<[HQMObjectPacket
     packets
 }
 
-async fn get_master_server() -> Result<SocketAddr, Box<dyn Error>> {
-    let s = reqwest::get("http://www.crypticsea.com/anewzero/serverinfo.php")
+async fn get_master_server(client: &reqwest::Client) -> Result<SocketAddr, Box<dyn Error>> {
+    let s = client
+        .get("http://www.crypticsea.com/anewzero/serverinfo.php")
+        .send()
         .await?
         .text()
         .await?;
@@ -1998,12 +2019,19 @@ pub enum HQMSpawnPoint {
 }
 
 #[derive(Debug, Clone)]
+pub enum ReplaySaving {
+    File,
+    Endpoint { url: String },
+}
+
+#[derive(Debug, Clone)]
 pub struct HQMServerConfiguration {
     pub welcome: Vec<String>,
     pub password: String,
     pub player_max: usize,
 
     pub replays_enabled: bool,
+    pub replay_saving: ReplaySaving,
     pub server_name: String,
     pub server_service: Option<String>,
 }
