@@ -135,8 +135,8 @@ async fn main() -> std::io::Result<()> {
         // Game
         let game_section = conf.section(Some("Game"));
 
-        let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, |x| {
-            x.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on")
+        let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, |s| {
+            s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on")
         });
 
         let blue_line_location = get_optional(game_section, "blue_line_location", 22.86f32, |x| {
