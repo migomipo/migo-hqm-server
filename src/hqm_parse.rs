@@ -300,17 +300,17 @@ pub struct HQMMessageWriter<'a> {
 
 impl<'a> HQMMessageWriter<'a> {
     pub fn write_byte_aligned(&mut self, v: u8) {
-        self.align();
+        self.bit_pos = 0;
         self.buf.put_u8(v);
     }
 
     pub fn write_bytes_aligned(&mut self, v: &[u8]) {
-        self.align();
+        self.bit_pos = 0;
         self.buf.put_slice(v);
     }
 
     pub fn write_bytes_aligned_padded(&mut self, n: usize, v: &[u8]) {
-        self.align();
+        self.bit_pos = 0;
         let m = min(n, v.len());
         self.buf.put_slice(&v[0..m]);
         if n > m {
@@ -319,7 +319,7 @@ impl<'a> HQMMessageWriter<'a> {
     }
 
     pub fn write_u32_aligned(&mut self, v: u32) {
-        self.align();
+        self.bit_pos = 0;
         self.buf.put_u32_le(v);
     }
 
@@ -373,10 +373,6 @@ impl<'a> HQMMessageWriter<'a> {
                 bits_remaining = 0;
             }
         }
-    }
-
-    fn align(&mut self) {
-        self.bit_pos = 0;
     }
 
     pub fn replay_fix(&mut self) {
