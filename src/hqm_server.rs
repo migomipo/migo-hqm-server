@@ -1139,13 +1139,11 @@ impl HQMServer {
         self.game.saved_pings.truncate(100 - 1);
         self.game.saved_pings.push_front(Instant::now());
 
-        if self.config.replays_enabled {
-            write_replay(
-                &mut self.game,
-                &self.messages.get_replay_messages(),
-                write_buf,
-            );
-        }
+        write_replay(
+            &mut self.game,
+            &self.messages.get_replay_messages(),
+            write_buf,
+        );
     }
 
     fn remove_inactive_players<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {

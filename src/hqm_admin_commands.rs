@@ -431,11 +431,6 @@ impl HQMServer {
                 match rule {
                     "on" => {
                         self.config.replays_enabled = true;
-                        if self.game.replay_data.len() < 64 * 1024 * 1024 {
-                            self.game
-                                .replay_data
-                                .reserve((64 * 1024 * 1024) - self.game.replay_data.len())
-                        }
 
                         info!("{} ({}) enabled replays", player.player_name, player_index);
                         let msg = format!("Replays enabled by {}", player.player_name);
