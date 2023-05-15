@@ -1316,10 +1316,9 @@ impl HQMServer {
                 }
                 ReplaySaving::Endpoint { ref url } => {
                     let client = self.reqwest_client.clone();
-                    let bytes: Vec<u8> = replay_data.into();
                     let form = reqwest::multipart::Form::new()
                         .text("time", time)
-                        .part("replay", reqwest::multipart::Part::bytes(bytes));
+                        .part("replay", reqwest::multipart::Part::stream(replay_data));
 
                     let request = client.post(url).multipart(form);
                     tokio::spawn(async move {
