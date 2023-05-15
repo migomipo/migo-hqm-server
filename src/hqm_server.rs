@@ -1292,10 +1292,10 @@ impl HQMServer {
             replay_data.put_slice(&old_game.replay_data);
             let replay_data = replay_data.freeze();
             let time = old_game.start_time.format("%Y-%m-%dT%H%M%S").to_string();
+            let file_name = format!("{}.{}.hrp", self.config.server_name, time);
+            let server_name = self.config.server_name.clone();
             match self.config.replay_saving {
                 ReplaySaving::File => {
-                    let file_name = format!("{}.{}.hrp", self.config.server_name, time);
-
                     tokio::spawn(async move {
                         if tokio::fs::create_dir_all("replays").await.is_err() {
                             return;
@@ -1318,7 +1318,11 @@ impl HQMServer {
                     let client = self.reqwest_client.clone();
                     let form = reqwest::multipart::Form::new()
                         .text("time", time)
-                        .part("replay", reqwest::multipart::Part::stream(replay_data));
+                        .text("server", server_name)
+                        .part(
+                            "replay",
+                            reqwest::multipart::Part::stream(replay_data).file_name(file_name),
+                        );
 
                     let request = client.post(url).multipart(form);
                     tokio::spawn(async move {
