@@ -10,12 +10,14 @@ use std::rc::Rc;
 
 use tracing::info;
 
+#[derive(Debug, Clone)]
 enum HQMShootoutAttemptState {
     Attack { progress: f32 }, // Puck has been touched by attacker, but not touched by goalie, hit post or moved backwards
     NoMoreAttack { final_progress: f32 }, // Puck has moved backwards, hit the post or the goalie, but may still enter the net
     Over { timer: u32, goal_scored: bool }, // Attempt is over
 }
 
+#[derive(Debug, Clone)]
 enum HQMShootoutStatus {
     WaitingForGame,
     Game {
@@ -771,5 +773,9 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
 
     fn get_number_of_players(&self) -> u32 {
         self.team_max as u32
+    }
+
+    fn save_replay_data(&self, _server: &HQMServer) -> bool {
+        !matches!(self.status, HQMShootoutStatus::WaitingForGame)
     }
 }

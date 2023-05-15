@@ -1,5 +1,6 @@
 use crate::hqm_server::{
     HQMMuteStatus, HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex,
+    ReplayEnabled,
 };
 
 use systemctl::restart;
@@ -430,7 +431,7 @@ impl HQMServer {
             if player.is_admin {
                 match rule {
                     "on" => {
-                        self.config.replays_enabled = true;
+                        self.config.replays_enabled = ReplayEnabled::On;
 
                         info!("{} ({}) enabled replays", player.player_name, player_index);
                         let msg = format!("Replays enabled by {}", player.player_name);
@@ -438,10 +439,25 @@ impl HQMServer {
                         self.messages.add_server_chat_message(msg);
                     }
                     "off" => {
-                        self.config.replays_enabled = false;
+                        self.config.replays_enabled = ReplayEnabled::Off;
 
-                        info!("{} ({}) disabled replays", player.player_name, player_index);
+                        info!(
+                            "{} ({}) disabled replay recording",
+                            player.player_name, player_index
+                        );
                         let msg = format!("Replays disabled by {}", player.player_name);
+
+                        self.messages.add_server_chat_message(msg);
+                    }
+                    "standby" => {
+                        self.config.replays_enabled = ReplayEnabled::Standby;
+
+                        info!(
+                            "{} ({}) enabled standby replay recording",
+                            player.player_name, player_index
+                        );
+                        let msg =
+                            format!("Standby replay recording enabled by {}", player.player_name);
 
                         self.messages.add_server_chat_message(msg);
                     }

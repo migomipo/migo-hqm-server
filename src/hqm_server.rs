@@ -1139,7 +1139,9 @@ impl HQMServer {
         self.game.saved_pings.truncate(100 - 1);
         self.game.saved_pings.push_front(Instant::now());
 
-        write_replay(&mut self.game, self.messages.get_replay_messages());
+        if self.config.replays_enabled != ReplayEnabled::Off && behaviour.save_replay_data(self) {
+            write_replay(&mut self.game, self.messages.get_replay_messages());
+        }
     }
 
     fn remove_inactive_players<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
@@ -1278,7 +1280,7 @@ impl HQMServer {
         self.messages.clear();
         info!("New game {} started", self.game_id);
 
-        if self.config.replays_enabled && old_game.period != 0 {
+        if self.config.replays_enabled == ReplayEnabled::On && !old_game.replay_data.is_empty() {
             let size = old_game.replay_data.len();
             let mut replay_data = BytesMut::with_capacity(size + 8);
             replay_data.put_u32_le(0u32);
@@ -2017,13 +2019,20 @@ pub enum ReplaySaving {
     Endpoint { url: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+pub enum ReplayEnabled {
+    Off,
+    On,
+    Standby,
+}
+
 #[derive(Debug, Clone)]
 pub struct HQMServerConfiguration {
     pub welcome: Vec<String>,
     pub password: String,
     pub player_max: usize,
 
-    pub replays_enabled: bool,
+    pub replays_enabled: ReplayEnabled,
     pub replay_saving: ReplaySaving,
     pub server_name: String,
     pub server_service: Option<String>,
@@ -2051,6 +2060,10 @@ pub trait HQMServerBehaviour {
     fn after_player_join(&mut self, _server: &mut HQMServer, _player_index: HQMServerPlayerIndex) {}
 
     fn get_number_of_players(&self) -> u32;
+
+    fn save_replay_data(&self, _server: &HQMServer) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone)]

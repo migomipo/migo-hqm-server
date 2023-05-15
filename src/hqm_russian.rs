@@ -9,8 +9,9 @@ use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::f32::consts::FRAC_PI_2;
 use std::rc::Rc;
 
+#[derive(Debug, Clone)]
 enum HQMRussianStatus {
-    Pause,
+    WaitingForGame,
     Game {
         in_zone: HQMTeam,
         round: u32,
@@ -41,7 +42,7 @@ impl HQMRussianBehaviour {
             attempts,
             physics_config,
             blue_line_location,
-            status: HQMRussianStatus::Pause,
+            status: HQMRussianStatus::WaitingForGame,
             team_switch_timer: Default::default(),
             team_max,
         }
@@ -177,7 +178,7 @@ impl HQMRussianBehaviour {
 
     fn fix_status(&mut self, server: &mut HQMServer, team: HQMTeam) {
         match &mut self.status {
-            HQMRussianStatus::Pause => {
+            HQMRussianStatus::WaitingForGame => {
                 self.status = HQMRussianStatus::Game {
                     in_zone: team,
                     round: 0,
@@ -384,7 +385,7 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
             (red_player_count, blue_player_count)
         };
 
-        if let HQMRussianStatus::Pause = self.status {
+        if let HQMRussianStatus::WaitingForGame = self.status {
             if red_player_count > 0 && blue_player_count > 0 {
                 server.game.time = server.game.time.saturating_sub(1);
                 if server.game.time == 0 {
@@ -494,7 +495,7 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
     }
 
     fn create_game(&mut self) -> HQMGame {
-        self.status = HQMRussianStatus::Pause;
+        self.status = HQMRussianStatus::WaitingForGame;
         let mut game = HQMGame::new(1, self.physics_config.clone(), self.blue_line_location);
 
         game.time = 1000;
@@ -507,5 +508,9 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
 
     fn get_number_of_players(&self) -> u32 {
         self.team_max as u32
+    }
+
+    fn save_replay_data(&self, _server: &HQMServer) -> bool {
+        !matches!(self.status, HQMRussianStatus::WaitingForGame)
     }
 }

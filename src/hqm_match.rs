@@ -344,6 +344,10 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
     fn get_number_of_players(&self) -> u32 {
         self.team_max as u32
     }
+
+    fn save_replay_data(&self, server: &HQMServer) -> bool {
+        server.game.period > 0
+    }
 }
 
 fn add_player(

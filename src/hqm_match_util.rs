@@ -23,7 +23,6 @@ pub struct HQMMatchConfiguration {
     pub warmup_pucks: usize,
     pub physics_config: HQMPhysicsConfiguration,
     pub blue_line_location: f32,
-    pub cheats_enabled: bool,
     pub use_mph: bool,
     pub goal_replay: bool,
 }

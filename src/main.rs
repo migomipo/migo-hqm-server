@@ -25,7 +25,9 @@ use migo_hqm_server::hqm_match_util::{
     HQMOffsideLineConfiguration, HQMTwoLinePassConfiguration,
 };
 use migo_hqm_server::hqm_server;
-use migo_hqm_server::hqm_server::{HQMServerConfiguration, HQMSpawnPoint, ReplaySaving};
+use migo_hqm_server::hqm_server::{
+    HQMServerConfiguration, HQMSpawnPoint, ReplayEnabled, ReplaySaving,
+};
 use tracing_appender;
 use tracing_subscriber;
 
@@ -93,14 +95,13 @@ async fn main() -> std::io::Result<()> {
             });
 
         let replays_enabled = match server_section.get("replays") {
-            Some(s) => s.eq_ignore_ascii_case("true"),
-            None => false,
+            Some(s) if s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on") => {
+                ReplayEnabled::On
+            }
+            Some(s) if s.eq_ignore_ascii_case("standby") => ReplayEnabled::Standby,
+            _ => ReplayEnabled::Off,
         };
 
-        let cheats_enabled = match server_section.get("cheats_enabled") {
-            Some(s) => s.eq_ignore_ascii_case("true"),
-            None => false,
-        };
         let log_name = server_section
             .get("log_name")
             .map_or(format!("{}.log", server_name), |x| String::from(x));
@@ -135,7 +136,7 @@ async fn main() -> std::io::Result<()> {
         let game_section = conf.section(Some("Game"));
 
         let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, |x| {
-            x.eq_ignore_ascii_case("true")
+            x.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on")
         });
 
         let blue_line_location = get_optional(game_section, "blue_line_location", 22.86f32, |x| {
@@ -290,11 +291,11 @@ async fn main() -> std::io::Result<()> {
                     });
 
                 let use_mph = get_optional(game_section, "use_mph", false, |s| {
-                    s.eq_ignore_ascii_case("true")
+                    s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on")
                 });
 
                 let goal_replay = get_optional(game_section, "goal_replay", false, |s| {
-                    s.eq_ignore_ascii_case("true")
+                    s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on")
                 });
 
                 let match_config = HQMMatchConfiguration {
@@ -309,7 +310,6 @@ async fn main() -> std::io::Result<()> {
                     offside_line,
                     twoline_pass,
                     warmup_pucks,
-                    cheats_enabled,
                     use_mph,
                     goal_replay,
                     physics_config,
