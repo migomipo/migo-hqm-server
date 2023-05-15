@@ -5,6 +5,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use crate::hqm_server::{HQMObjectPacket, HQMPuckPacket, HQMSkaterPacket, ReplayTick};
+use bytes::BytesMut;
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
@@ -135,7 +136,7 @@ impl HQMGameWorld {
 pub struct HQMGame {
     pub(crate) start_time: DateTime<Utc>,
 
-    pub(crate) replay_data: Vec<u8>,
+    pub(crate) replay_data: BytesMut,
     pub(crate) replay_msg_pos: usize,
     pub(crate) replay_last_packet: u32,
 
@@ -188,7 +189,7 @@ impl HQMGame {
         HQMGame {
             start_time: Utc::now(),
 
-            replay_data: Vec::with_capacity(64 * 1024 * 1024),
+            replay_data: BytesMut::with_capacity(64 * 1024 * 1024),
             replay_msg_pos: 0,
             replay_last_packet: u32::MAX,
 

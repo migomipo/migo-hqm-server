@@ -1098,7 +1098,7 @@ impl HQMServer {
         return self.players.iter().find(|(_, x)| x.is_none()).map(|x| x.0);
     }
 
-    fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B, write_buf: &mut BytesMut) {
+    fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
         self.game.game_step = self.game.game_step.wrapping_add(1);
 
         behaviour.before_tick(self);
@@ -1139,11 +1139,7 @@ impl HQMServer {
         self.game.saved_pings.truncate(100 - 1);
         self.game.saved_pings.push_front(Instant::now());
 
-        write_replay(
-            &mut self.game,
-            &self.messages.get_replay_messages(),
-            write_buf,
-        );
+        write_replay(&mut self.game, self.messages.get_replay_messages());
     }
 
     fn remove_inactive_players<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
@@ -1209,7 +1205,7 @@ impl HQMServer {
                     self.game.packet = self.game.packet.wrapping_add(1);
                     (game_step, forced_view)
                 } else {
-                    self.game_step(behaviour, write_buf);
+                    self.game_step(behaviour);
                     (self.game.game_step, None)
                 }
             });
@@ -1657,9 +1653,8 @@ fn write_objects(
     }
 }
 
-fn write_replay(game: &mut HQMGame, replay_messages: &[Rc<HQMMessage>], write_buf: &mut BytesMut) {
-    write_buf.clear();
-    let mut writer = HQMMessageWriter::new(write_buf);
+fn write_replay(game: &mut HQMGame, replay_messages: &[Rc<HQMMessage>]) {
+    let mut writer = HQMMessageWriter::new(&mut game.replay_data);
 
     writer.write_byte_aligned(5);
     writer.write_bits(
@@ -1691,9 +1686,6 @@ fn write_replay(game: &mut HQMGame, replay_messages: &[Rc<HQMMessage>], write_bu
     }
     game.replay_msg_pos = replay_messages.len();
     writer.replay_fix();
-    let slice: &[u8] = &write_buf;
-
-    game.replay_data.extend_from_slice(slice);
 }
 
 async fn send_updates(
