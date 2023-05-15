@@ -26,7 +26,8 @@ player_max             | Number of players allowed in the server.
 password               | Administrator password.
 welcome                | Welcome message that is sent to all players when they're joining. \n will create a new line. The client can only show 7 chat lines at a time, and it is not recommended to have more than three lines.
 replays                | (optional) If true, all matches that start will be saved as replays. Games that ended before the warmup ended will not be saved.
-service                | Service name for Linux based systems. Command /serverrestart for restarting the service.        
+service                | Service name for Linux based systems. Command /serverrestart for restarting the service.      
+replay_endpoint        | If configured (and replays are enabled), the server will send the replay data as a HTTP POST request (multipart form) to the given URL when matches end.
 
 ### Game
 

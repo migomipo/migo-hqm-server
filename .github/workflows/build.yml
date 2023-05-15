@@ -30,7 +30,7 @@ jobs:
           command: build
           args: --release --target ${{matrix.target}}
       - run: |
-          7z a "${{ env.BIN }}.zip" config.ini README.md ".\target\${{ matrix.target }}\release\${{ env.BIN }}.exe"
+          7z a "${{ env.BIN }}.zip" config.ini README.md example_replay_integration.py ".\target\${{ matrix.target }}\release\${{ env.BIN }}.exe"
           mv "${{ env.BIN }}.zip" $GITHUB_WORKSPACE
         shell: bash
       - uses: XAMPPRocky/create-release@v1.0.2
@@ -73,7 +73,7 @@ jobs:
         with:
           command: build
           args: --release --target ${{matrix.target}}
-      - run: tar -czvf ${{ env.BIN }}.tar.gz config.ini README.md -C target/${{ matrix.target }}/release ${{ env.BIN }}
+      - run: tar -czvf ${{ env.BIN }}.tar.gz config.ini README.md example_replay_integration.py -C target/${{ matrix.target }}/release ${{ env.BIN }}
       - uses: XAMPPRocky/create-release@v1.0.2
         id: create_release
         env:
@@ -124,7 +124,7 @@ jobs:
           use-cross: true
           command: build
           args: --release --target ${{matrix.target}}
-      - run: tar -czvf ${{ env.BIN }}.tar.gz config.ini README.md -C target/${{ matrix.target }}/release ${{ env.BIN }}
+      - run: tar -czvf ${{ env.BIN }}.tar.gz config.ini README.md example_replay_integration.py -C target/${{ matrix.target }}/release ${{ env.BIN }}
       - uses: XAMPPRocky/create-release@v1.0.2
         id: create_release
         env:
