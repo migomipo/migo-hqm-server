@@ -1421,12 +1421,12 @@ impl HQMServer {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ReplayTick {
+struct ReplayTick {
     game_step: u32,
     packets: smallvec::SmallVec<[HQMObjectPacket; 32]>,
 }
 
-pub(crate) struct ReplayElement {
+struct ReplayElement {
     data: VecDeque<ReplayTick>,
     force_view: Option<HQMServerPlayerIndex>,
 }
