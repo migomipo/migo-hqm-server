@@ -4,12 +4,10 @@ use nalgebra::{Matrix3, Point3, Rotation3, Vector2, Vector3};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::hqm_server::{HQMObjectPacket, HQMPuckPacket, HQMSkaterPacket, ReplayTick};
-use bytes::BytesMut;
+use crate::hqm_server::{HQMPuckPacket, HQMSkaterPacket};
 use chrono::{DateTime, Utc};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::f32::consts::PI;
-use std::time::Instant;
 
 pub struct HQMGameWorld {
     pub objects: HQMGameWorldObjectList,
@@ -134,15 +132,8 @@ impl HQMGameWorld {
 }
 
 pub struct HQMGame {
-    pub(crate) start_time: DateTime<Utc>,
+    pub start_time: DateTime<Utc>,
 
-    pub(crate) replay_data: BytesMut,
-    pub(crate) replay_msg_pos: usize,
-    pub(crate) replay_last_packet: u32,
-
-    pub(crate) saved_packets: VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
-    pub(crate) saved_pings: VecDeque<Instant>,
-    pub(crate) saved_history: VecDeque<ReplayTick>,
     pub rules_state: HQMRulesState,
     pub world: HQMGameWorld,
     pub red_score: u32,
@@ -153,9 +144,6 @@ pub struct HQMGame {
 
     pub game_step: u32,
     pub game_over: bool,
-    pub(crate) packet: u32,
-
-    pub(crate) active: bool,
 
     pub history_length: usize,
 }
@@ -189,13 +177,6 @@ impl HQMGame {
         HQMGame {
             start_time: Utc::now(),
 
-            replay_data: BytesMut::with_capacity(64 * 1024 * 1024),
-            replay_msg_pos: 0,
-            replay_last_packet: u32::MAX,
-
-            saved_packets: VecDeque::with_capacity(192),
-            saved_pings: VecDeque::with_capacity(100),
-            saved_history: VecDeque::new(),
             rules_state: HQMRulesState::Regular {
                 offside_warning: false,
                 icing_warning: false,
@@ -215,8 +196,7 @@ impl HQMGame {
             goal_message_timer: 0,
             game_over: false,
             game_step: u32::MAX,
-            packet: u32::MAX,
-            active: false,
+
             history_length: 0,
         }
     }

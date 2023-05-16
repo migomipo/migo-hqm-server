@@ -196,14 +196,6 @@ impl HQMServerMessages {
         self.waiting_messages.clear();
     }
 
-    fn get_persistent_messages(&self) -> &[Rc<HQMMessage>] {
-        self.persistent_messages.as_slice()
-    }
-
-    fn get_replay_messages(&self) -> &[Rc<HQMMessage>] {
-        self.replay_messages.as_slice()
-    }
-
     pub fn add_user_chat_message(&mut self, message: String, sender_index: HQMServerPlayerIndex) {
         let chat = HQMMessage::Chat {
             player_index: Some(sender_index),
@@ -324,6 +316,17 @@ pub struct HQMServer {
     game_id: u32,
     pub is_muted: bool,
     pub reqwest_client: reqwest::Client,
+
+    pub(crate) has_current_game_been_active: bool,
+
+    pub(crate) packet: u32,
+    pub(crate) replay_data: BytesMut,
+    pub(crate) replay_msg_pos: usize,
+    pub(crate) replay_last_packet: u32,
+
+    pub(crate) saved_packets: VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
+    pub(crate) saved_pings: VecDeque<Instant>,
+    pub(crate) saved_history: VecDeque<ReplayTick>,
 }
 
 impl HQMServer {
@@ -438,9 +441,8 @@ impl HQMServer {
 
             let duration_since_packet =
                 if data.game_id == current_game_id && data.known_packet < new_known_packet {
-                    let ticks = &self.game.saved_pings;
-                    self.game
-                        .packet
+                    let ticks = &self.saved_pings;
+                    self.packet
                         .checked_sub(new_known_packet)
                         .and_then(|diff| ticks.get(diff as usize))
                         .and_then(|last_time_received| {
@@ -911,7 +913,7 @@ impl HQMServer {
                     player_index,
                     player_name,
                     addr,
-                    self.messages.get_persistent_messages(),
+                    &self.messages.persistent_messages,
                 );
                 let update = new_player.get_update_message(player_index);
 
@@ -1125,22 +1127,20 @@ impl HQMServer {
                 packets: packets.clone(),
             };
 
-            self.game
-                .saved_history
-                .truncate(self.game.history_length - 1);
-            self.game.saved_history.push_front(new_replay_tick);
+            self.saved_history.truncate(self.game.history_length - 1);
+            self.saved_history.push_front(new_replay_tick);
         } else {
-            self.game.saved_history.clear();
+            self.saved_history.clear();
         }
 
-        self.game.saved_packets.truncate(192 - 1);
-        self.game.saved_packets.push_front(packets);
-        self.game.packet = self.game.packet.wrapping_add(1);
-        self.game.saved_pings.truncate(100 - 1);
-        self.game.saved_pings.push_front(Instant::now());
+        self.saved_packets.truncate(192 - 1);
+        self.saved_packets.push_front(packets);
+        self.packet = self.packet.wrapping_add(1);
+        self.saved_pings.truncate(100 - 1);
+        self.saved_pings.push_front(Instant::now());
 
         if self.config.replays_enabled != ReplayEnabled::Off && behaviour.save_replay_data(self) {
-            write_replay(&mut self.game, self.messages.get_replay_messages());
+            self.write_replay();
         }
     }
 
@@ -1181,7 +1181,7 @@ impl HQMServer {
         write_buf: &mut BytesMut,
     ) {
         if self.player_count() != 0 {
-            self.game.active = true;
+            self.has_current_game_been_active = true;
             let (game_step, forced_view) = tokio::task::block_in_place(|| {
                 self.remove_inactive_players(behaviour);
 
@@ -1199,12 +1199,12 @@ impl HQMServer {
                 if let Some((forced_view, tick)) = has_replay_data {
                     let game_step = tick.game_step;
                     let packets = tick.packets;
-                    self.game.saved_packets.truncate(192 - 1);
-                    self.game.saved_packets.push_front(packets);
-                    self.game.saved_pings.truncate(100 - 1);
-                    self.game.saved_pings.push_front(Instant::now());
+                    self.saved_packets.truncate(192 - 1);
+                    self.saved_packets.push_front(packets);
+                    self.saved_pings.truncate(100 - 1);
+                    self.saved_pings.push_front(Instant::now());
 
-                    self.game.packet = self.game.packet.wrapping_add(1);
+                    self.packet = self.packet.wrapping_add(1);
                     (game_step, forced_view)
                 } else {
                     self.game_step(behaviour);
@@ -1231,7 +1231,7 @@ impl HQMServer {
 
             send_updates(
                 self.game_id,
-                &self.game.saved_packets,
+                &self.saved_packets,
                 game_step,
                 self.game.game_over,
                 self.game.red_score,
@@ -1240,7 +1240,7 @@ impl HQMServer {
                 self.game.goal_message_timer,
                 self.game.period,
                 self.game.rules_state,
-                self.game.packet,
+                self.packet,
                 &self.players.players,
                 socket,
                 forced_view,
@@ -1257,7 +1257,6 @@ impl HQMServer {
                     continue;
                 }
                 let data = self
-                    .game
                     .saved_history
                     .range(i_end..=i_start)
                     .rev()
@@ -1266,7 +1265,7 @@ impl HQMServer {
                 self.replay_queue
                     .push_back(ReplayElement { data, force_view })
             }
-        } else if self.game.active {
+        } else if self.has_current_game_been_active {
             info!("Game {} abandoned", self.game_id);
             let new_game = behaviour.create_game();
             self.new_game(new_game);
@@ -1276,16 +1275,28 @@ impl HQMServer {
 
     pub fn new_game(&mut self, new_game: HQMGame) {
         let old_game = std::mem::replace(&mut self.game, new_game);
+
         self.game_id += 1;
         self.messages.clear();
+        let old_replay_data = std::mem::replace(&mut self.replay_data, BytesMut::new());
+        self.replay_msg_pos = 0;
+        self.packet = u32::MAX;
+        self.replay_last_packet = u32::MAX;
+
+        self.saved_packets.clear();
+        self.saved_pings.clear();
+        self.saved_history.clear();
+        self.replay_queue.clear();
+        self.has_current_game_been_active = false;
+
         info!("New game {} started", self.game_id);
 
-        if self.config.replays_enabled == ReplayEnabled::On && !old_game.replay_data.is_empty() {
-            let size = old_game.replay_data.len();
+        if self.config.replays_enabled == ReplayEnabled::On && !old_replay_data.is_empty() {
+            let size = old_replay_data.len();
             let mut replay_data = BytesMut::with_capacity(size + 8);
             replay_data.put_u32_le(0u32);
             replay_data.put_u32_le(size as u32);
-            replay_data.put_slice(&old_game.replay_data);
+            replay_data.put_slice(&old_replay_data);
             let replay_data = replay_data.freeze();
             let time = old_game.start_time.format("%Y-%m-%dT%H%M%S").to_string();
             let file_name = format!("{}.{}.hrp", self.config.server_name, time);
@@ -1346,8 +1357,6 @@ impl HQMServer {
                 }
             }
         }
-
-        self.replay_queue.clear();
     }
 
     pub fn add_replay_to_queue(
@@ -1362,6 +1371,42 @@ impl HQMServer {
         }
         self.requested_replays
             .push_back((start_step, end_step, force_view));
+    }
+
+    fn write_replay(&mut self) {
+        let mut writer = HQMMessageWriter::new(&mut self.replay_data);
+
+        let replay_messages = self.messages.replay_messages.as_slice();
+        writer.write_byte_aligned(5);
+        writer.write_bits(
+            1,
+            match self.game.game_over {
+                true => 1,
+                false => 0,
+            },
+        );
+        writer.write_bits(8, self.game.red_score);
+        writer.write_bits(8, self.game.blue_score);
+        writer.write_bits(16, self.game.time);
+
+        writer.write_bits(16, self.game.goal_message_timer);
+        writer.write_bits(8, self.game.period);
+
+        let packets = &self.saved_packets;
+
+        write_objects(&mut writer, packets, self.packet, self.replay_last_packet);
+        self.replay_last_packet = self.packet;
+
+        let remaining_messages = replay_messages.len() - self.replay_msg_pos;
+
+        writer.write_bits(16, remaining_messages as u32);
+        writer.write_bits(16, self.replay_msg_pos as u32);
+
+        for message in &replay_messages[self.replay_msg_pos..replay_messages.len()] {
+            write_message(&mut writer, Rc::as_ref(message));
+        }
+        self.replay_msg_pos = replay_messages.len();
+        writer.replay_fix();
     }
 }
 
@@ -1404,6 +1449,15 @@ pub async fn run_server<B: HQMServerBehaviour>(
         replay_queue: VecDeque::new(),
         requested_replays: VecDeque::new(),
         reqwest_client: reqwest_client.clone(),
+        replay_data: BytesMut::with_capacity(64 * 1024 * 1024),
+        replay_msg_pos: 0,
+        packet: u32::MAX,
+        replay_last_packet: u32::MAX,
+
+        saved_packets: VecDeque::with_capacity(192),
+        saved_pings: VecDeque::with_capacity(100),
+        saved_history: VecDeque::new(),
+        has_current_game_been_active: false,
     };
     info!("Server started, new game {} started", 1);
 
@@ -1653,41 +1707,6 @@ fn write_objects(
             }
         }
     }
-}
-
-fn write_replay(game: &mut HQMGame, replay_messages: &[Rc<HQMMessage>]) {
-    let mut writer = HQMMessageWriter::new(&mut game.replay_data);
-
-    writer.write_byte_aligned(5);
-    writer.write_bits(
-        1,
-        match game.game_over {
-            true => 1,
-            false => 0,
-        },
-    );
-    writer.write_bits(8, game.red_score);
-    writer.write_bits(8, game.blue_score);
-    writer.write_bits(16, game.time);
-
-    writer.write_bits(16, game.goal_message_timer);
-    writer.write_bits(8, game.period);
-
-    let packets = &game.saved_packets;
-
-    write_objects(&mut writer, packets, game.packet, game.replay_last_packet);
-    game.replay_last_packet = game.packet;
-
-    let remaining_messages = replay_messages.len() - game.replay_msg_pos;
-
-    writer.write_bits(16, remaining_messages as u32);
-    writer.write_bits(16, game.replay_msg_pos as u32);
-
-    for message in &replay_messages[game.replay_msg_pos..replay_messages.len()] {
-        write_message(&mut writer, Rc::as_ref(message));
-    }
-    game.replay_msg_pos = replay_messages.len();
-    writer.replay_fix();
 }
 
 async fn send_updates(
