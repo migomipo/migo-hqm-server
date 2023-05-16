@@ -868,7 +868,6 @@ impl HQMMatch {
             self.config.physics_config.clone(),
             self.config.blue_line_location,
         );
-        game.history_length = 1000;
         let puck_line_start = game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {

@@ -327,6 +327,8 @@ pub struct HQMServer {
     pub(crate) saved_packets: VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
     pub(crate) saved_pings: VecDeque<Instant>,
     pub(crate) saved_history: VecDeque<ReplayTick>,
+
+    pub history_length: usize,
 }
 
 impl HQMServer {
@@ -1121,13 +1123,13 @@ impl HQMServer {
 
         behaviour.after_tick(self, &events);
 
-        if self.game.history_length > 0 {
+        if self.history_length > 0 {
             let new_replay_tick = ReplayTick {
                 game_step: self.game.game_step,
                 packets: packets.clone(),
             };
 
-            self.saved_history.truncate(self.game.history_length - 1);
+            self.saved_history.truncate(self.history_length - 1);
             self.saved_history.push_front(new_replay_tick);
         } else {
             self.saved_history.clear();
@@ -1458,6 +1460,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
         saved_pings: VecDeque::with_capacity(100),
         saved_history: VecDeque::new(),
         has_current_game_been_active: false,
+        history_length: 0,
     };
     info!("Server started, new game {} started", 1);
 

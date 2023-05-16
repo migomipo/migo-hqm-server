@@ -181,6 +181,10 @@ impl HQMMatchBehaviour {
 }
 
 impl HQMServerBehaviour for HQMMatchBehaviour {
+    fn init(&mut self, server: &mut HQMServer) {
+        server.history_length = 1000;
+    }
+
     fn before_tick(&mut self, server: &mut HQMServer) {
         self.update_players(server);
     }

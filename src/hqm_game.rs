@@ -144,8 +144,6 @@ pub struct HQMGame {
 
     pub game_step: u32,
     pub game_over: bool,
-
-    pub history_length: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -196,8 +194,6 @@ impl HQMGame {
             goal_message_timer: 0,
             game_over: false,
             game_step: u32::MAX,
-
-            history_length: 0,
         }
     }
 }
