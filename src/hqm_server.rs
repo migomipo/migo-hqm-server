@@ -315,18 +315,18 @@ pub struct HQMServer {
     requested_replays: VecDeque<(u32, u32, Option<HQMServerPlayerIndex>)>,
     game_id: u32,
     pub is_muted: bool,
-    pub reqwest_client: reqwest::Client,
+    reqwest_client: reqwest::Client,
 
-    pub(crate) has_current_game_been_active: bool,
+    has_current_game_been_active: bool,
 
-    pub(crate) packet: u32,
-    pub(crate) replay_data: BytesMut,
-    pub(crate) replay_msg_pos: usize,
-    pub(crate) replay_last_packet: u32,
+    packet: u32,
+    replay_data: BytesMut,
+    replay_msg_pos: usize,
+    replay_last_packet: u32,
 
-    pub(crate) saved_packets: VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
-    pub(crate) saved_pings: VecDeque<Instant>,
-    pub(crate) saved_history: VecDeque<ReplayTick>,
+    saved_packets: VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
+    saved_pings: VecDeque<Instant>,
+    saved_history: VecDeque<ReplayTick>,
 
     pub history_length: usize,
 }
@@ -737,7 +737,7 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn view(
+    fn view(
         &mut self,
         view_player_index: HQMServerPlayerIndex,
         player_index: HQMServerPlayerIndex,
@@ -1373,6 +1373,14 @@ impl HQMServer {
         }
         self.requested_replays
             .push_back((start_step, end_step, force_view));
+    }
+
+    pub fn current_game_id(&self) -> u32 {
+        self.game_id
+    }
+
+    pub fn replay_data(&self) -> &[u8] {
+        self.replay_data.as_ref()
     }
 
     fn write_replay(&mut self) {
