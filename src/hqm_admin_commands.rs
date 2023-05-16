@@ -216,55 +216,56 @@ impl HQMServer {
             if player.is_admin {
                 let admin_player_name = player.player_name.clone();
 
-                // 0 full string | 1 begins with | 2 ends with | 3 contains
-                let (match_mode, match_f): (i32, Box<dyn Fn(&str) -> bool>) =
-                    if kick_player_name.starts_with("%") {
-                        if kick_player_name.ends_with("%") {
-                            let match_string: String = kick_player_name
-                                .chars()
-                                .skip(1)
-                                .take(kick_player_name.len() - 2)
-                                .collect();
-                            let f = move |player_name: &str| player_name.contains(&match_string);
-                            (3, Box::new(f)) // %contains%
-                        } else {
-                            let match_string: String = kick_player_name
-                                .chars()
-                                .skip(1)
-                                .take(kick_player_name.len() - 1)
-                                .collect();
-                            let f = move |player_name: &str| player_name.starts_with(&match_string);
-                            (2, Box::new(f)) // %ends with
-                        }
-                    } else if kick_player_name.ends_with("%") {
-                        let match_string: String = kick_player_name
-                            .chars()
-                            .take(kick_player_name.len() - 1)
-                            .collect();
-                        let f = move |player_name: &str| player_name.starts_with(&match_string);
-                        (1, Box::new(f)) // begins with%
-                    } else {
-                        let match_string = kick_player_name.to_owned();
-                        let f = move |player_name: &str| player_name == match_string;
-                        (0, Box::new(f))
-                    };
+                enum Matching<'a> {
+                    StartsWith(&'a str),
+                    EndsWith(&'a str),
+                    Contains(&'a str),
+                    Equals(&'a str),
+                }
 
-                // Because we allow matching using wildcards, we use vectors for multiple instances found
-                let mut kick_player_list = Vec::new();
-
-                for (player_index, player) in self.players.iter() {
-                    if let Some(player) = player {
-                        if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
-                            if match_f(&player.player_name) {
-                                kick_player_list.push((
-                                    player_index,
-                                    player.player_name.clone(),
-                                    data.addr,
-                                ));
-                            }
+                impl<'a> Matching<'a> {
+                    fn is_matching(&self, player_name: &str) -> bool {
+                        match self {
+                            Matching::StartsWith(s) => player_name.starts_with(s),
+                            Matching::EndsWith(s) => player_name.ends_with(s),
+                            Matching::Contains(s) => player_name.contains(s),
+                            Matching::Equals(s) => player_name == *s,
                         }
                     }
                 }
+
+                // 0 full string | 1 begins with | 2 ends with | 3 contains
+                let matching = if kick_player_name.starts_with("%") {
+                    if kick_player_name.ends_with("%") {
+                        Matching::Contains(&kick_player_name[1..kick_player_name.len() - 1])
+                    } else {
+                        Matching::StartsWith(&kick_player_name[1..kick_player_name.len()])
+                    }
+                } else if kick_player_name.ends_with("%") {
+                    Matching::EndsWith(&kick_player_name[0..kick_player_name.len() - 1])
+                } else {
+                    Matching::Equals(&kick_player_name)
+                };
+
+                let kick_player_list: Vec<_> = self
+                    .players
+                    .iter()
+                    .filter_map(|(player_index, player)| {
+                        if let Some(player) = player {
+                            if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
+                                if matching.is_matching(&player.player_name) {
+                                    return Some((
+                                        player_index,
+                                        player.player_name.clone(),
+                                        data.addr,
+                                    ));
+                                }
+                            }
+                        }
+                        None
+                    })
+                    .collect();
+
                 if !kick_player_list.is_empty() {
                     for (player_index, player_name, player_addr) in kick_player_list {
                         if player_index != admin_player_index {
@@ -311,32 +312,31 @@ impl HQMServer {
                         }
                     }
                 } else {
-                    match match_mode {
-                        0 => {
+                    match matching {
+                        Matching::Equals(_) => {
                             // full string
                             let msg = format!("No player names match {}", kick_player_name);
                             self.messages
                                 .add_directed_server_chat_message(msg, admin_player_index);
                         }
-                        1 => {
+                        Matching::StartsWith(_) => {
                             // begins with%
                             let msg = format!("No player names begin with {}", kick_player_name);
                             self.messages
                                 .add_directed_server_chat_message(msg, admin_player_index);
                         }
-                        2 => {
+                        Matching::EndsWith(_) => {
                             // %ends with
                             let msg = format!("No player names end with {}", kick_player_name);
                             self.messages
                                 .add_directed_server_chat_message(msg, admin_player_index);
                         }
-                        3 => {
+                        Matching::Contains(_) => {
                             // %contains%
                             let msg = format!("No player names contain {}", kick_player_name);
                             self.messages
                                 .add_directed_server_chat_message(msg, admin_player_index);
                         }
-                        _ => {}
                     }
                 }
             } else {
