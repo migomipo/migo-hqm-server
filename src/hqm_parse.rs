@@ -388,8 +388,8 @@ impl<'a> HQMMessageWriter<'a> {
 
 pub struct HQMMessageReader<'a> {
     buf: &'a [u8],
-    pub(crate) pos: usize,
-    pub(crate) bit_pos: u8,
+    pos: usize,
+    bit_pos: u8,
 }
 
 impl<'a> HQMMessageReader<'a> {
