@@ -1384,6 +1384,7 @@ impl HQMServer {
     }
 
     fn write_replay(&mut self) {
+        self.replay_data.reserve(2048);
         let mut writer = HQMMessageWriter::new(&mut self.replay_data);
 
         let replay_messages = self.messages.replay_messages.as_slice();
