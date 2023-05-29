@@ -235,19 +235,38 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                                 }
                             };
 
-                            let time_parts: Vec<&str> = time_part_string.split(':').collect();
+                            fn parse_t(
+                                s: &str,
+                            ) -> Result<(u32, u32, u32), std::num::ParseIntError>
+                            {
+                                let (time_minutes, rest) =
+                                    if let Some((time_minutes, rest)) = s.split_once(':') {
+                                        (time_minutes.parse::<u32>()?, rest)
+                                    } else {
+                                        (0, s)
+                                    };
+                                let (time_seconds, time_centis) =
+                                    if let Some((time_seconds, time_centis)) = rest.split_once(".")
+                                    {
+                                        let mut centis = time_centis.parse::<u32>()?;
+                                        if time_centis.len() == 1 {
+                                            centis *= 10;
+                                        }
+                                        (time_seconds.parse::<u32>()?, centis)
+                                    } else {
+                                        (rest.parse::<u32>()?, 0)
+                                    };
+                                Ok((time_minutes, time_seconds, time_centis))
+                            }
 
-                            if time_parts.len() >= 2 {
-                                if let (Ok(time_minutes), Ok(time_seconds)) =
-                                    (time_parts[0].parse::<u32>(), time_parts[1].parse::<u32>())
-                                {
-                                    self.m.set_clock(
-                                        server,
-                                        time_minutes,
-                                        time_seconds,
-                                        player_index,
-                                    );
-                                }
+                            if let Ok((time_minutes, time_seconds, time_centis)) =
+                                parse_t(&time_part_string)
+                            {
+                                self.m.set_clock(
+                                    server,
+                                    (time_minutes * 100 * 60) + (time_seconds * 100) + time_centis,
+                                    player_index,
+                                );
                             }
                         }
                         "icing" => {

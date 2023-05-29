@@ -74,17 +74,21 @@ impl HQMMatch {
     pub fn set_clock(
         &mut self,
         server: &mut HQMServer,
-        input_minutes: u32,
-        input_seconds: u32,
+        input_time: u32,
         player_index: HQMServerPlayerIndex,
     ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
-                server.game.time = (input_minutes * 60 * 100) + (input_seconds * 100);
+                server.game.time = input_time;
+
+                let input_minutes = input_time / (60 * 100);
+                let input_rest = input_time % (60 * 100);
+                let input_seconds = input_rest / 100;
+                let input_centis = input_time % 100;
 
                 info!(
-                    "Clock set to {}:{} by {} ({})",
-                    input_minutes, input_seconds, player.player_name, player_index
+                    "Clock set to {}:{:02}.{:02} by {} ({})",
+                    input_minutes, input_seconds, input_centis, player.player_name, player_index
                 );
                 let msg = format!("Clock set by {}", player.player_name);
                 server.messages.add_server_chat_message(msg);
