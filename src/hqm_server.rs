@@ -1384,10 +1384,17 @@ impl HQMServer {
     }
 
     fn write_replay(&mut self) {
-        self.replay_data.reserve(2048);
+        let replay_messages_to_send = &self.messages.replay_messages[self.replay_msg_pos..];
+        let remaining_messages = replay_messages_to_send.len();
+        self.replay_data.reserve(
+            9 // Header, time, score, period, etc.
+            + 8 // Position metadata
+            + (32*30) // 32 objects that can be at most 30 bytes each
+            + 4 // Message metadata
+            + remaining_messages * 66, // Chat message can be up to 66 bytes each
+        );
         let mut writer = HQMMessageWriter::new(&mut self.replay_data);
 
-        let replay_messages = self.messages.replay_messages.as_slice();
         writer.write_byte_aligned(5);
         writer.write_bits(
             1,
@@ -1401,22 +1408,20 @@ impl HQMServer {
         writer.write_bits(16, self.game.time);
 
         writer.write_bits(16, self.game.goal_message_timer);
-        writer.write_bits(8, self.game.period);
+        writer.write_bits(8, self.game.period); // 8.1
 
         let packets = &self.saved_packets;
 
         write_objects(&mut writer, packets, self.packet, self.replay_last_packet);
         self.replay_last_packet = self.packet;
 
-        let remaining_messages = replay_messages.len() - self.replay_msg_pos;
-
         writer.write_bits(16, remaining_messages as u32);
         writer.write_bits(16, self.replay_msg_pos as u32);
 
-        for message in &replay_messages[self.replay_msg_pos..replay_messages.len()] {
+        for message in replay_messages_to_send {
             write_message(&mut writer, Rc::as_ref(message));
         }
-        self.replay_msg_pos = replay_messages.len();
+        self.replay_msg_pos = self.messages.replay_messages.len();
         writer.replay_fix();
     }
 }
