@@ -112,6 +112,7 @@ jobs:
           - x86_64-unknown-linux-musl
           - x86_64-unknown-freebsd
           - riscv64gc-unknown-linux-gnu
+          - loongarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
