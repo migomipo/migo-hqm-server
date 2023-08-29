@@ -10,7 +10,7 @@ nalgebra = "0.32"
 tokio = { version = "1", features = ["net", "time", "macros", "rt-multi-thread", "sync", "fs", "parking_lot"] }
 rust-ini = "0.18" # INI For configuration
 bytes = "1.4"
-reqwest = { version = "0.11", default_features=false, features = ["multipart"] }
+reqwest = { version = "0.11", default_features=false, features = ["multipart", "rustls-tls"] }
 tracing = "0.1.37"
 tracing-subscriber = {version="0.3", features = ["parking_lot"]}
 tracing-appender = "0.2"

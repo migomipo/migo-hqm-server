@@ -1439,7 +1439,7 @@ struct ReplayElement {
 
 pub async fn run_server<B: HQMServerBehaviour>(
     port: u16,
-    public: bool,
+    public: Option<&str>,
     config: HQMServerConfiguration,
     mut behaviour: B,
 ) -> std::io::Result<()> {
@@ -1492,23 +1492,41 @@ pub async fn run_server<B: HQMServerBehaviour>(
         socket.local_addr().unwrap()
     );
 
-    if public {
+    async fn get_http_response(
+        client: &reqwest::Client,
+        address: &str,
+    ) -> Result<SocketAddr, Box<dyn Error + Send + Sync>> {
+        let response = client.get(address).send().await?.text().await?;
+
+        let split = response.split_ascii_whitespace().collect::<Vec<&str>>();
+
+        let addr = split.get(1).unwrap_or(&"").parse::<IpAddr>()?;
+        let port = split.get(2).unwrap_or(&"").parse::<u16>()?;
+        Ok(SocketAddr::new(addr, port))
+    }
+
+    if let Some(public) = public {
         let socket = socket.clone();
         let reqwest_client = reqwest_client.clone();
+        let address = public.to_string();
         tokio::spawn(async move {
             loop {
-                let master_server = get_master_server(&reqwest_client).await.ok();
-                if let Some(addr) = master_server {
-                    for _ in 0..60 {
-                        let msg = b"Hock\x20";
-                        let res = socket.send_to(msg, addr).await;
-                        if res.is_err() {
-                            break;
+                let master_server = get_http_response(&reqwest_client, &address).await;
+                match master_server {
+                    Ok(addr) => {
+                        for _ in 0..60 {
+                            let msg = b"Hock\x20";
+                            let res = socket.send_to(msg, addr).await;
+                            if res.is_err() {
+                                break;
+                            }
+                            tokio::time::sleep(Duration::from_secs(10)).await;
                         }
-                        tokio::time::sleep(Duration::from_secs(10)).await;
                     }
-                } else {
-                    tokio::time::sleep(Duration::from_secs(15)).await;
+                    Err(e) => {
+                        tracing::warn!(e);
+                        tokio::time::sleep(Duration::from_secs(15)).await;
+                    }
                 }
             }
         });
@@ -1838,21 +1856,6 @@ fn get_packets(objects: &[HQMGameObject]) -> smallvec::SmallVec<[HQMObjectPacket
         packets.push(packet);
     }
     packets
-}
-
-async fn get_master_server(client: &reqwest::Client) -> Result<SocketAddr, Box<dyn Error>> {
-    let s = client
-        .get("http://www.crypticsea.com/anewzero/serverinfo.php")
-        .send()
-        .await?
-        .text()
-        .await?;
-
-    let split = s.split_ascii_whitespace().collect::<Vec<&str>>();
-
-    let addr = split.get(1).unwrap_or(&"").parse::<IpAddr>()?;
-    let port = split.get(2).unwrap_or(&"").parse::<u16>()?;
-    Ok(SocketAddr::new(addr, port))
 }
 
 pub fn get_spawnpoint(

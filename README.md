@@ -20,6 +20,7 @@ name                   | Name of the server that will be visible in the server l
 port                   | Port number, must be a number between 0 and 65535. 27585 is the default, and most servers are in the 27585-27599 range.
 mode                   | Game mode. Currently supported values are "match" (play matches), "warmup" (warmup mode forever), "russian" (Russian 1v1/2v2), and "shootout" (shootout mode).
 public                 | If true, the server will notify the master server so that clients can find this server easily in the server list.
+public_address         | (optional) Master server address.
 log_name               | (optional) Log name prefix. Log files will end up in a "log" folder in the current working directory, and be named *log_name*-*date*. Default log name prefix is the server name + ".log".
 team_max               | Number of players allowed in each team.
 player_max             | Number of players allowed in the server.

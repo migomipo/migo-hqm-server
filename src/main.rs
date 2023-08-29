@@ -39,6 +39,10 @@ enum HQMServerMode {
     FaceoffPractice,
 }
 
+fn is_true(s: &str) -> bool {
+    s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on")
+}
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
@@ -62,11 +66,16 @@ async fn main() -> std::io::Result<()> {
             .parse::<String>()
             .unwrap();
         let server_port = server_section.get("port").unwrap().parse::<u16>().unwrap();
-        let server_public = server_section
-            .get("public")
-            .unwrap()
-            .parse::<bool>()
-            .unwrap();
+        let server_public = is_true(server_section.get("public").unwrap());
+        let public_address = if server_public {
+            Some(
+                server_section
+                    .get("public_address")
+                    .unwrap_or("https://sam2.github.io/HQMMasterServerEndpoint/"),
+            )
+        } else {
+            None
+        };
         let server_player_max = server_section
             .get("player_max")
             .unwrap()
@@ -95,9 +104,7 @@ async fn main() -> std::io::Result<()> {
             });
 
         let replays_enabled = match server_section.get("replays") {
-            Some(s) if s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on") => {
-                ReplayEnabled::On
-            }
+            Some(s) if is_true(s) => ReplayEnabled::On,
             Some(s) if s.eq_ignore_ascii_case("standby") => ReplayEnabled::Standby,
             _ => ReplayEnabled::Off,
         };
@@ -135,9 +142,7 @@ async fn main() -> std::io::Result<()> {
         // Game
         let game_section = conf.section(Some("Game"));
 
-        let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, |s| {
-            s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on")
-        });
+        let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, is_true);
 
         let blue_line_location = get_optional(game_section, "blue_line_location", 22.86f32, |x| {
             x.parse::<f32>().unwrap()
@@ -213,7 +218,8 @@ async fn main() -> std::io::Result<()> {
             .with_line_number(false)
             .with_file(false)
             .with_target(false)
-            .with_writer(non_blocking).init();
+            .with_writer(non_blocking)
+            .init();
 
         return match mode {
             HQMServerMode::Match => {
@@ -294,13 +300,9 @@ async fn main() -> std::io::Result<()> {
                         _ => HQMSpawnPoint::Center,
                     });
 
-                let use_mph = get_optional(game_section, "use_mph", false, |s| {
-                    s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on")
-                });
+                let use_mph = get_optional(game_section, "use_mph", false, is_true);
 
-                let goal_replay = get_optional(game_section, "goal_replay", false, |s| {
-                    s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("on")
-                });
+                let goal_replay = get_optional(game_section, "goal_replay", false, is_true);
 
                 let match_config = HQMMatchConfiguration {
                     time_period: rules_time_period,
@@ -323,7 +325,7 @@ async fn main() -> std::io::Result<()> {
 
                 hqm_server::run_server(
                     server_port,
-                    server_public,
+                    public_address,
                     config,
                     HQMMatchBehaviour::new(match_config, server_team_max, spawn_point),
                 )
@@ -342,7 +344,7 @@ async fn main() -> std::io::Result<()> {
 
                 hqm_server::run_server(
                     server_port,
-                    server_public,
+                    public_address,
                     config,
                     HQMPermanentWarmup::new(physics_config, warmup_pucks, spawn_point),
                 )
@@ -354,7 +356,7 @@ async fn main() -> std::io::Result<()> {
 
                 hqm_server::run_server(
                     server_port,
-                    server_public,
+                    public_address,
                     config,
                     HQMRussianBehaviour::new(
                         attempts,
@@ -371,7 +373,7 @@ async fn main() -> std::io::Result<()> {
 
                 hqm_server::run_server(
                     server_port,
-                    server_public,
+                    public_address,
                     config,
                     HQMShootoutBehaviour::new(attempts, physics_config),
                 )
@@ -380,7 +382,7 @@ async fn main() -> std::io::Result<()> {
             HQMServerMode::FaceoffPractice => {
                 hqm_server::run_server(
                     server_port,
-                    server_public,
+                    public_address,
                     config,
                     HQMFaceoffPracticeBehaviour::new(physics_config),
                 )
