@@ -517,10 +517,10 @@ fn update_player(
     let mut touches_ice = false;
     if feet_pos[1] < 0.0 {
         // Makes players bounce up if their feet get below the ice
-        let temp1 = -feet_pos[1] * 0.125 * 0.125 * 0.25;
+        let temp1 = -feet_pos[1] * 0.125 * 0.125;
         let unit_y = Vector3::y();
 
-        let mut temp2 = temp1 * unit_y - 0.25 * player.body.linear_velocity;
+        let mut temp2 = 0.25 * (temp1 * unit_y - player.body.linear_velocity);
         if temp2.dot(&unit_y) > 0.0 {
             let (column, rejection_limit) = if player.input.shift() {
                 (Vector3::x(), 0.4)
