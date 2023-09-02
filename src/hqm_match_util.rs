@@ -1,12 +1,19 @@
 use crate::hqm_game::{
-    HQMGame, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRinkFaceoffSpot,
-    HQMRinkLine, HQMRinkSide, HQMRulesState, HQMTeam,
+    HQMFaceoffSpot, HQMGame, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRink,
+    HQMRinkFaceoffSpot, HQMRinkLine, HQMRinkSide, HQMRulesState, HQMTeam,
 };
 use crate::hqm_server::{HQMServer, HQMServerPlayer, HQMServerPlayerIndex, HQMServerPlayerList};
+
 use crate::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
+use std::f32::consts::PI;
+
+pub const ALLOWED_POSITIONS: [&str; 18] = [
+    "C", "LW", "RW", "LD", "RD", "G", "LM", "RM", "LLM", "RRM", "LLD", "RRD", "CM", "CD", "LW2",
+    "RW2", "LLW", "RRW",
+];
 
 pub struct HQMMatchConfiguration {
     pub time_period: u32,
@@ -49,7 +56,7 @@ pub struct HQMMatch {
     offside_status: HQMOffsideStatus,
     twoline_pass_status: HQMTwoLinePassStatus,
     pass: Option<HQMPass>,
-    pub(crate) preferred_positions: HashMap<HQMServerPlayerIndex, String>,
+    pub(crate) preferred_positions: HashMap<HQMServerPlayerIndex, &'static str>,
 
     pub started_as_goalie: Vec<HQMServerPlayerIndex>,
     faceoff_game_step: u32,
@@ -92,21 +99,12 @@ impl HQMMatch {
     }
 
     fn do_faceoff(&mut self, server: &mut HQMServer) {
-        let positions = get_faceoff_positions(
-            &server.players,
-            &self.preferred_positions,
-            &server.game.world,
-        );
+        let positions = get_faceoff_positions(&server.players, &self.preferred_positions);
 
         server.game.world.clear_pucks();
         self.puck_touches.clear();
 
-        let next_faceoff_spot = server
-            .game
-            .world
-            .rink
-            .get_faceoff_spot(self.next_faceoff_spot)
-            .clone();
+        let next_faceoff_spot = get_faceoff_spot(&server.game.world.rink, self.next_faceoff_spot);
 
         let puck_pos = next_faceoff_spot.center_position + &(1.5f32 * Vector3::y());
 
@@ -118,8 +116,8 @@ impl HQMMatch {
         self.started_as_goalie.clear();
         for (player_index, (team, faceoff_position)) in positions {
             let (player_position, player_rotation) = match team {
-                HQMTeam::Red => next_faceoff_spot.red_player_positions[&faceoff_position].clone(),
-                HQMTeam::Blue => next_faceoff_spot.blue_player_positions[&faceoff_position].clone(),
+                HQMTeam::Red => next_faceoff_spot.red_player_positions[faceoff_position].clone(),
+                HQMTeam::Blue => next_faceoff_spot.blue_player_positions[faceoff_position].clone(),
             };
             server.spawn_skater(player_index, team, player_position, player_rotation);
             if faceoff_position == "G" {
@@ -1014,10 +1012,8 @@ pub fn add_touch(
 
 pub fn get_faceoff_positions(
     players: &HQMServerPlayerList,
-    preferred_positions: &HashMap<HQMServerPlayerIndex, String>,
-    world: &HQMGameWorld,
-) -> HashMap<HQMServerPlayerIndex, (HQMTeam, String)> {
-    let allowed_positions = &world.rink.allowed_positions;
+    preferred_positions: &HashMap<HQMServerPlayerIndex, &'static str>,
+) -> HashMap<HQMServerPlayerIndex, (HQMTeam, &'static str)> {
     let mut res = HashMap::new();
 
     let mut red_players = smallvec::SmallVec::<[_; 32]>::new();
@@ -1026,7 +1022,7 @@ pub fn get_faceoff_positions(
         if let Some(player) = player {
             let team = player.object.map(|x| x.1);
 
-            let preferred_position = preferred_positions.get(&player_index).map(String::as_str);
+            let preferred_position = preferred_positions.get(&player_index).map(|x| *x);
 
             if team == Some(HQMTeam::Red) {
                 red_players.push((player_index, preferred_position));
@@ -1036,8 +1032,8 @@ pub fn get_faceoff_positions(
         }
     }
 
-    setup_position(&mut res, &red_players, allowed_positions, HQMTeam::Red);
-    setup_position(&mut res, &blue_players, allowed_positions, HQMTeam::Blue);
+    setup_position(&mut res, &red_players, HQMTeam::Red);
+    setup_position(&mut res, &blue_players, HQMTeam::Blue);
 
     res
 }
@@ -1090,19 +1086,18 @@ pub fn has_players_in_offensive_zone(
 }
 
 fn setup_position(
-    positions: &mut HashMap<HQMServerPlayerIndex, (HQMTeam, String)>,
-    players: &[(HQMServerPlayerIndex, Option<&str>)],
-    allowed_positions: &[String],
+    positions: &mut HashMap<HQMServerPlayerIndex, (HQMTeam, &'static str)>,
+    players: &[(HQMServerPlayerIndex, Option<&'static str>)],
     team: HQMTeam,
 ) {
-    let mut available_positions = Vec::from(allowed_positions);
+    let mut available_positions = Vec::from(ALLOWED_POSITIONS);
 
     // First, we try to give each player its preferred position
     for (player_index, player_position) in players.iter() {
         if let Some(player_position) = player_position {
             if let Some(x) = available_positions
                 .iter()
-                .position(|x| x == *player_position)
+                .position(|x| x == player_position)
             {
                 let s = available_positions.remove(x);
                 positions.insert(*player_index, (team, s));
@@ -1114,7 +1109,7 @@ fn setup_position(
     // or because it was already taken
     for (player_index, player_position) in players.iter() {
         if !positions.contains_key(player_index) {
-            let s = if let Some(x) = available_positions.iter().position(|x| x == "C") {
+            let s = if let Some(x) = available_positions.iter().position(|x| *x == "C") {
                 // Someone needs to be C
                 let x = available_positions.remove(x);
                 (team, x)
@@ -1125,16 +1120,16 @@ fn setup_position(
             } else {
                 // Oh no, we're out of legal starting positions
                 if let Some(player_position) = player_position {
-                    (team, (*player_position).to_owned())
+                    (team, *player_position)
                 } else {
-                    (team, "C".to_owned())
+                    (team, "C")
                 }
             };
             positions.insert(*player_index, s);
         }
     }
 
-    if let Some(x) = available_positions.iter().position(|x| x == "C") {
+    if let Some(x) = available_positions.iter().position(|x| *x == "C") {
         let mut change_index = None;
         for (player_index, _) in players.iter() {
             if change_index.is_none() {
@@ -1142,7 +1137,7 @@ fn setup_position(
             }
 
             if let Some((_, pos)) = positions.get(player_index) {
-                if pos != "G" {
+                if *pos != "G" {
                     change_index = Some(player_index);
                     break;
                 }
@@ -1152,6 +1147,200 @@ fn setup_position(
         if let Some(change_index) = change_index {
             let c = available_positions.remove(x);
             positions.insert(*change_index, (team, c));
+        }
+    }
+}
+
+fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot) -> HQMFaceoffSpot {
+    let length = rink.length;
+    let width = rink.width;
+
+    let red_rot = Rotation3::identity();
+    let blue_rot = Rotation3::from_euler_angles(0.0, PI, 0.0);
+    let red_goalie_pos = Point3::new(width / 2.0, 1.5, length - 5.0);
+    let blue_goalie_pos = Point3::new(width / 2.0, 1.5, 5.0);
+
+    let goal_line_distance = 4.0; // IIHF rule 17iv
+
+    let blue_line_distance_neutral_zone_edge = rink.blue_line_distance;
+    // IIHF specifies distance between end boards and edge closest to the neutral zone, but my code specifies middle of line
+    let distance_neutral_faceoff_spot = blue_line_distance_neutral_zone_edge + 1.5; // IIHF rule 18iv and 18vii
+    let distance_zone_faceoff_spot = goal_line_distance + 6.0; // IIHF rule 18vi and 18vii
+
+    let center_x = width / 2.0;
+    let left_faceoff_x = center_x - 7.0; // IIHF rule 18vi and 18iv
+    let right_faceoff_x = center_x + 7.0; // IIHF rule 18vi and 18iv
+
+    let red_zone_faceoff_z = length - distance_zone_faceoff_spot;
+    let red_neutral_faceoff_z = length - distance_neutral_faceoff_spot;
+    let center_z = length / 2.0;
+    let blue_neutral_faceoff_z = distance_neutral_faceoff_spot;
+    let blue_zone_faceoff_z = distance_zone_faceoff_spot;
+
+    let create_faceoff_spot = |center_position: Point3<f32>| {
+        let red_defensive_zone = center_position.z > length - 11.0;
+        let blue_defensive_zone = center_position.z < 11.0;
+        let (red_left, red_right) = if center_position.x < 9.0 {
+            (true, false)
+        } else if center_position.x > width - 9.0 {
+            (false, true)
+        } else {
+            (false, false)
+        };
+        let blue_left = red_right;
+        let blue_right = red_left;
+
+        fn get_positions(
+            center_position: &Point3<f32>,
+            rot: &Rotation3<f32>,
+            goalie_pos: &Point3<f32>,
+            is_defensive_zone: bool,
+            is_close_to_left: bool,
+            is_close_to_right: bool,
+        ) -> HashMap<String, (Point3<f32>, Rotation3<f32>)> {
+            let mut player_positions = HashMap::new();
+
+            let winger_z = 4.0;
+            let m_z = 7.25;
+            let d_z = if is_defensive_zone { 8.25 } else { 10.0 };
+            let (far_left_winger_x, far_left_winger_z) = if is_close_to_left {
+                (-6.5, 3.0)
+            } else {
+                (-10.0, winger_z)
+            };
+            let (far_right_winger_x, far_right_winger_z) = if is_close_to_right {
+                (6.5, 3.0)
+            } else {
+                (10.0, winger_z)
+            };
+
+            let offsets = vec![
+                ("C", Vector3::new(0.0, 1.5, 2.75)),
+                ("LM", Vector3::new(-2.0, 1.5, m_z)),
+                ("RM", Vector3::new(2.0, 1.5, m_z)),
+                ("LW", Vector3::new(-5.0, 1.5, winger_z)),
+                ("RW", Vector3::new(5.0, 1.5, winger_z)),
+                ("LD", Vector3::new(-2.0, 1.5, d_z)),
+                ("RD", Vector3::new(2.0, 1.5, d_z)),
+                (
+                    "LLM",
+                    Vector3::new(
+                        if is_close_to_left && is_defensive_zone {
+                            -3.0
+                        } else {
+                            -5.0
+                        },
+                        1.5,
+                        m_z,
+                    ),
+                ),
+                (
+                    "RRM",
+                    Vector3::new(
+                        if is_close_to_right && is_defensive_zone {
+                            3.0
+                        } else {
+                            5.0
+                        },
+                        1.5,
+                        m_z,
+                    ),
+                ),
+                (
+                    "LLD",
+                    Vector3::new(
+                        if is_close_to_left && is_defensive_zone {
+                            -3.0
+                        } else {
+                            -5.0
+                        },
+                        1.5,
+                        d_z,
+                    ),
+                ),
+                (
+                    "RRD",
+                    Vector3::new(
+                        if is_close_to_right && is_defensive_zone {
+                            3.0
+                        } else {
+                            5.0
+                        },
+                        1.5,
+                        d_z,
+                    ),
+                ),
+                ("CM", Vector3::new(0.0, 1.5, m_z)),
+                ("CD", Vector3::new(0.0, 1.5, d_z)),
+                ("LW2", Vector3::new(-6.0, 1.5, winger_z)),
+                ("RW2", Vector3::new(6.0, 1.5, winger_z)),
+                (
+                    "LLW",
+                    Vector3::new(far_left_winger_x, 1.5, far_left_winger_z),
+                ),
+                (
+                    "RRW",
+                    Vector3::new(far_right_winger_x, 1.5, far_right_winger_z),
+                ),
+            ];
+            for (s, offset) in offsets {
+                let pos = center_position + rot * &offset;
+
+                player_positions.insert(String::from(s), (pos, rot.clone()));
+            }
+
+            player_positions.insert(String::from("G"), (goalie_pos.clone(), rot.clone()));
+
+            player_positions
+        }
+
+        let red_player_positions = get_positions(
+            &center_position,
+            &red_rot,
+            &red_goalie_pos,
+            red_defensive_zone,
+            red_left,
+            red_right,
+        );
+        let blue_player_positions = get_positions(
+            &center_position,
+            &blue_rot,
+            &blue_goalie_pos,
+            blue_defensive_zone,
+            blue_left,
+            blue_right,
+        );
+
+        HQMFaceoffSpot {
+            center_position,
+            red_player_positions,
+            blue_player_positions,
+        }
+    };
+
+    match spot {
+        HQMRinkFaceoffSpot::Center => create_faceoff_spot(Point3::new(center_x, 0.0, center_z)),
+        HQMRinkFaceoffSpot::DefensiveZone(team, side) => {
+            let z = match team {
+                HQMTeam::Red => red_zone_faceoff_z,
+                HQMTeam::Blue => blue_zone_faceoff_z,
+            };
+            let x = match side {
+                HQMRinkSide::Left => left_faceoff_x,
+                HQMRinkSide::Right => right_faceoff_x,
+            };
+            create_faceoff_spot(Point3::new(x, 0.0, z))
+        }
+        HQMRinkFaceoffSpot::Offside(team, side) => {
+            let z = match team {
+                HQMTeam::Red => red_neutral_faceoff_z,
+                HQMTeam::Blue => blue_neutral_faceoff_z,
+            };
+            let x = match side {
+                HQMRinkSide::Left => left_faceoff_x,
+                HQMRinkSide::Right => right_faceoff_x,
+            };
+            create_faceoff_spot(Point3::new(x, 0.0, z))
         }
     }
 }
@@ -1166,55 +1355,28 @@ mod tests {
 
     #[test]
     fn test1() {
-        let allowed_positions: Vec<String> = vec![
-            "C", "LW", "RW", "LD", "RD", "G", "LM", "RM", "LLM", "RRM", "LLD", "RRD", "CM", "CD",
-            "LW2", "RW2", "LLW", "RRW",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect();
         let c = "C";
         let lw = "LW";
         let rw = "RW";
         let g = "G";
         let mut res1 = HashMap::new();
         let players = vec![(HQMServerPlayerIndex(0), None)];
-        setup_position(
-            &mut res1,
-            players.as_ref(),
-            &allowed_positions,
-            HQMTeam::Red,
-        );
+        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
         assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
         let players = vec![(HQMServerPlayerIndex(0), Some(c))];
-        setup_position(
-            &mut res1,
-            players.as_ref(),
-            &allowed_positions,
-            HQMTeam::Red,
-        );
+        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
         assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
         let players = vec![(HQMServerPlayerIndex(0), Some(lw))];
-        setup_position(
-            &mut res1,
-            players.as_ref(),
-            &allowed_positions,
-            HQMTeam::Red,
-        );
+        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
         assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
         let players = vec![(HQMServerPlayerIndex(0), Some(g))];
-        setup_position(
-            &mut res1,
-            players.as_ref(),
-            &allowed_positions,
-            HQMTeam::Red,
-        );
+        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
         assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
@@ -1222,12 +1384,7 @@ mod tests {
             (HQMServerPlayerIndex(0usize), Some(c)),
             (HQMServerPlayerIndex(1), Some(lw)),
         ];
-        setup_position(
-            &mut res1,
-            players.as_ref(),
-            &allowed_positions,
-            HQMTeam::Red,
-        );
+        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
         assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
         assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
 
@@ -1236,12 +1393,7 @@ mod tests {
             (HQMServerPlayerIndex(0), None),
             (HQMServerPlayerIndex(1), Some(lw)),
         ];
-        setup_position(
-            &mut res1,
-            players.as_ref(),
-            &allowed_positions,
-            HQMTeam::Red,
-        );
+        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
         assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
         assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
 
@@ -1250,12 +1402,7 @@ mod tests {
             (HQMServerPlayerIndex(0), Some(rw)),
             (HQMServerPlayerIndex(1), Some(lw)),
         ];
-        setup_position(
-            &mut res1,
-            players.as_ref(),
-            &allowed_positions,
-            HQMTeam::Red,
-        );
+        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
         assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
         assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
 
@@ -1264,12 +1411,7 @@ mod tests {
             (HQMServerPlayerIndex(0), Some(g)),
             (HQMServerPlayerIndex(1), Some(lw)),
         ];
-        setup_position(
-            &mut res1,
-            players.as_ref(),
-            &allowed_positions,
-            HQMTeam::Red,
-        );
+        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
         assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "G");
         assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "C");
 
@@ -1278,12 +1420,7 @@ mod tests {
             (HQMServerPlayerIndex(0usize), Some(c)),
             (HQMServerPlayerIndex(1), Some(c)),
         ];
-        setup_position(
-            &mut res1,
-            players.as_ref(),
-            &allowed_positions,
-            HQMTeam::Red,
-        );
+        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
         assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
         assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
     }

@@ -350,12 +350,7 @@ pub struct HQMRink {
     pub blue_lines_and_net: LinesAndNet,
     pub width: f32,
     pub length: f32,
-    pub allowed_positions: Vec<String>,
-    pub blue_zone_faceoff_spots: [HQMFaceoffSpot; 2],
-    pub blue_neutral_faceoff_spots: [HQMFaceoffSpot; 2],
-    pub center_faceoff_spot: HQMFaceoffSpot,
-    pub red_neutral_faceoff_spots: [HQMFaceoffSpot; 2],
-    pub red_zone_faceoff_spots: [HQMFaceoffSpot; 2],
+    pub blue_line_distance: f32,
 }
 
 impl HQMRink {
@@ -620,58 +615,7 @@ impl HQMRink {
             },
             width,
             length,
-            allowed_positions: vec![
-                "C", "LW", "RW", "LD", "RD", "G", "LM", "RM", "LLM", "RRM", "LLD", "RRD", "CM",
-                "CD", "LW2", "RW2", "LLW", "RRW",
-            ]
-            .into_iter()
-            .map(String::from)
-            .collect(),
-            blue_zone_faceoff_spots: [
-                create_faceoff_spot(Point3::new(left_faceoff_x, 0.0, blue_zone_faceoff_z)),
-                create_faceoff_spot(Point3::new(right_faceoff_x, 0.0, blue_zone_faceoff_z)),
-            ],
-            blue_neutral_faceoff_spots: [
-                create_faceoff_spot(Point3::new(left_faceoff_x, 0.0, blue_neutral_faceoff_z)),
-                create_faceoff_spot(Point3::new(right_faceoff_x, 0.0, blue_neutral_faceoff_z)),
-            ],
-            center_faceoff_spot: create_faceoff_spot(Point3::new(center_x, 0.0, center_z)),
-            red_neutral_faceoff_spots: [
-                create_faceoff_spot(Point3::new(left_faceoff_x, 0.0, red_neutral_faceoff_z)),
-                create_faceoff_spot(Point3::new(right_faceoff_x, 0.0, red_neutral_faceoff_z)),
-            ],
-            red_zone_faceoff_spots: [
-                create_faceoff_spot(Point3::new(left_faceoff_x, 0.0, red_zone_faceoff_z)),
-                create_faceoff_spot(Point3::new(right_faceoff_x, 0.0, red_zone_faceoff_z)),
-            ],
-        }
-    }
-
-    pub fn get_faceoff_spot(&self, spot: HQMRinkFaceoffSpot) -> &HQMFaceoffSpot {
-        match spot {
-            HQMRinkFaceoffSpot::Center => &self.center_faceoff_spot,
-            HQMRinkFaceoffSpot::DefensiveZone(team, side) => {
-                let faceoff_spots = match team {
-                    HQMTeam::Red => &self.red_zone_faceoff_spots,
-                    HQMTeam::Blue => &self.blue_zone_faceoff_spots,
-                };
-                let index = match side {
-                    HQMRinkSide::Left => 0,
-                    HQMRinkSide::Right => 1,
-                };
-                &faceoff_spots[index]
-            }
-            HQMRinkFaceoffSpot::Offside(team, side) => {
-                let faceoff_spots = match team {
-                    HQMTeam::Red => &self.red_neutral_faceoff_spots,
-                    HQMTeam::Blue => &self.blue_neutral_faceoff_spots,
-                };
-                let index = match side {
-                    HQMRinkSide::Left => 0,
-                    HQMRinkSide::Right => 1,
-                };
-                &faceoff_spots[index]
-            }
+            blue_line_distance,
         }
     }
 }

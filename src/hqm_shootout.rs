@@ -653,8 +653,11 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                                 server.game.world.objects.get_puck(HQMObjectIndex(0))
                             {
                                 let puck_pos = &puck.body.pos;
-                                let center_pos =
-                                    &server.game.world.rink.center_faceoff_spot.center_position;
+                                let center_pos = Point3::new(
+                                    server.game.world.rink.width / 2.0,
+                                    0.0,
+                                    server.game.world.rink.length / 2.0,
+                                );
                                 let pos_diff = puck_pos - center_pos;
                                 let normal = match *team {
                                     HQMTeam::Red => -Vector3::z(),

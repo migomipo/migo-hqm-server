@@ -1,7 +1,7 @@
 use crate::hqm_game::HQMTeam;
 use crate::hqm_match_util::{
     HQMIcingConfiguration, HQMMatch, HQMOffsideConfiguration, HQMOffsideLineConfiguration,
-    HQMTwoLinePassConfiguration,
+    HQMTwoLinePassConfiguration, ALLOWED_POSITIONS,
 };
 use crate::hqm_server::{HQMServer, HQMServerPlayerIndex};
 use tracing::info;
@@ -522,22 +522,18 @@ impl HQMMatch {
         input_position: &str,
     ) {
         let input_position = input_position.to_uppercase();
-        if server
-            .game
-            .world
-            .rink
-            .allowed_positions
-            .contains(&input_position)
+        if let Some(position) = ALLOWED_POSITIONS
+            .into_iter()
+            .find(|x| x.eq_ignore_ascii_case(input_position.as_str()))
         {
             if let Some(player) = server.players.get(player_index) {
                 info!(
                     "{} ({}) set position {}",
-                    player.player_name, player_index, input_position
+                    player.player_name, player_index, position
                 );
-                let msg = format!("{} position {}", player.player_name, input_position);
+                let msg = format!("{} position {}", player.player_name, position);
 
-                self.preferred_positions
-                    .insert(player_index, input_position);
+                self.preferred_positions.insert(player_index, position);
                 server.messages.add_server_chat_message(msg);
             }
         }
