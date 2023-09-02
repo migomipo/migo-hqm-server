@@ -1,5 +1,5 @@
 use crate::hqm_parse;
-use nalgebra::{Matrix3, Point3, Rotation3, Vector2, Vector3};
+use nalgebra::{point, Matrix3, Point3, Rotation3, Vector2, Vector3};
 
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -7,6 +7,7 @@ use std::fmt::{Display, Formatter};
 use crate::hqm_server::{HQMPuckPacket, HQMSkaterPacket};
 use chrono::{DateTime, Utc};
 
+use arr_macro::arr;
 use std::f32::consts::PI;
 
 pub struct HQMGameWorld {
@@ -700,8 +701,8 @@ impl HQMPuck {
         }
     }
 
-    pub(crate) fn get_puck_vertices(&self) -> smallvec::SmallVec<[Point3<f32>; 48]> {
-        let mut res = smallvec::SmallVec::<[Point3<f32>; 48]>::new();
+    pub(crate) fn get_puck_vertices(&self) -> [Point3<f32>; 48] {
+        let mut res = arr![point![0.0, 0.0, 0.0]; 48];
         for i in 0..16 {
             let (sin, cos) = ((i as f32) * PI / 8.0).sin_cos();
             for j in -1..=1 {
@@ -711,7 +712,8 @@ impl HQMPuck {
                     sin * self.radius,
                 );
                 let point2 = &self.body.rot * point;
-                res.push(&self.body.pos + point2);
+                let index = i * 3 + 1 - j;
+                res[index as usize] = self.body.pos + point2;
             }
         }
         res

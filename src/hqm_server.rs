@@ -1,3 +1,4 @@
+use arr_macro::arr;
 use std::borrow::Cow;
 use std::cmp::min;
 use std::collections::{HashSet, VecDeque};
@@ -324,7 +325,7 @@ pub struct HQMServer {
     replay_msg_pos: usize,
     replay_last_packet: u32,
 
-    saved_packets: VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
+    saved_packets: VecDeque<[HQMObjectPacket; 32]>,
     saved_pings: VecDeque<Instant>,
     saved_history: VecDeque<ReplayTick>,
 
@@ -1429,7 +1430,7 @@ impl HQMServer {
 #[derive(Clone, Debug)]
 struct ReplayTick {
     game_step: u32,
-    packets: smallvec::SmallVec<[HQMObjectPacket; 32]>,
+    packets: [HQMObjectPacket; 32],
 }
 
 struct ReplayElement {
@@ -1645,7 +1646,7 @@ fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage) {
 
 fn write_objects(
     writer: &mut HQMMessageWriter,
-    packets: &VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
+    packets: &VecDeque<[HQMObjectPacket; 32]>,
     current_packet: u32,
     known_packet: u32,
 ) {
@@ -1660,7 +1661,7 @@ fn write_objects(
         if let Some(diff) = diff {
             let index = diff as usize;
             if index < 192 && index > 0 {
-                packets.get(index).map(smallvec::SmallVec::as_slice)
+                packets.get(index)
             } else {
                 None
             }
@@ -1746,7 +1747,7 @@ fn write_objects(
 
 async fn send_updates(
     game_id: u32,
-    packets: &VecDeque<smallvec::SmallVec<[HQMObjectPacket; 32]>>,
+    packets: &VecDeque<[HQMObjectPacket; 32]>,
     game_step: u32,
     game_over: bool,
     red_score: u32,
@@ -1845,15 +1846,15 @@ async fn send_updates(
     }
 }
 
-fn get_packets(objects: &[HQMGameObject]) -> smallvec::SmallVec<[HQMObjectPacket; 32]> {
-    let mut packets = smallvec::SmallVec::<[HQMObjectPacket; 32]>::new();
+fn get_packets(objects: &[HQMGameObject]) -> [HQMObjectPacket; 32] {
+    let mut packets = arr![HQMObjectPacket::None; 32];
     for i in 0usize..32 {
         let packet = match &objects[i] {
             HQMGameObject::Puck(puck) => HQMObjectPacket::Puck(puck.get_packet()),
             HQMGameObject::Player(player) => HQMObjectPacket::Skater(player.get_packet()),
             HQMGameObject::None => HQMObjectPacket::None,
         };
-        packets.push(packet);
+        packets[i] = packet;
     }
     packets
 }
