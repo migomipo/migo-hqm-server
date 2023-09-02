@@ -1,6 +1,6 @@
 use crate::hqm_game::{
-    HQMFaceoffSpot, HQMGame, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRink,
-    HQMRinkFaceoffSpot, HQMRinkLine, HQMRinkSide, HQMRulesState, HQMTeam,
+    HQMGame, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRink, HQMRinkLine, HQMRulesState,
+    HQMTeam,
 };
 use crate::hqm_server::{HQMServer, HQMServerPlayer, HQMServerPlayerIndex, HQMServerPlayerList};
 
@@ -14,6 +14,26 @@ pub const ALLOWED_POSITIONS: [&str; 18] = [
     "C", "LW", "RW", "LD", "RD", "G", "LM", "RM", "LLM", "RRM", "LLD", "RRD", "CM", "CD", "LW2",
     "RW2", "LLW", "RRW",
 ];
+
+#[derive(Debug, Clone)]
+pub struct HQMFaceoffSpot {
+    pub center_position: Point3<f32>,
+    pub red_player_positions: HashMap<&'static str, (Point3<f32>, Rotation3<f32>)>,
+    pub blue_player_positions: HashMap<&'static str, (Point3<f32>, Rotation3<f32>)>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum HQMRinkSide {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum HQMRinkFaceoffSpot {
+    Center,
+    DefensiveZone(HQMTeam, HQMRinkSide),
+    Offside(HQMTeam, HQMRinkSide),
+}
 
 pub struct HQMMatchConfiguration {
     pub time_period: u32,
@@ -1197,7 +1217,7 @@ fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot) -> HQMFaceoffSpot 
             is_defensive_zone: bool,
             is_close_to_left: bool,
             is_close_to_right: bool,
-        ) -> HashMap<String, (Point3<f32>, Rotation3<f32>)> {
+        ) -> HashMap<&'static str, (Point3<f32>, Rotation3<f32>)> {
             let mut player_positions = HashMap::new();
 
             let winger_z = 4.0;
@@ -1286,10 +1306,10 @@ fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot) -> HQMFaceoffSpot 
             for (s, offset) in offsets {
                 let pos = center_position + rot * &offset;
 
-                player_positions.insert(String::from(s), (pos, rot.clone()));
+                player_positions.insert(s, (pos, rot.clone()));
             }
 
-            player_positions.insert(String::from("G"), (goalie_pos.clone(), rot.clone()));
+            player_positions.insert("G", (goalie_pos.clone(), rot.clone()));
 
             player_positions
         }

@@ -6,7 +6,7 @@ use std::fmt::{Display, Formatter};
 
 use crate::hqm_server::{HQMPuckPacket, HQMSkaterPacket};
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
+
 use std::f32::consts::PI;
 
 pub struct HQMGameWorld {
@@ -323,26 +323,6 @@ pub struct LinesAndNet {
 }
 
 #[derive(Debug, Clone)]
-pub struct HQMFaceoffSpot {
-    pub center_position: Point3<f32>,
-    pub red_player_positions: HashMap<String, (Point3<f32>, Rotation3<f32>)>,
-    pub blue_player_positions: HashMap<String, (Point3<f32>, Rotation3<f32>)>,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum HQMRinkSide {
-    Left,
-    Right,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum HQMRinkFaceoffSpot {
-    Center,
-    DefensiveZone(HQMTeam, HQMRinkSide),
-    Offside(HQMTeam, HQMRinkSide),
-}
-
-#[derive(Debug, Clone)]
 pub struct HQMRink {
     pub planes: Vec<(Point3<f32>, Vector3<f32>)>,
     pub corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
@@ -395,20 +375,12 @@ impl HQMRink {
         let blue_line_distance_neutral_zone_edge = blue_line_distance;
         let blue_line_distance_mid = blue_line_distance_neutral_zone_edge - line_width / 2.0; // IIHF rule 17v and 17vi
                                                                                               // IIHF specifies distance between end boards and edge closest to the neutral zone, but my code specifies middle of line
-        let distance_neutral_faceoff_spot = blue_line_distance_neutral_zone_edge + 1.5; // IIHF rule 18iv and 18vii
-        let distance_zone_faceoff_spot = goal_line_distance + 6.0; // IIHF rule 18vi and 18vii
 
         let center_x = width / 2.0;
-        let left_faceoff_x = center_x - 7.0; // IIHF rule 18vi and 18iv
-        let right_faceoff_x = center_x + 7.0; // IIHF rule 18vi and 18iv
 
-        let red_zone_faceoff_z = length - distance_zone_faceoff_spot;
         let red_zone_blueline_z = length - blue_line_distance_mid;
-        let red_neutral_faceoff_z = length - distance_neutral_faceoff_spot;
         let center_z = length / 2.0;
-        let blue_neutral_faceoff_z = distance_neutral_faceoff_spot;
         let blue_zone_blueline_z = blue_line_distance_mid;
-        let blue_zone_faceoff_z = distance_zone_faceoff_spot;
 
         let red_line_normal = Vector3::z();
         let blue_line_normal = -Vector3::z();
@@ -450,152 +422,6 @@ impl HQMRink {
             point: Point3::new(0.0, 0.0, center_z),
             width: line_width,
             normal: blue_line_normal.clone(),
-        };
-
-        let red_rot = Rotation3::identity();
-        let blue_rot = Rotation3::from_euler_angles(0.0, PI, 0.0);
-        let red_goalie_pos = Point3::new(width / 2.0, 1.5, length - 5.0);
-        let blue_goalie_pos = Point3::new(width / 2.0, 1.5, 5.0);
-
-        let create_faceoff_spot = |center_position: Point3<f32>| {
-            let red_defensive_zone = center_position.z > length - 11.0;
-            let blue_defensive_zone = center_position.z < 11.0;
-            let (red_left, red_right) = if center_position.x < 9.0 {
-                (true, false)
-            } else if center_position.x > width - 9.0 {
-                (false, true)
-            } else {
-                (false, false)
-            };
-            let blue_left = red_right;
-            let blue_right = red_left;
-
-            fn get_positions(
-                center_position: &Point3<f32>,
-                rot: &Rotation3<f32>,
-                goalie_pos: &Point3<f32>,
-                is_defensive_zone: bool,
-                is_close_to_left: bool,
-                is_close_to_right: bool,
-            ) -> HashMap<String, (Point3<f32>, Rotation3<f32>)> {
-                let mut player_positions = HashMap::new();
-
-                let winger_z = 4.0;
-                let m_z = 7.25;
-                let d_z = if is_defensive_zone { 8.25 } else { 10.0 };
-                let (far_left_winger_x, far_left_winger_z) = if is_close_to_left {
-                    (-6.5, 3.0)
-                } else {
-                    (-10.0, winger_z)
-                };
-                let (far_right_winger_x, far_right_winger_z) = if is_close_to_right {
-                    (6.5, 3.0)
-                } else {
-                    (10.0, winger_z)
-                };
-
-                let offsets = vec![
-                    ("C", Vector3::new(0.0, 1.5, 2.75)),
-                    ("LM", Vector3::new(-2.0, 1.5, m_z)),
-                    ("RM", Vector3::new(2.0, 1.5, m_z)),
-                    ("LW", Vector3::new(-5.0, 1.5, winger_z)),
-                    ("RW", Vector3::new(5.0, 1.5, winger_z)),
-                    ("LD", Vector3::new(-2.0, 1.5, d_z)),
-                    ("RD", Vector3::new(2.0, 1.5, d_z)),
-                    (
-                        "LLM",
-                        Vector3::new(
-                            if is_close_to_left && is_defensive_zone {
-                                -3.0
-                            } else {
-                                -5.0
-                            },
-                            1.5,
-                            m_z,
-                        ),
-                    ),
-                    (
-                        "RRM",
-                        Vector3::new(
-                            if is_close_to_right && is_defensive_zone {
-                                3.0
-                            } else {
-                                5.0
-                            },
-                            1.5,
-                            m_z,
-                        ),
-                    ),
-                    (
-                        "LLD",
-                        Vector3::new(
-                            if is_close_to_left && is_defensive_zone {
-                                -3.0
-                            } else {
-                                -5.0
-                            },
-                            1.5,
-                            d_z,
-                        ),
-                    ),
-                    (
-                        "RRD",
-                        Vector3::new(
-                            if is_close_to_right && is_defensive_zone {
-                                3.0
-                            } else {
-                                5.0
-                            },
-                            1.5,
-                            d_z,
-                        ),
-                    ),
-                    ("CM", Vector3::new(0.0, 1.5, m_z)),
-                    ("CD", Vector3::new(0.0, 1.5, d_z)),
-                    ("LW2", Vector3::new(-6.0, 1.5, winger_z)),
-                    ("RW2", Vector3::new(6.0, 1.5, winger_z)),
-                    (
-                        "LLW",
-                        Vector3::new(far_left_winger_x, 1.5, far_left_winger_z),
-                    ),
-                    (
-                        "RRW",
-                        Vector3::new(far_right_winger_x, 1.5, far_right_winger_z),
-                    ),
-                ];
-                for (s, offset) in offsets {
-                    let pos = center_position + rot * &offset;
-
-                    player_positions.insert(String::from(s), (pos, rot.clone()));
-                }
-
-                player_positions.insert(String::from("G"), (goalie_pos.clone(), rot.clone()));
-
-                player_positions
-            }
-
-            let red_player_positions = get_positions(
-                &center_position,
-                &red_rot,
-                &red_goalie_pos,
-                red_defensive_zone,
-                red_left,
-                red_right,
-            );
-            let blue_player_positions = get_positions(
-                &center_position,
-                &blue_rot,
-                &blue_goalie_pos,
-                blue_defensive_zone,
-                blue_left,
-                blue_right,
-            );
-
-            HQMFaceoffSpot {
-                center_position,
-                red_player_positions,
-                blue_player_positions,
-            }
         };
 
         HQMRink {
