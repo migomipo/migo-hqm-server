@@ -160,44 +160,40 @@ async fn main() -> std::io::Result<()> {
 
         // Physics
         let physics_section = conf.section(Some("Physics"));
-        let gravity = get_optional(physics_section, "gravity", 0.000680555, |x| {
-            x.parse::<f32>().unwrap() / 10000.0
+        let gravity = get_optional(physics_section, "gravity", 6.80555, |x| {
+            x.parse::<f32>().unwrap()
         });
         let player_acceleration =
-            get_optional(physics_section, "player_acceleration", 0.000208333, |x| {
-                x.parse::<f32>().unwrap() / 10000.0
+            get_optional(physics_section, "player_acceleration", 2.08333, |x| {
+                x.parse::<f32>().unwrap()
             });
         let player_deceleration =
-            get_optional(physics_section, "player_deceleration", 0.000555555, |x| {
-                x.parse::<f32>().unwrap() / 10000.0
+            get_optional(physics_section, "player_deceleration", 5.55555, |x| {
+                x.parse::<f32>().unwrap()
             });
-        let max_player_speed = get_optional(physics_section, "max_player_speed", 0.05, |x| {
-            x.parse::<f32>().unwrap() / 100.0
+        let max_player_speed = get_optional(physics_section, "max_player_speed", 5.0, |x| {
+            x.parse::<f32>().unwrap()
         });
         let max_player_shift_speed =
-            get_optional(physics_section, "max_player_shift_speed", 0.0333333, |x| {
-                x.parse::<f32>().unwrap() / 100.0
+            get_optional(physics_section, "max_player_shift_speed", 3.33333, |x| {
+                x.parse::<f32>().unwrap()
             });
 
         let puck_rink_friction = get_optional(physics_section, "puck_rink_friction", 0.05, |x| {
             x.parse::<f32>().unwrap()
         });
-        let player_turning = get_optional(physics_section, "player_turning", 0.00041666666, |x| {
-            x.parse::<f32>().unwrap() / 10000.0
+        let player_turning = get_optional(physics_section, "player_turning", 4.1666666, |x| {
+            x.parse::<f32>().unwrap()
         });
-        let player_shift_turning = get_optional(
-            physics_section,
-            "player_shift_turning",
-            0.00038888888,
-            |x| x.parse::<f32>().unwrap() / 10000.0,
-        );
+        let player_shift_turning =
+            get_optional(physics_section, "player_shift_turning", 3.8888888, |x| {
+                x.parse::<f32>().unwrap()
+            });
 
-        let player_shift_acceleration = get_optional(
-            physics_section,
-            "player_shift_acceleration",
-            0.00027777,
-            |x| x.parse::<f32>().unwrap() / 10000.0,
-        );
+        let player_shift_acceleration =
+            get_optional(physics_section, "player_shift_acceleration", 2.7777, |x| {
+                x.parse::<f32>().unwrap()
+            });
 
         let physics_config = HQMPhysicsConfiguration {
             gravity,
