@@ -398,10 +398,11 @@ fn update_player(
     }
     let feet_pos = player.body.pos - &player.body.rot * (player.height * Vector3::y());
     if feet_pos[1] < 0.0 {
+        // If feet is below ground
         let fwbw_from_client = player.input.fwbw.clamp(-1.0, 1.0);
         if fwbw_from_client != 0.0 {
             let mut skate_direction = if fwbw_from_client > 0.0 {
-                player.body.rot * -Vector3::z()
+                player.body.rot * -Vector3::z() // Which direction do we want to accelerate in
             } else {
                 player.body.rot * Vector3::z()
             };
@@ -412,9 +413,11 @@ fn update_player(
                 physics_config.player_acceleration
             };
             skate_direction[1] = 0.0;
-            skate_direction.normalize_mut();
+            skate_direction.normalize_mut(); // Flatten direction vector to 2d space, ignore Y axis
             let new_acceleration =
                 physics_config.max_player_speed * skate_direction - player.body.linear_velocity;
+            // Calculates the step needed to change from current velocity to max velocity in the desired direction in
+            // a single frame. This would be way too fast, so we limit the step to a specified max acceleration
 
             player.body.linear_velocity += limit_vector_length(&new_acceleration, max_acceleration);
         }
@@ -422,7 +425,7 @@ fn update_player(
             let diff = if physics_config.limit_jump_speed {
                 (0.025 - player.body.linear_velocity[1]).clamp(0.0, 0.025)
             } else {
-                0.025
+                0.025 // 0.025 is the jump acceleration per frame when jumping
             };
             if diff != 0.0 {
                 player.body.linear_velocity[1] += diff;
@@ -436,21 +439,26 @@ fn update_player(
 
     // Turn player
     let turn = player.input.turn.clamp(-1.0, 1.0);
-    let mut turn_change = player.body.rot * Vector3::y();
     if player.input.shift() {
-        let mut velocity_adjustment = player.body.rot * Vector3::x();
-        velocity_adjustment[1] = 0.0;
-        velocity_adjustment.normalize_mut();
-        velocity_adjustment *= physics_config.max_player_shift_speed * turn;
-        velocity_adjustment -= player.body.linear_velocity;
+        let mut velocity_direction = player.body.rot * Vector3::x(); // Axis pointing towards the side (left, right? I forgot)
+        velocity_direction[1] = 0.0;
+        velocity_direction.normalize_mut(); // Remove Y axis, so a vector in the X-Z plane
+
+        let velocity_adjustment =
+            (physics_config.max_player_shift_speed * turn * velocity_direction)
+                - player.body.linear_velocity;
+        // Change required to change velocity to max speed in the desired direction in one frame
+        // Still way too fast, so we limit the maximum allowed change in a single frame
         player.body.linear_velocity += limit_vector_length(
             &velocity_adjustment,
             physics_config.player_shift_acceleration,
         );
-        turn_change *= -turn * physics_config.player_shift_turning;
+        let turn_change =
+            (-turn * physics_config.player_shift_turning) * (player.body.rot * Vector3::y());
         player.body.angular_velocity += turn_change;
     } else {
-        turn_change *= turn * physics_config.player_turning;
+        // Regular turn, so let's just turn the player around its Y axis
+        let turn_change = (turn * physics_config.player_turning) * (player.body.rot * Vector3::y());
         player.body.angular_velocity += turn_change;
     }
 
@@ -481,6 +489,7 @@ fn update_player(
             rotate_matrix_around_axis(&mut new_rot, &rot_axis, player.body_rot);
         }
         let intended_collision_ball_pos = player.body.pos + (new_rot * &collision_ball.offset);
+        // With head and body rotations and offset, calculate where each ball is "supposed to be"
         let collision_pos_diff = intended_collision_ball_pos - &collision_ball.pos;
 
         let speed = speed_of_point_including_rotation(
@@ -517,47 +526,54 @@ fn update_player(
     let mut touches_ice = false;
     if feet_pos[1] < 0.0 {
         // Makes players bounce up if their feet get below the ice
-        let temp1 = -feet_pos[1] * 0.125 * 0.125;
         let unit_y = Vector3::y();
 
-        let mut temp2 = 0.25 * (temp1 * unit_y - player.body.linear_velocity);
+        let temp2 = 0.25 * ((-feet_pos[1] * 0.125 * 0.125) * unit_y - player.body.linear_velocity);
         if temp2.dot(&unit_y) > 0.0 {
-            let (column, rejection_limit) = if player.input.shift() {
-                (Vector3::x(), 0.4)
+            let (axis, rejection_limit) = if player.input.shift() {
+                (Vector3::x(), 0.4) // Shift means you move sideways
             } else {
-                (Vector3::z(), 1.2)
+                (Vector3::z(), 1.2) // If not shift, then usual forwards/backwards movement
             };
-            let mut direction = player.body.rot * column;
+            let mut direction = player.body.rot * axis;
             direction[1] = 0.0;
+            direction.normalize_mut();
 
-            temp2 -= get_projection(&temp2, &direction);
+            let mut acceleration = temp2 - get_projection(&temp2, &direction);
+            // We get the rejection here
 
-            limit_friction(&mut temp2, &unit_y, rejection_limit);
-            player.body.linear_velocity += temp2;
+            limit_friction(&mut acceleration, &unit_y, rejection_limit);
+            player.body.linear_velocity += acceleration;
             touches_ice = true;
         }
     }
     if player.body.pos[1] < 0.5 && player.body.linear_velocity.norm() < 0.025 {
-        player.body.linear_velocity[1] += 0.00055555555;
+        player.body.linear_velocity[1] += 0.00055555555; // Extra speed boost upwards if body is low (fallen?) and the speed is slow
         touches_ice = true;
     }
     if touches_ice {
         // This is where the leaning happens
         player.body.angular_velocity *= 0.975;
-        let mut unit: Vector3<f32> = Vector3::y();
+        let mut intended_up: Vector3<f32> = Vector3::y();
 
         if !player.input.shift() {
+            // If we're turning and not shift-turning, we want to lean while turning depending on speed
             let axis = player.body.rot * Vector3::z();
-            let temp = -player.body.linear_velocity.dot(&axis) / physics_config.max_player_speed;
-            rotate_vector_around_axis(&mut unit, &axis, 0.225 * turn * temp);
+            let fraction_of_max_speed =
+                player.body.linear_velocity.dot(&axis) / physics_config.max_player_speed;
+            rotate_vector_around_axis(
+                &mut intended_up,
+                &axis,
+                -0.225 * turn * fraction_of_max_speed,
+            );
         }
 
-        let temp2 = unit.cross(&(player.body.rot * Vector3::y()));
+        let rotation1 = intended_up.cross(&(player.body.rot * Vector3::y())); // Vector that is perpendicular to the main Y and the current player Y
 
-        let temp2 =
-            0.008333333 * temp2 - 0.25 * get_projection(&player.body.angular_velocity, &temp2);
-        let temp2 = limit_vector_length(&temp2, 0.000347222222);
-        player.body.angular_velocity += temp2;
+        let angular_change = 0.008333333 * rotation1
+            - 0.25 * get_projection(&player.body.angular_velocity, &rotation1);
+        let angular_change = limit_vector_length(&angular_change, 0.000347222222);
+        player.body.angular_velocity += angular_change;
     }
     update_stick(
         player,
