@@ -540,7 +540,8 @@ fn update_player(
             direction.normalize_mut();
 
             let mut acceleration = temp2 - get_projection(&temp2, &direction);
-            // We get the rejection here
+            // We get the rejection here, so the acceleration will be a vector perpendicular to and
+            // pointing away from direction
 
             limit_friction(&mut acceleration, &unit_y, rejection_limit);
             player.body.linear_velocity += acceleration;
