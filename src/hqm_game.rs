@@ -1,5 +1,5 @@
 use crate::hqm_parse;
-use nalgebra::{point, Matrix3, Point3, Rotation3, Vector2, Vector3};
+use nalgebra::{point, Matrix3, Point3, Rotation3, Unit, Vector2, Vector3};
 
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -203,7 +203,7 @@ impl HQMGame {
 pub struct HQMRinkLine {
     pub point: Point3<f32>,
     pub width: f32,
-    pub normal: Vector3<f32>,
+    pub normal: Unit<Vector3<f32>>,
 }
 
 impl HQMRinkLine {
@@ -325,7 +325,7 @@ pub struct LinesAndNet {
 
 #[derive(Debug, Clone)]
 pub struct HQMRink {
-    pub planes: Vec<(Point3<f32>, Vector3<f32>)>,
+    pub planes: Vec<(Point3<f32>, Unit<Vector3<f32>>)>,
     pub corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
     pub red_lines_and_net: LinesAndNet,
     pub blue_lines_and_net: LinesAndNet,
@@ -338,11 +338,11 @@ impl HQMRink {
     fn new(width: f32, length: f32, corner_radius: f32, blue_line_distance: f32) -> Self {
         let zero = Point3::new(0.0, 0.0, 0.0);
         let planes = vec![
-            (zero.clone(), Vector3::y()),
-            (Point3::new(0.0, 0.0, length), -Vector3::z()),
-            (zero.clone(), Vector3::z()),
-            (Point3::new(width, 0.0, 0.0), -Vector3::x()),
-            (zero.clone(), Vector3::x()),
+            (zero.clone(), Vector3::y_axis()),
+            (Point3::new(0.0, 0.0, length), -Vector3::z_axis()),
+            (zero.clone(), Vector3::z_axis()),
+            (Point3::new(width, 0.0, 0.0), -Vector3::x_axis()),
+            (zero.clone(), Vector3::x_axis()),
         ];
         let r = corner_radius;
         let wr = width - corner_radius;
@@ -383,8 +383,8 @@ impl HQMRink {
         let center_z = length / 2.0;
         let blue_zone_blueline_z = blue_line_distance_mid;
 
-        let red_line_normal = Vector3::z();
-        let blue_line_normal = -Vector3::z();
+        let red_line_normal = Vector3::z_axis();
+        let blue_line_normal = -Vector3::z_axis();
 
         let red_net = HQMRinkNet::new(
             Point3::new(center_x, 0.0, goal_line_distance),
