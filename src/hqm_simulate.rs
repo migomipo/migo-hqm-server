@@ -2,14 +2,14 @@ use crate::hqm_game::{
     HQMBody, HQMGameObject, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck,
     HQMRink, HQMRinkNet, HQMSkater, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, LinesAndNet,
 };
-use nalgebra::{vector, Point3, Rotation3, Vector2, Vector3};
+use nalgebra::{vector, Point3, Rotation3, Unit, Vector2, Vector3};
 use smallvec::SmallVec;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
 use std::iter::FromIterator;
 
 enum HQMCollision {
-    PlayerRink((usize, usize), f32, Vector3<f32>),
-    PlayerPlayer((usize, usize), (usize, usize), f32, Vector3<f32>),
+    PlayerRink((usize, usize), f32, Unit<Vector3<f32>>),
+    PlayerPlayer((usize, usize), (usize, usize), f32, Unit<Vector3<f32>>),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -102,7 +102,7 @@ impl HQMGameWorld {
                                 (i, ib),
                                 (j, jb),
                                 overlap,
-                                pos_diff.normalize(),
+                                Unit::new_normalize(pos_diff),
                             ));
                         }
                     }
@@ -111,11 +111,12 @@ impl HQMGameWorld {
                 let stick_distance = stick_v.norm();
                 if stick_distance < 0.25 {
                     let stick_overlap = 0.25 - stick_distance;
-                    let normal = stick_v.normalize();
-                    let mut force = 0.125 * stick_overlap * normal
+                    let normal = Unit::new_normalize(stick_v);
+                    let mut force = 0.125 * stick_overlap * *normal
                         + 0.25 * (&p2.stick_velocity - &p1.stick_velocity);
                     if force.dot(&normal) > 0.0 {
                         limit_friction(&mut force, &normal, 0.01);
+                        let force = force.scale(0.5);
                         p1.stick_velocity += 0.5 * force;
                         p2.stick_velocity -= 0.5 * force;
                     }
@@ -147,7 +148,7 @@ impl HQMGameWorld {
             if puck.body.angular_velocity.norm() > 1.0 / 65536.0 {
                 rotate_matrix_around_axis(
                     &mut puck.body.rot,
-                    &puck.body.angular_velocity.normalize(),
+                    &Unit::new_normalize(puck.body.angular_velocity),
                     puck.body.angular_velocity.norm(),
                 )
             }
@@ -309,7 +310,7 @@ fn update_stick(
         );
 
         if player.stick_placement[1] > 0.0 {
-            let axis = new_stick_rotation * Vector3::y();
+            let axis = new_stick_rotation * Vector3::y_axis();
             rotate_matrix_around_axis(
                 &mut new_stick_rotation,
                 &axis,
@@ -318,7 +319,7 @@ fn update_stick(
         }
 
         // Rotate around the stick axis
-        let handle_axis = (new_stick_rotation * Vector3::new(0.0, 0.75, 1.0)).normalize();
+        let handle_axis = new_stick_rotation * Unit::new_normalize(Vector3::new(0.0, 0.75, 1.0));
         rotate_matrix_around_axis(
             &mut new_stick_rotation,
             &handle_axis,
@@ -336,7 +337,7 @@ fn update_stick(
             player.stick_placement[1],
         );
 
-        let temp = stick_rotation2 * Vector3::x();
+        let temp = stick_rotation2 * Vector3::x_axis();
         rotate_matrix_around_axis(&mut stick_rotation2, &temp, FRAC_PI_4);
 
         let stick_length = 1.75;
@@ -371,7 +372,7 @@ fn update_stick(
     if let Some((overlap, normal)) =
         collision_between_sphere_and_rink(&player.stick_pos, 0.09375, rink)
     {
-        let mut n = overlap * 0.25 * normal - 0.5 * player.stick_velocity;
+        let mut n = overlap * 0.25 * *normal - 0.5 * player.stick_velocity;
         if n.dot(&normal) > 0.0 {
             limit_friction(&mut n, &normal, 0.1);
             player.stick_velocity += n;
@@ -465,7 +466,7 @@ fn update_player(
     if player.body.angular_velocity.norm() > 1.0 / 65536.0 {
         rotate_matrix_around_axis(
             &mut player.body.rot,
-            &player.body.angular_velocity.normalize(),
+            &Unit::new_normalize(player.body.angular_velocity),
             player.body.angular_velocity.norm(),
         );
     }
@@ -483,9 +484,9 @@ fn update_player(
     for (collision_ball_index, collision_ball) in player.collision_balls.iter_mut().enumerate() {
         let mut new_rot = player.body.rot.clone();
         if collision_ball_index == 1 || collision_ball_index == 2 || collision_ball_index == 5 {
-            let rot_axis = new_rot * Vector3::y();
+            let rot_axis = new_rot * Vector3::y_axis();
             rotate_matrix_around_axis(&mut new_rot, &rot_axis, player.head_rot * 0.5);
-            let rot_axis = new_rot * Vector3::x();
+            let rot_axis = new_rot * Vector3::x_axis();
             rotate_matrix_around_axis(&mut new_rot, &rot_axis, player.body_rot);
         }
         let intended_collision_ball_pos = player.body.pos + (new_rot * &collision_ball.offset);
@@ -526,18 +527,17 @@ fn update_player(
     let mut touches_ice = false;
     if feet_pos[1] < 0.0 {
         // Makes players bounce up if their feet get below the ice
-        let unit_y = Vector3::y();
+        let unit_y = Vector3::y_axis();
 
-        let temp2 = 0.25 * ((-feet_pos[1] * 0.125 * 0.125) * unit_y - player.body.linear_velocity);
+        let temp2 = 0.25 * ((-feet_pos[1] * 0.125 * 0.125) * *unit_y - player.body.linear_velocity);
         if temp2.dot(&unit_y) > 0.0 {
             let (axis, rejection_limit) = if player.input.shift() {
-                (Vector3::x(), 0.4) // Shift means you move sideways
+                (Vector3::x_axis(), 0.4) // Shift means you move sideways
             } else {
-                (Vector3::z(), 1.2) // If not shift, then usual forwards/backwards movement
+                (Vector3::z_axis(), 1.2) // If not shift, then usual forwards/backwards movement
             };
-            let mut direction = player.body.rot * axis;
-            direction[1] = 0.0;
-            direction.normalize_mut();
+            let direction = player.body.rot * axis;
+            let direction = Unit::new_normalize(Vector3::new(direction.x, 0.0, direction.z));
 
             let mut acceleration = temp2 - get_projection(&temp2, &direction);
             // We get the rejection here, so the acceleration will be a vector perpendicular to and
@@ -559,7 +559,7 @@ fn update_player(
 
         if !player.input.shift() {
             // If we're turning and not shift-turning, we want to lean while turning depending on speed
-            let axis = player.body.rot * Vector3::z();
+            let axis = player.body.rot * Vector3::z_axis();
             let fraction_of_max_speed =
                 player.body.linear_velocity.dot(&axis) / physics_config.max_player_speed;
             rotate_vector_around_axis(
@@ -570,11 +570,13 @@ fn update_player(
         }
 
         let rotation1 = intended_up.cross(&(player.body.rot * Vector3::y())); // Vector that is perpendicular to the main Y and the current player Y
-
-        let angular_change = 0.008333333 * rotation1
-            - 0.25 * get_projection(&player.body.angular_velocity, &rotation1);
-        let angular_change = limit_vector_length(&angular_change, 0.000347222222);
-        player.body.angular_velocity += angular_change;
+        if let Some(rotation1_direction) = rotation1.try_normalize(0.0) {
+            let rotation1_direction = Unit::new_unchecked(rotation1_direction);
+            let angular_change = 0.008333333 * rotation1
+                - 0.25 * get_projection(&player.body.angular_velocity, &rotation1_direction);
+            let angular_change = limit_vector_length(&angular_change, 0.000347222222);
+            player.body.angular_velocity += angular_change;
+        }
     }
     update_stick(
         player,
@@ -585,9 +587,8 @@ fn update_player(
 }
 
 // Project a onto b
-fn get_projection(a: &Vector3<f32>, b: &Vector3<f32>) -> Vector3<f32> {
-    let normal = normal_or_zero(b);
-    normal.dot(a) * normal
+fn get_projection(a: &Vector3<f32>, normal: &Unit<Vector3<f32>>) -> Vector3<f32> {
+    normal.scale(normal.dot(a))
 }
 
 fn apply_collisions(players: &mut [(usize, &mut HQMSkater)], collisions: &[HQMCollision]) {
@@ -608,7 +609,7 @@ fn apply_collisions(players: &mut [(usize, &mut HQMSkater)], collisions: &[HQMCo
                     let (i, ib) = (*i2, *ib2);
 
                     let original_velocity = &original_ball_velocities[i][ib];
-                    let mut new = overlap * 0.03125 * normal - 0.25 * original_velocity;
+                    let mut new = overlap * 0.03125 * **normal - 0.25 * original_velocity;
                     if new.dot(&normal) > 0.0 {
                         limit_friction(&mut new, &normal, 0.01);
                         let (_, skater) = &mut players[i];
@@ -622,8 +623,8 @@ fn apply_collisions(players: &mut [(usize, &mut HQMSkater)], collisions: &[HQMCo
                     let original_velocity1 = &original_ball_velocities[i][ib];
                     let original_velocity2 = &original_ball_velocities[j][jb];
 
-                    let mut new =
-                        overlap * 0.125 * normal + 0.25 * (original_velocity2 - original_velocity1);
+                    let mut new = normal.scale(overlap * 0.125)
+                        + 0.25 * (original_velocity2 - original_velocity1);
                     if new.dot(&normal) > 0.0 {
                         limit_friction(&mut new, &normal, 0.01);
                         let (_, skater1) = &players[i];
@@ -752,7 +753,7 @@ fn do_puck_net_forces(
             &puck_linear_velocity,
             &puck_angular_velocity,
         );
-        let mut puck_force = overlap * 0.5 * normal - 0.5 * vertex_velocity;
+        let mut puck_force = normal.scale(0.5 * overlap) - 0.5 * vertex_velocity;
 
         if normal.dot(&puck_force) > 0.0 {
             limit_friction(&mut puck_force, &normal, 0.5);
@@ -775,14 +776,14 @@ fn do_puck_post_forces(
         let collision = collision_between_sphere_and_post(&puck.body.pos, puck.radius, post);
         if let Some((overlap, normal)) = collision {
             res = true;
-            let p = puck.body.pos - puck.radius * normal;
+            let p = puck.body.pos - normal.scale(puck.radius);
             let vertex_velocity = speed_of_point_including_rotation(
                 &p,
                 &puck.body.pos,
                 puck_linear_velocity,
                 puck_angular_velocity,
             );
-            let mut puck_force = overlap * 0.125 * normal - 0.25 * vertex_velocity;
+            let mut puck_force = normal.scale(overlap * 0.125) - 0.25 * vertex_velocity;
 
             if normal.dot(&puck_force) > 0.0 {
                 limit_friction(&mut puck_force, &normal, 0.2);
@@ -816,7 +817,7 @@ fn do_puck_stick_forces(
             );
 
             let mut puck_force =
-                dot * 0.125 * 0.5 * normal + 0.125 * (stick_velocity - puck_vertex_speed);
+                dot * 0.125 * 0.5 * *normal + 0.125 * (stick_velocity - puck_vertex_speed);
             if puck_force.dot(&normal) > 0.0 {
                 limit_friction(&mut puck_force, &normal, 0.5);
                 player.stick_velocity -= 0.25 * puck_force;
@@ -845,7 +846,7 @@ fn do_puck_rink_forces(
                 puck_linear_velocity,
                 puck_angular_velocity,
             );
-            let mut puck_force = 0.125 * 0.125 * (overlap * 0.5 * normal - vertex_velocity);
+            let mut puck_force = 0.125 * 0.125 * (overlap * 0.5 * *normal - vertex_velocity);
 
             if normal.dot(&puck_force) > 0.0 {
                 limit_friction(&mut puck_force, &normal, friction);
@@ -903,14 +904,12 @@ fn collision_between_sphere_and_net(
     pos: &Point3<f32>,
     radius: f32,
     net: &HQMRinkNet,
-) -> Option<(Point3<f32>, f32, Vector3<f32>)> {
+) -> Option<(Point3<f32>, f32, Unit<Vector3<f32>>)> {
     let mut max_overlap = 0.0;
-    let mut res: Option<(Point3<f32>, f32, Vector3<f32>)> = None;
+    let mut res: Option<(Point3<f32>, f32, Unit<Vector3<f32>>)> = None;
 
     for surface in net.surfaces.iter() {
-        let normal = (surface.3 - surface.0)
-            .cross(&(surface.1 - surface.0))
-            .normalize();
+        let normal = Unit::new_normalize((surface.3 - surface.0).cross(&(surface.1 - surface.0)));
 
         let diff = surface.0 - pos;
         let dot = diff.dot(&normal);
@@ -918,7 +917,7 @@ fn collision_between_sphere_and_net(
         let overlap2 = -dot + radius;
 
         if overlap > 0.0 && overlap < radius {
-            let overlap_pos = pos + (radius - overlap) * normal;
+            let overlap_pos = pos + (radius - overlap) * *normal;
             if inside_surface(&overlap_pos, surface, &normal) {
                 if overlap > max_overlap {
                     max_overlap = overlap;
@@ -926,7 +925,7 @@ fn collision_between_sphere_and_net(
                 }
             }
         } else if overlap2 > 0.0 && overlap2 < radius {
-            let overlap_pos = pos + (radius - overlap) * normal;
+            let overlap_pos = pos + (radius - overlap) * *normal;
             if inside_surface(&overlap_pos, surface, &normal) {
                 if overlap2 > max_overlap {
                     max_overlap = overlap2;
@@ -943,7 +942,7 @@ fn collision_between_sphere_and_post(
     pos: &Point3<f32>,
     radius: f32,
     post: &(Point3<f32>, Point3<f32>, f32),
-) -> Option<(f32, Vector3<f32>)> {
+) -> Option<(f32, Unit<Vector3<f32>>)> {
     let (p1, p2, post_radius) = post;
     let a = post_radius + radius;
     let direction_vector = p2 - p1;
@@ -957,7 +956,7 @@ fn collision_between_sphere_and_post(
     let rejection_norm = rejection.norm();
     let overlap = a - rejection_norm;
     if overlap > 0.0 {
-        Some((overlap, rejection.normalize()))
+        Some((overlap, Unit::new_normalize(rejection.normalize())))
     } else {
         None
     }
@@ -967,10 +966,8 @@ fn collision_between_puck_and_surface(
     puck_pos: &Point3<f32>,
     puck_pos2: &Point3<f32>,
     surface: &(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>),
-) -> Option<(f32, Point3<f32>, f32, Vector3<f32>)> {
-    let normal = (surface.3 - surface.0)
-        .cross(&(surface.1 - surface.0))
-        .normalize();
+) -> Option<(f32, Point3<f32>, f32, Unit<Vector3<f32>>)> {
+    let normal = Unit::new_normalize((surface.3 - surface.0).cross(&(surface.1 - surface.0)));
     let p1 = &surface.0;
     let puck_pos2_projection = (p1 - puck_pos2).dot(&normal);
     if puck_pos2_projection >= 0.0 {
@@ -997,7 +994,7 @@ fn collision_between_puck_vertex_and_stick(
     puck_pos: &Point3<f32>,
     puck_vertex: &Point3<f32>,
     stick_surfaces: &[(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)],
-) -> Option<(f32, Vector3<f32>)> {
+) -> Option<(f32, Unit<Vector3<f32>>)> {
     let mut min_intersection = 1f32;
     let mut res = None;
     for stick_surface in stick_surfaces.iter() {
@@ -1016,14 +1013,14 @@ fn collision_between_sphere_and_rink(
     pos: &Point3<f32>,
     radius: f32,
     rink: &HQMRink,
-) -> Option<(f32, Vector3<f32>)> {
+) -> Option<(f32, Unit<Vector3<f32>>)> {
     let mut max_overlap = 0f32;
     let mut coll_normal = None;
     for (p, normal) in rink.planes.iter() {
         let overlap = (p - pos).dot(normal) + radius;
         if overlap > max_overlap {
             max_overlap = overlap;
-            coll_normal = Some(normal.clone_owned());
+            coll_normal = Some(normal.clone());
         }
     }
     for (p, dir, corner_radius) in rink.corners.iter() {
@@ -1033,7 +1030,7 @@ fn collision_between_sphere_and_rink(
             let overlap = p2.norm() + radius - corner_radius;
             if overlap > max_overlap {
                 max_overlap = overlap;
-                let p2n = p2.normalize();
+                let p2n = Unit::new_normalize(p2);
                 coll_normal = Some(p2n);
             }
         }
@@ -1047,14 +1044,14 @@ fn collision_between_sphere_and_rink(
 fn collision_between_collision_ball_and_rink(
     ball: &HQMSkaterCollisionBall,
     rink: &HQMRink,
-) -> Option<(f32, Vector3<f32>)> {
+) -> Option<(f32, Unit<Vector3<f32>>)> {
     collision_between_sphere_and_rink(&ball.pos, ball.radius, rink)
 }
 
 fn collision_between_vertex_and_rink(
     vertex: &Point3<f32>,
     rink: &HQMRink,
-) -> Option<(f32, Vector3<f32>)> {
+) -> Option<(f32, Unit<Vector3<f32>>)> {
     collision_between_sphere_and_rink(vertex, 0.0, rink)
 }
 
@@ -1075,9 +1072,9 @@ fn speed_of_point_including_rotation(
 }
 
 fn rotate_matrix_spherical(matrix: &mut Rotation3<f32>, azimuth: f32, inclination: f32) {
-    let col1 = &*matrix * Vector3::y();
+    let col1 = &*matrix * Vector3::y_axis();
     rotate_matrix_around_axis(matrix, &col1, azimuth);
-    let col0 = &*matrix * Vector3::x();
+    let col0 = &*matrix * Vector3::x_axis();
     rotate_matrix_around_axis(matrix, &col0, inclination);
 }
 
@@ -1112,9 +1109,9 @@ fn limit_vector_length2(v: &Vector2<f32>, max_len: f32) -> Vector2<f32> {
     res
 }
 
-pub fn limit_friction(v: &mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
+pub fn limit_friction(v: &mut Vector3<f32>, normal: &Unit<Vector3<f32>>, d: f32) {
     let projection_length = v.dot(&normal);
-    let projection = projection_length * normal;
+    let projection = projection_length * **normal;
     let rejection = &*v - &projection;
     let rejection_length = rejection.norm();
     *v = projection.clone_owned();
@@ -1127,22 +1124,12 @@ pub fn limit_friction(v: &mut Vector3<f32>, normal: &Vector3<f32>, d: f32) {
     }
 }
 
-fn rotate_vector_around_axis(v: &mut Vector3<f32>, axis: &Vector3<f32>, angle: f32) {
-    let axis_angle = -angle * axis;
-    let rot = Rotation3::new(axis_angle);
+fn rotate_vector_around_axis(v: &mut Vector3<f32>, axis: &Unit<Vector3<f32>>, angle: f32) {
+    let rot = Rotation3::from_axis_angle(axis, -angle);
     *v = &rot * *v;
 }
 
-fn rotate_matrix_around_axis(v: &mut Rotation3<f32>, axis: &Vector3<f32>, angle: f32) {
-    let axis_angle = -angle * axis;
-    let rot = Rotation3::new(axis_angle);
+fn rotate_matrix_around_axis(v: &mut Rotation3<f32>, axis: &Unit<Vector3<f32>>, angle: f32) {
+    let rot = Rotation3::from_axis_angle(axis, -angle);
     *v = rot * *v;
-}
-
-fn normal_or_zero(v: &Vector3<f32>) -> Vector3<f32> {
-    if let Some(r) = v.try_normalize(0.0) {
-        r
-    } else {
-        Vector3::new(0.0, 0.0, 0.0)
-    }
 }
