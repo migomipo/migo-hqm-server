@@ -1367,7 +1367,6 @@ fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot) -> HQMFaceoffSpot 
 
 #[cfg(test)]
 mod tests {
-    use crate::hqm_behaviour_extra::setup_position;
     use crate::hqm_game::HQMTeam;
     use crate::hqm_match_util::setup_position;
     use crate::hqm_server::HQMServerPlayerIndex;
