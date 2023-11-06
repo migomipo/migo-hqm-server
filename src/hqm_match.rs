@@ -45,15 +45,32 @@ impl HQMMatchBehaviour {
                     {
                         if player.input.join_red() {
                             joining_red.push((player_index, player.player_name.clone()));
+                            if server.config.extended_chat == "true" {
+                                let msg =
+                                    format!("{} --> RED", player.player_name);
+                                server.messages.add_server_chat_message(msg);
+                            }
                         } else if player.input.join_blue() {
                             joining_blue.push((player_index, player.player_name.clone()));
+                            if server.config.extended_chat == "true" {
+                                let msg =
+                                    format!("{} --> BLUE", player.player_name);
+                                server.messages.add_server_chat_message(msg);
+                            }
                         }
                     }
                 } else if player.input.spectate() {
                     let has_skater = player.object.is_some();
                     if has_skater {
                         self.team_switch_timer.insert(player_index, 500);
-                        spectating_players.push((player_index, player.player_name.clone()))
+                        spectating_players.push((player_index, player.player_name.clone()));
+
+                        if let Some((object_index, skater_team)) = player.object {
+                            if server.config.extended_chat == "true" {
+                                let msg = format!("{} --> Specs from {}", player.player_name, skater_team.to_string().to_uppercase());
+                                server.messages.add_server_chat_message(msg);
+                            } 
+                        }
                     }
                 }
             }
@@ -307,6 +324,11 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                         "replay" => {
                             if let Some(arg) = args.get(1) {
                                 server.set_replay(player_index, arg);
+                            }
+                        }
+                        "chatextend" => {
+                            if let Some(arg) = args.get(1){
+                                server.set_extended_chat(player_index, arg);
                             }
                         }
                         "goalreplay" => {

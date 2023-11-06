@@ -2076,6 +2076,7 @@ pub struct HQMServerConfiguration {
     pub replay_saving: ReplaySaving,
     pub server_name: String,
     pub server_service: Option<String>,
+    pub extended_chat: String,
 }
 
 pub trait HQMServerBehaviour {

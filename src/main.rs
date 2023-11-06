@@ -139,6 +139,12 @@ async fn main() -> std::io::Result<()> {
 
         let server_service = server_section.get("service").map(|x| x.to_owned());
 
+        let extended_chat = server_section
+            .get("extended_chat")
+            .unwrap()
+            .parse::<String>()
+            .unwrap();
+
         // Game
         let game_section = conf.section(Some("Game"));
 
@@ -156,6 +162,7 @@ async fn main() -> std::io::Result<()> {
             replay_saving,
             server_name,
             server_service,
+            extended_chat,
         };
 
         // Physics

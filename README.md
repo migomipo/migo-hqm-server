@@ -29,6 +29,7 @@ welcome                | Welcome message that is sent to all players when they'r
 replays                | (optional) If true, all matches that start will be saved as replays. Games that ended before the warmup ended will not be saved.
 service                | Service name for Linux based systems. Command /serverrestart for restarting the service.      
 replay_endpoint        | If configured (and replays are enabled), the server will send the replay data as a HTTP POST request (multipart form) to the given URL when matches end.
+extended_chat          | If true, the server will send messages to chat whenever player joins the team or spectators.
 
 ### Game
 
@@ -117,6 +118,7 @@ Commands                 | Explanation
 /set mercy *N/off*       | Sets mercy rule setting. If 0 or off, mercy rule will be disabled. Otherwise, games will automatically end if a team scores and leads by at least N goals.
 /set first *N/off*       | Sets first-to-goals rule setting. If 0, first-to-goals rule will be disabled. Otherwise, games will automatically end if a team scores and and reaches at least N goals scored.
 /set goalreplay *on/off* | Enables/disabled goal replays.
+/set chatextend *on/off* | Enables/disabled extended chat logs mode.
 /kickall *S*             | Kicks all players with a player name equal to *S* (case-insensitive). % can be used as wildcards at the start and end of *S* to match players with similar names. For example, migo%, %mipo and %gomi% all match MigoMipo.
 /banall *S*              | Same as /kickall, but also IP-bans.
 /serverrestart           | Restarting the server service in Linux based OS (see "service" at "Server" section)
