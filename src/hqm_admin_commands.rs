@@ -468,4 +468,31 @@ impl HQMServer {
             }
         }
     }
+
+    pub fn set_extended_chat(&mut self, player_index: HQMServerPlayerIndex, rule: &str) {
+        if let Some(player) = self.players.get(player_index) {
+            if player.is_admin{
+                match rule {
+                    "on" => {
+                        self.config.extended_chat = "true".to_string();
+                        info!("{} ({}) enabled extended chat", player.player_name, player_index);
+                        let msg = format!("Extended chat enabled by {}", player.player_name);
+
+                        self.messages.add_server_chat_message(msg);
+                    }
+                    "off" => {
+                        self.config.extended_chat = "false".to_string();
+                        info!("{} ({}) disabled extended chat", player.player_name, player_index);
+
+                        let msg = format!("Extended chat disabled by {}", player.player_name);
+
+                        self.messages.add_server_chat_message(msg);
+                    }
+                    _ => {}
+                }
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
 }
