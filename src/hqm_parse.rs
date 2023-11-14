@@ -1,9 +1,11 @@
-use crate::hqm_game::HQMPlayerInput;
-use crate::hqm_server::HQMClientVersion;
+use crate::hqm_game::{HQMGameObject, HQMPlayerInput};
+use crate::hqm_server::{HQMClientVersion, HQMMessage};
+use arr_macro::arr;
 use bytes::{BufMut, BytesMut};
 use nalgebra::storage::Storage;
 use nalgebra::{Matrix3, Vector2, Vector3, U1, U3};
 use std::cmp::min;
+use std::collections::VecDeque;
 use std::io::Error;
 use std::string::FromUtf8Error;
 
@@ -532,4 +534,214 @@ impl<'a> HQMMessageReader<'a> {
             bit_pos: 0,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum HQMObjectPacket {
+    None,
+    Puck(HQMPuckPacket),
+    Skater(HQMSkaterPacket),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HQMSkaterPacket {
+    pub pos: (u32, u32, u32),
+    pub rot: (u32, u32),
+    pub stick_pos: (u32, u32, u32),
+    pub stick_rot: (u32, u32),
+    pub head_rot: u32,
+    pub body_rot: u32,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HQMPuckPacket {
+    pub pos: (u32, u32, u32),
+    pub rot: (u32, u32),
+}
+
+pub(crate) fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage) {
+    match message {
+        HQMMessage::Chat {
+            player_index,
+            message,
+        } => {
+            writer.write_bits(6, 2);
+            writer.write_bits(
+                6,
+                match *player_index {
+                    Some(x) => x.0 as u32,
+                    None => u32::MAX,
+                },
+            );
+            let message_bytes = message.as_bytes();
+            let size = min(63, message_bytes.len());
+            writer.write_bits(6, size as u32);
+
+            for i in 0..size {
+                writer.write_bits(7, message_bytes[i] as u32);
+            }
+        }
+        HQMMessage::Goal {
+            team,
+            goal_player_index,
+            assist_player_index,
+        } => {
+            writer.write_bits(6, 1);
+            writer.write_bits(2, team.get_num());
+            writer.write_bits(
+                6,
+                match *goal_player_index {
+                    Some(x) => x.0 as u32,
+                    None => u32::MAX,
+                },
+            );
+            writer.write_bits(
+                6,
+                match *assist_player_index {
+                    Some(x) => x.0 as u32,
+                    None => u32::MAX,
+                },
+            );
+        }
+        HQMMessage::PlayerUpdate {
+            player_name,
+            object,
+            player_index,
+            in_server,
+        } => {
+            writer.write_bits(6, 0);
+            writer.write_bits(6, player_index.0 as u32);
+            writer.write_bits(1, if *in_server { 1 } else { 0 });
+            let (object_index, team_num) = match object {
+                Some((i, team)) => (i.0 as u32, team.get_num()),
+                None => (u32::MAX, u32::MAX),
+            };
+            writer.write_bits(2, team_num);
+            writer.write_bits(6, object_index);
+
+            let name_bytes = player_name.as_bytes();
+            for i in 0usize..31 {
+                let v = if i < name_bytes.len() {
+                    name_bytes[i]
+                } else {
+                    0
+                };
+                writer.write_bits(7, v as u32);
+            }
+        }
+    };
+}
+
+pub(crate) fn write_objects(
+    writer: &mut HQMMessageWriter,
+    packets: &VecDeque<[HQMObjectPacket; 32]>,
+    current_packet: u32,
+    known_packet: u32,
+) {
+    let current_packets = packets[0].as_slice();
+
+    let old_packets = {
+        let diff = if known_packet == u32::MAX {
+            None
+        } else {
+            current_packet.checked_sub(known_packet)
+        };
+        if let Some(diff) = diff {
+            let index = diff as usize;
+            if index < 192 && index > 0 {
+                packets.get(index)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    writer.write_u32_aligned(current_packet);
+    writer.write_u32_aligned(known_packet);
+
+    for i in 0..32 {
+        let current_packet = &current_packets[i];
+        let old_packet = old_packets.map(|x| &x[i]);
+        match current_packet {
+            HQMObjectPacket::Puck(puck) => {
+                let old_puck = old_packet.and_then(|x| match x {
+                    HQMObjectPacket::Puck(old_puck) => Some(old_puck),
+                    _ => None,
+                });
+                writer.write_bits(1, 1);
+                writer.write_bits(2, 1); // Puck type
+                writer.write_pos(17, puck.pos.0, old_puck.map(|puck| puck.pos.0));
+                writer.write_pos(17, puck.pos.1, old_puck.map(|puck| puck.pos.1));
+                writer.write_pos(17, puck.pos.2, old_puck.map(|puck| puck.pos.2));
+                writer.write_pos(31, puck.rot.0, old_puck.map(|puck| puck.rot.0));
+                writer.write_pos(31, puck.rot.1, old_puck.map(|puck| puck.rot.1));
+            }
+            HQMObjectPacket::Skater(skater) => {
+                let old_skater = old_packet.and_then(|x| match x {
+                    HQMObjectPacket::Skater(old_skater) => Some(old_skater),
+                    _ => None,
+                });
+                writer.write_bits(1, 1);
+                writer.write_bits(2, 0); // Skater type
+                writer.write_pos(17, skater.pos.0, old_skater.map(|skater| skater.pos.0));
+                writer.write_pos(17, skater.pos.1, old_skater.map(|skater| skater.pos.1));
+                writer.write_pos(17, skater.pos.2, old_skater.map(|skater| skater.pos.2));
+                writer.write_pos(31, skater.rot.0, old_skater.map(|skater| skater.rot.0));
+                writer.write_pos(31, skater.rot.1, old_skater.map(|skater| skater.rot.1));
+                writer.write_pos(
+                    13,
+                    skater.stick_pos.0,
+                    old_skater.map(|skater| skater.stick_pos.0),
+                );
+                writer.write_pos(
+                    13,
+                    skater.stick_pos.1,
+                    old_skater.map(|skater| skater.stick_pos.1),
+                );
+                writer.write_pos(
+                    13,
+                    skater.stick_pos.2,
+                    old_skater.map(|skater| skater.stick_pos.2),
+                );
+                writer.write_pos(
+                    25,
+                    skater.stick_rot.0,
+                    old_skater.map(|skater| skater.stick_rot.0),
+                );
+                writer.write_pos(
+                    25,
+                    skater.stick_rot.1,
+                    old_skater.map(|skater| skater.stick_rot.1),
+                );
+                writer.write_pos(
+                    16,
+                    skater.head_rot,
+                    old_skater.map(|skater| skater.head_rot),
+                );
+                writer.write_pos(
+                    16,
+                    skater.body_rot,
+                    old_skater.map(|skater| skater.body_rot),
+                );
+            }
+            HQMObjectPacket::None => {
+                writer.write_bits(1, 0);
+            }
+        }
+    }
+}
+
+pub(crate) fn get_packets(objects: &[HQMGameObject]) -> [HQMObjectPacket; 32] {
+    let mut packets = arr![HQMObjectPacket::None; 32];
+    for i in 0usize..32 {
+        let packet = match &objects[i] {
+            HQMGameObject::Puck(puck) => HQMObjectPacket::Puck(puck.get_packet()),
+            HQMGameObject::Player(player) => HQMObjectPacket::Skater(player.get_packet()),
+            HQMGameObject::None => HQMObjectPacket::None,
+        };
+        packets[i] = packet;
+    }
+    packets
 }

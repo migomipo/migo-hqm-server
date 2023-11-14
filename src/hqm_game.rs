@@ -4,9 +4,7 @@ use nalgebra::{point, Matrix3, Point3, Rotation3, Unit, Vector2, Vector3};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::hqm_server::{HQMPuckPacket, HQMSkaterPacket};
-use chrono::{DateTime, Utc};
-
+use crate::hqm_parse::{HQMPuckPacket, HQMSkaterPacket};
 use arr_macro::arr;
 use std::f32::consts::PI;
 
@@ -133,8 +131,6 @@ impl HQMGameWorld {
 }
 
 pub struct HQMGame {
-    pub start_time: DateTime<Utc>,
-
     pub rules_state: HQMRulesState,
     pub world: HQMGameWorld,
     pub red_score: u32,
@@ -143,7 +139,6 @@ pub struct HQMGame {
     pub time: u32,
     pub goal_message_timer: u32,
 
-    pub game_step: u32,
     pub game_over: bool,
 }
 
@@ -174,8 +169,6 @@ impl HQMGame {
         let rink = HQMRink::new(30.0, 61.0, 8.5, blue_line_location);
 
         HQMGame {
-            start_time: Utc::now(),
-
             rules_state: HQMRulesState::Regular {
                 offside_warning: false,
                 icing_warning: false,
@@ -194,7 +187,6 @@ impl HQMGame {
             time: 30000,
             goal_message_timer: 0,
             game_over: false,
-            game_step: u32::MAX,
         }
     }
 }

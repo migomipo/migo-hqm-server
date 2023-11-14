@@ -1,7 +1,7 @@
+use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
 use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
-use migo_hqm_server::hqm_server::{
-    HQMServer, HQMServerBehaviour, HQMServerPlayerIndex, HQMSpawnPoint,
-};
+use migo_hqm_server::hqm_match_util::{get_spawnpoint, HQMSpawnPoint};
+use migo_hqm_server::hqm_server::{HQMServer, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3};
 
@@ -27,16 +27,14 @@ impl HQMPermanentWarmup {
         let mut spectating_players = vec![];
         let mut joining_team = vec![];
         for (player_index, player) in server.players.iter() {
-            if let Some(player) = player {
-                let has_skater = player.object.is_some();
-                if has_skater && player.input.spectate() {
-                    spectating_players.push(player_index);
-                } else if !has_skater {
-                    if player.input.join_red() {
-                        joining_team.push((player_index, HQMTeam::Red));
-                    } else if player.input.join_blue() {
-                        joining_team.push((player_index, HQMTeam::Blue));
-                    }
+            let has_skater = player.object.is_some();
+            if has_skater && player.input.spectate() {
+                spectating_players.push(player_index);
+            } else if !has_skater {
+                if player.input.join_red() {
+                    joining_team.push((player_index, HQMTeam::Red));
+                } else if player.input.join_blue() {
+                    joining_team.push((player_index, HQMTeam::Blue));
                 }
             }
         }
@@ -50,7 +48,9 @@ impl HQMPermanentWarmup {
             team: HQMTeam,
             spawn_point: HQMSpawnPoint,
         ) {
-            server.spawn_skater_at_spawnpoint(player_index, team, spawn_point);
+            let (pos, rot) = get_spawnpoint(&server.game.world.rink, team, spawn_point);
+
+            server.spawn_skater(player_index, team, pos, rot);
         }
 
         for (player_index, team) in joining_team {

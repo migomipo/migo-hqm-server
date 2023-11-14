@@ -1,8 +1,8 @@
 use crate::hqm_server::{
-    HQMMuteStatus, HQMServer, HQMServerBehaviour, HQMServerPlayerData, HQMServerPlayerIndex,
-    ReplayEnabled,
+    HQMMuteStatus, HQMServer, HQMServerPlayerData, HQMServerPlayerIndex, ReplayEnabled,
 };
 
+use crate::hqm_behaviour::HQMServerBehaviour;
 use systemctl::restart;
 use tracing::info;
 
@@ -251,15 +251,9 @@ impl HQMServer {
                     .players
                     .iter()
                     .filter_map(|(player_index, player)| {
-                        if let Some(player) = player {
-                            if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
-                                if matching.is_matching(&player.player_name) {
-                                    return Some((
-                                        player_index,
-                                        player.player_name.clone(),
-                                        data.addr,
-                                    ));
-                                }
+                        if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
+                            if matching.is_matching(&player.player_name) {
+                                return Some((player_index, player.player_name.clone(), data.addr));
                             }
                         }
                         None

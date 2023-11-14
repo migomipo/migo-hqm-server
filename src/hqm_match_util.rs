@@ -8,7 +8,7 @@ use crate::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 pub const ALLOWED_POSITIONS: [&str; 18] = [
     "C", "LW", "RW", "LD", "RD", "G", "LM", "RM", "LLM", "RRM", "LLD", "RRD", "CM", "CD", "LW2",
@@ -165,7 +165,7 @@ impl HQMMatch {
         self.twoline_pass_status = HQMTwoLinePassStatus::No;
         self.pass = None;
 
-        self.faceoff_game_step = server.game.game_step;
+        self.faceoff_game_step = server.game_step;
     }
 
     pub(crate) fn update_game_over(&mut self, server: &mut HQMServer) {
@@ -319,7 +319,7 @@ impl HQMMatch {
 
         self.update_game_over(server);
 
-        let gamestep = server.game.game_step;
+        let gamestep = server.game_step;
 
         if self.config.goal_replay {
             let force_view = goal_scorer_index.or(last_touch);
@@ -350,7 +350,6 @@ impl HQMMatch {
         for event in events {
             if let HQMSimulationEvent::PuckEnteredNet { .. } = event {
                 let time = server
-                    .game
                     .game_step
                     .saturating_sub(self.step_where_period_ended);
                 if time <= 300 && !self.too_late_printed_this_period {
@@ -589,10 +588,8 @@ impl HQMMatch {
             if player_index == pass_player {
                 continue;
             }
-            if let Some(player) = player {
-                if is_past_line(server, player, team, line) {
-                    players_past_line.push(player_index);
-                }
+            if is_past_line(server, player, team, line) {
+                players_past_line.push(player_index);
             }
         }
         if !players_past_line.is_empty() {
@@ -811,7 +808,7 @@ impl HQMMatch {
         self.update_clock(server);
 
         if let Some((start_replay, end_replay, force_view)) = self.start_next_replay {
-            if end_replay <= server.game.game_step {
+            if end_replay <= server.game_step {
                 server.add_replay_to_queue(start_replay, end_replay, force_view);
                 server.messages.add_server_chat_message_str("Goal replay");
                 self.start_next_replay = None;
@@ -845,7 +842,7 @@ impl HQMMatch {
                     server.game.period += 1;
                     self.pause_timer = intermission_time;
                     self.is_pause_goal = false;
-                    self.step_where_period_ended = server.game.game_step;
+                    self.step_where_period_ended = server.game_step;
                     self.too_late_printed_this_period = false;
                     self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
                     self.update_game_over(server);
@@ -1039,16 +1036,14 @@ pub fn get_faceoff_positions(
     let mut red_players = smallvec::SmallVec::<[_; 32]>::new();
     let mut blue_players = smallvec::SmallVec::<[_; 32]>::new();
     for (player_index, player) in players.iter() {
-        if let Some(player) = player {
-            let team = player.object.map(|x| x.1);
+        let team = player.object.map(|x| x.1);
 
-            let preferred_position = preferred_positions.get(&player_index).map(|x| *x);
+        let preferred_position = preferred_positions.get(&player_index).map(|x| *x);
 
-            if team == Some(HQMTeam::Red) {
-                red_players.push((player_index, preferred_position));
-            } else if team == Some(HQMTeam::Blue) {
-                blue_players.push((player_index, preferred_position));
-            }
+        if team == Some(HQMTeam::Red) {
+            red_players.push((player_index, preferred_position));
+        } else if team == Some(HQMTeam::Blue) {
+            blue_players.push((player_index, preferred_position));
         }
     }
 
@@ -1095,10 +1090,8 @@ pub fn has_players_in_offensive_zone(
         if Some(player_index) == ignore_player {
             continue;
         }
-        if let Some(player) = player {
-            if is_past_line(server, player, team, line) {
-                return true;
-            }
+        if is_past_line(server, player, team, line) {
+            return true;
         }
     }
 
@@ -1362,6 +1355,48 @@ fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot) -> HQMFaceoffSpot 
             };
             create_faceoff_spot(Point3::new(x, 0.0, z))
         }
+    }
+}
+
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub enum HQMSpawnPoint {
+    Center,
+    Bench,
+}
+pub fn get_spawnpoint(
+    rink: &HQMRink,
+    team: HQMTeam,
+    spawn_point: HQMSpawnPoint,
+) -> (Point3<f32>, Rotation3<f32>) {
+    match team {
+        HQMTeam::Red => match spawn_point {
+            HQMSpawnPoint::Center => {
+                let (z, rot) = ((rink.length / 2.0) + 3.0, 0.0);
+                let pos = Point3::new(rink.width / 2.0, 2.0, z);
+                let rot = Rotation3::from_euler_angles(0.0, rot, 0.0);
+                (pos, rot)
+            }
+            HQMSpawnPoint::Bench => {
+                let z = (rink.length / 2.0) + 4.0;
+                let pos = Point3::new(0.5, 2.0, z);
+                let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
+                (pos, rot)
+            }
+        },
+        HQMTeam::Blue => match spawn_point {
+            HQMSpawnPoint::Center => {
+                let (z, rot) = ((rink.length / 2.0) - 3.0, PI);
+                let pos = Point3::new(rink.width / 2.0, 2.0, z);
+                let rot = Rotation3::from_euler_angles(0.0, rot, 0.0);
+                (pos, rot)
+            }
+            HQMSpawnPoint::Bench => {
+                let z = (rink.length / 2.0) - 4.0;
+                let pos = Point3::new(0.5, 2.0, z);
+                let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
+                (pos, rot)
+            }
+        },
     }
 }
 

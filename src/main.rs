@@ -5,14 +5,12 @@ extern crate ini;
 use ini::Ini;
 use std::env;
 
-mod hqm_faceoff_practice;
 mod hqm_match;
 
 mod hqm_russian;
 mod hqm_shootout;
 mod hqm_warmup;
 
-use crate::hqm_faceoff_practice::HQMFaceoffPracticeBehaviour;
 use crate::hqm_match::HQMMatchBehaviour;
 
 use crate::hqm_russian::HQMRussianBehaviour;
@@ -22,12 +20,10 @@ use ini::Properties;
 use migo_hqm_server::hqm_game::HQMPhysicsConfiguration;
 use migo_hqm_server::hqm_match_util::{
     HQMIcingConfiguration, HQMMatchConfiguration, HQMOffsideConfiguration,
-    HQMOffsideLineConfiguration, HQMTwoLinePassConfiguration,
+    HQMOffsideLineConfiguration, HQMSpawnPoint, HQMTwoLinePassConfiguration,
 };
 use migo_hqm_server::hqm_server;
-use migo_hqm_server::hqm_server::{
-    HQMServerConfiguration, HQMSpawnPoint, ReplayEnabled, ReplaySaving,
-};
+use migo_hqm_server::hqm_server::{HQMServerConfiguration, ReplayEnabled, ReplaySaving};
 use tracing_appender;
 use tracing_subscriber;
 
@@ -36,7 +32,6 @@ enum HQMServerMode {
     PermanentWarmup,
     Russian,
     Shootout,
-    FaceoffPractice,
 }
 
 fn is_true(s: &str) -> bool {
@@ -99,7 +94,6 @@ async fn main() -> std::io::Result<()> {
                 "match" => HQMServerMode::Match,
                 "russian" => HQMServerMode::Russian,
                 "shootout" => HQMServerMode::Shootout,
-                "faceoff" => HQMServerMode::FaceoffPractice,
                 _ => HQMServerMode::Match,
             });
 
@@ -376,15 +370,6 @@ async fn main() -> std::io::Result<()> {
                     public_address,
                     config,
                     HQMShootoutBehaviour::new(attempts, physics_config),
-                )
-                .await
-            }
-            HQMServerMode::FaceoffPractice => {
-                hqm_server::run_server(
-                    server_port,
-                    public_address,
-                    config,
-                    HQMFaceoffPracticeBehaviour::new(physics_config),
                 )
                 .await
             }

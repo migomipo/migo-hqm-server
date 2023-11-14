@@ -1,13 +1,13 @@
 use migo_hqm_server::hqm_game::{HQMGame, HQMObjectIndex, HQMPhysicsConfiguration, HQMTeam};
-use migo_hqm_server::hqm_server::{
-    HQMServer, HQMServerBehaviour, HQMServerPlayerIndex, HQMSpawnPoint,
-};
+use migo_hqm_server::hqm_server::{HQMServer, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
 use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::rc::Rc;
 
+use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
+use migo_hqm_server::hqm_match_util::{get_spawnpoint, HQMSpawnPoint};
 use tracing::info;
 
 #[derive(Debug, Clone)]
@@ -77,13 +77,11 @@ impl HQMShootoutBehaviour {
         let mut blue_players = vec![];
 
         for (player_index, player) in server.players.iter() {
-            if let Some(player) = player {
-                if let Some((_, team)) = player.object {
-                    if team == HQMTeam::Red {
-                        red_players.push(player_index);
-                    } else if team == HQMTeam::Blue {
-                        blue_players.push(player_index);
-                    }
+            if let Some((_, team)) = player.object {
+                if team == HQMTeam::Red {
+                    red_players.push(player_index);
+                } else if team == HQMTeam::Blue {
+                    blue_players.push(player_index);
                 }
             }
         }
@@ -169,30 +167,28 @@ impl HQMShootoutBehaviour {
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
         for (player_index, player) in server.players.iter() {
-            if let Some(player) = player {
-                self.team_switch_timer
-                    .get_mut(&player_index)
-                    .map(|x| *x = x.saturating_sub(1));
-                if player.input.join_red() || player.input.join_blue() {
-                    let has_skater = player.object.is_some();
-                    if !has_skater
-                        && self
-                            .team_switch_timer
-                            .get(&player_index)
-                            .map_or(true, |x| *x == 0)
-                    {
-                        if player.input.join_red() {
-                            joining_red.push((player_index, player.player_name.clone()));
-                        } else if player.input.join_blue() {
-                            joining_blue.push((player_index, player.player_name.clone()));
-                        }
+            self.team_switch_timer
+                .get_mut(&player_index)
+                .map(|x| *x = x.saturating_sub(1));
+            if player.input.join_red() || player.input.join_blue() {
+                let has_skater = player.object.is_some();
+                if !has_skater
+                    && self
+                        .team_switch_timer
+                        .get(&player_index)
+                        .map_or(true, |x| *x == 0)
+                {
+                    if player.input.join_red() {
+                        joining_red.push((player_index, player.player_name.clone()));
+                    } else if player.input.join_blue() {
+                        joining_blue.push((player_index, player.player_name.clone()));
                     }
-                } else if player.input.spectate() {
-                    let has_skater = player.object.is_some();
-                    if has_skater {
-                        self.team_switch_timer.insert(player_index, 500);
-                        spectating_players.push((player_index, player.player_name.clone()))
-                    }
+                }
+            } else if player.input.spectate() {
+                let has_skater = player.object.is_some();
+                if has_skater {
+                    self.team_switch_timer.insert(player_index, 500);
+                    spectating_players.push((player_index, player.player_name.clone()))
                 }
             }
         }
@@ -205,13 +201,11 @@ impl HQMShootoutBehaviour {
                 let mut red_player_count = 0usize;
                 let mut blue_player_count = 0usize;
                 for (_, player) in server.players.iter() {
-                    if let Some(player) = player {
-                        if let Some((_, team)) = player.object {
-                            if team == HQMTeam::Red {
-                                red_player_count += 1;
-                            } else if team == HQMTeam::Blue {
-                                blue_player_count += 1;
-                            }
+                    if let Some((_, team)) = player.object {
+                        if team == HQMTeam::Red {
+                            red_player_count += 1;
+                        } else if team == HQMTeam::Blue {
+                            blue_player_count += 1;
                         }
                     }
                 }
@@ -231,11 +225,10 @@ impl HQMShootoutBehaviour {
                 if *player_count >= team_max {
                     return;
                 }
+                let (pos, rot) =
+                    get_spawnpoint(&server.game.world.rink, team, HQMSpawnPoint::Bench);
 
-                if server
-                    .spawn_skater_at_spawnpoint(player_index, team, HQMSpawnPoint::Bench)
-                    .is_some()
-                {
+                if server.spawn_skater(player_index, team, pos, rot).is_some() {
                     info!(
                         "{} ({}) has joined team {:?}",
                         player_name, player_index, team
@@ -609,13 +602,11 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                     let mut red_player_count = 0usize;
                     let mut blue_player_count = 0usize;
                     for (_, player) in server.players.iter() {
-                        if let Some(player) = player {
-                            if let Some((_, team)) = player.object {
-                                if team == HQMTeam::Red {
-                                    red_player_count += 1;
-                                } else if team == HQMTeam::Blue {
-                                    blue_player_count += 1;
-                                }
+                        if let Some((_, team)) = player.object {
+                            if team == HQMTeam::Red {
+                                red_player_count += 1;
+                            } else if team == HQMTeam::Blue {
+                                blue_player_count += 1;
                             }
                         }
                     }

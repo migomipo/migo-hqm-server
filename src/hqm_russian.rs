@@ -2,8 +2,9 @@ use nalgebra::{Point3, Rotation3};
 use std::collections::HashMap;
 use tracing::info;
 
+use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
 use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
-use migo_hqm_server::hqm_server::{HQMServer, HQMServerBehaviour, HQMServerPlayerIndex};
+use migo_hqm_server::hqm_server::{HQMServer, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate;
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::f32::consts::FRAC_PI_2;
@@ -53,30 +54,28 @@ impl HQMRussianBehaviour {
         let mut joining_red = vec![];
         let mut joining_blue = vec![];
         for (player_index, player) in server.players.iter() {
-            if let Some(player) = player {
-                self.team_switch_timer
-                    .get_mut(&player_index)
-                    .map(|x| *x = x.saturating_sub(1));
-                if player.input.join_red() || player.input.join_blue() {
-                    let has_skater = player.object.is_some();
-                    if !has_skater
-                        && self
-                            .team_switch_timer
-                            .get(&player_index)
-                            .map_or(true, |x| *x == 0)
-                    {
-                        if player.input.join_red() {
-                            joining_red.push((player_index, player.player_name.clone()));
-                        } else if player.input.join_blue() {
-                            joining_blue.push((player_index, player.player_name.clone()));
-                        }
+            self.team_switch_timer
+                .get_mut(&player_index)
+                .map(|x| *x = x.saturating_sub(1));
+            if player.input.join_red() || player.input.join_blue() {
+                let has_skater = player.object.is_some();
+                if !has_skater
+                    && self
+                        .team_switch_timer
+                        .get(&player_index)
+                        .map_or(true, |x| *x == 0)
+                {
+                    if player.input.join_red() {
+                        joining_red.push((player_index, player.player_name.clone()));
+                    } else if player.input.join_blue() {
+                        joining_blue.push((player_index, player.player_name.clone()));
                     }
-                } else if player.input.spectate() {
-                    let has_skater = player.object.is_some();
-                    if has_skater {
-                        self.team_switch_timer.insert(player_index, 500);
-                        spectating_players.push((player_index, player.player_name.clone()))
-                    }
+                }
+            } else if player.input.spectate() {
+                let has_skater = player.object.is_some();
+                if has_skater {
+                    self.team_switch_timer.insert(player_index, 500);
+                    spectating_players.push((player_index, player.player_name.clone()))
                 }
             }
         }
@@ -89,13 +88,11 @@ impl HQMRussianBehaviour {
                 let mut red_player_count = 0usize;
                 let mut blue_player_count = 0usize;
                 for (_, player) in server.players.iter() {
-                    if let Some(player) = player {
-                        if let Some((_, team)) = player.object {
-                            if team == HQMTeam::Red {
-                                red_player_count += 1;
-                            } else if team == HQMTeam::Blue {
-                                blue_player_count += 1;
-                            }
+                    if let Some((_, team)) = player.object {
+                        if team == HQMTeam::Red {
+                            red_player_count += 1;
+                        } else if team == HQMTeam::Blue {
+                            blue_player_count += 1;
                         }
                     }
                 }
@@ -236,13 +233,11 @@ impl HQMRussianBehaviour {
         self.place_puck_for_team(server, HQMTeam::Red);
 
         for (player_index, player) in server.players.iter() {
-            if let Some(player) = player {
-                if let Some((_, team)) = player.object {
-                    if team == HQMTeam::Red {
-                        red_players.push(player_index);
-                    } else if team == HQMTeam::Blue {
-                        blue_players.push(player_index);
-                    }
+            if let Some((_, team)) = player.object {
+                if team == HQMTeam::Red {
+                    red_players.push(player_index);
+                } else if team == HQMTeam::Blue {
+                    blue_players.push(player_index);
                 }
             }
         }
@@ -344,37 +339,34 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
             let mut blue_player_count = 0usize;
 
             for (_, player) in server.players.iter() {
-                if let Some(player) = player {
-                    if let Some((object_index, team)) = player.object {
-                        if team == HQMTeam::Red {
+                if let Some((object_index, team)) = player.object {
+                    if team == HQMTeam::Red {
+                        red_player_count += 1;
+                    } else if team == HQMTeam::Blue {
+                        blue_player_count += 1;
+                    }
+                    if let Some(skater) = server.game.world.objects.get_skater_mut(object_index) {
+                        let line = if team == HQMTeam::Red {
                             red_player_count += 1;
-                        } else if team == HQMTeam::Blue {
+                            &server.game.world.rink.red_lines_and_net.defensive_line
+                        } else {
                             blue_player_count += 1;
-                        }
-                        if let Some(skater) = server.game.world.objects.get_skater_mut(object_index)
-                        {
-                            let line = if team == HQMTeam::Red {
-                                red_player_count += 1;
-                                &server.game.world.rink.red_lines_and_net.defensive_line
-                            } else {
-                                blue_player_count += 1;
-                                &server.game.world.rink.blue_lines_and_net.defensive_line
-                            };
+                            &server.game.world.rink.blue_lines_and_net.defensive_line
+                        };
 
-                            let p = &line.point;
-                            let normal = &line.normal;
-                            for collision_ball in skater.collision_balls.iter_mut() {
-                                let pos = &collision_ball.pos;
-                                let radius = collision_ball.radius;
-                                let overlap = (p - pos).dot(normal) + radius;
-                                if overlap > 0.0 {
-                                    let mut new = normal.scale(overlap * 0.03125)
-                                        - collision_ball.velocity.scale(0.25);
-                                    if new.dot(&normal) > 0.0 {
-                                        hqm_simulate::limit_friction(&mut new, &normal, 0.01);
+                        let p = &line.point;
+                        let normal = &line.normal;
+                        for collision_ball in skater.collision_balls.iter_mut() {
+                            let pos = &collision_ball.pos;
+                            let radius = collision_ball.radius;
+                            let overlap = (p - pos).dot(normal) + radius;
+                            if overlap > 0.0 {
+                                let mut new = normal.scale(overlap * 0.03125)
+                                    - collision_ball.velocity.scale(0.25);
+                                if new.dot(&normal) > 0.0 {
+                                    hqm_simulate::limit_friction(&mut new, &normal, 0.01);
 
-                                        collision_ball.velocity += new;
-                                    }
+                                    collision_ball.velocity += new;
                                 }
                             }
                         }

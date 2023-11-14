@@ -1,10 +1,11 @@
 use tracing::info;
 
+use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
 use migo_hqm_server::hqm_game::{HQMGame, HQMTeam};
-use migo_hqm_server::hqm_match_util::{HQMMatch, HQMMatchConfiguration};
-use migo_hqm_server::hqm_server::{
-    HQMServer, HQMServerBehaviour, HQMServerPlayerIndex, HQMSpawnPoint,
+use migo_hqm_server::hqm_match_util::{
+    get_spawnpoint, HQMMatch, HQMMatchConfiguration, HQMSpawnPoint,
 };
+use migo_hqm_server::hqm_server::{HQMServer, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -31,30 +32,28 @@ impl HQMMatchBehaviour {
         let mut joining_red = smallvec::SmallVec::<[_; 32]>::new();
         let mut joining_blue = smallvec::SmallVec::<[_; 32]>::new();
         for (player_index, player) in server.players.iter() {
-            if let Some(player) = player {
-                self.team_switch_timer
-                    .get_mut(&player_index)
-                    .map(|x| *x = x.saturating_sub(1));
-                if player.input.join_red() || player.input.join_blue() {
-                    let has_skater = player.object.is_some();
-                    if !has_skater
-                        && self
-                            .team_switch_timer
-                            .get(&player_index)
-                            .map_or(true, |x| *x == 0)
-                    {
-                        if player.input.join_red() {
-                            joining_red.push((player_index, player.player_name.clone()));
-                        } else if player.input.join_blue() {
-                            joining_blue.push((player_index, player.player_name.clone()));
-                        }
+            self.team_switch_timer
+                .get_mut(&player_index)
+                .map(|x| *x = x.saturating_sub(1));
+            if player.input.join_red() || player.input.join_blue() {
+                let has_skater = player.object.is_some();
+                if !has_skater
+                    && self
+                        .team_switch_timer
+                        .get(&player_index)
+                        .map_or(true, |x| *x == 0)
+                {
+                    if player.input.join_red() {
+                        joining_red.push((player_index, player.player_name.clone()));
+                    } else if player.input.join_blue() {
+                        joining_blue.push((player_index, player.player_name.clone()));
                     }
-                } else if player.input.spectate() {
-                    let has_skater = player.object.is_some();
-                    if has_skater {
-                        self.team_switch_timer.insert(player_index, 500);
-                        spectating_players.push((player_index, player.player_name.clone()))
-                    }
+                }
+            } else if player.input.spectate() {
+                let has_skater = player.object.is_some();
+                if has_skater {
+                    self.team_switch_timer.insert(player_index, 500);
+                    spectating_players.push((player_index, player.player_name.clone()))
                 }
             }
         }
@@ -67,13 +66,11 @@ impl HQMMatchBehaviour {
                 let mut red_player_count = 0usize;
                 let mut blue_player_count = 0usize;
                 for (_, player) in server.players.iter() {
-                    if let Some(player) = player {
-                        if let Some((_, team)) = player.object {
-                            if team == HQMTeam::Red {
-                                red_player_count += 1;
-                            } else if team == HQMTeam::Blue {
-                                blue_player_count += 1;
-                            }
+                    if let Some((_, team)) = player.object {
+                        if team == HQMTeam::Red {
+                            red_player_count += 1;
+                        } else if team == HQMTeam::Blue {
+                            blue_player_count += 1;
                         }
                     }
                 }
@@ -387,10 +384,9 @@ fn add_player(
         return;
     }
 
-    if server
-        .spawn_skater_at_spawnpoint(player_index, team, spawn_point)
-        .is_some()
-    {
+    let (pos, rot) = get_spawnpoint(&server.game.world.rink, team, spawn_point);
+
+    if server.spawn_skater(player_index, team, pos, rot).is_some() {
         info!(
             "{} ({}) has joined team {:?}",
             player_name, player_index, team

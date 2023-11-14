@@ -1,9 +1,7 @@
-use arr_macro::arr;
 use std::borrow::Cow;
 use std::cmp::min;
 use std::collections::{HashSet, VecDeque};
 use std::error::Error;
-use std::f32::consts::{FRAC_PI_2, PI};
 use std::fmt::{Debug, Formatter};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -11,7 +9,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+pub use crate::hqm_behaviour::HQMServerBehaviour;
 use bytes::{BufMut, BytesMut};
+use chrono::{DateTime, Utc};
 use nalgebra::{Point3, Rotation3};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
@@ -21,13 +21,15 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::hqm_game::{
-    HQMGame, HQMGameObject, HQMObjectIndex, HQMPlayerInput, HQMRink, HQMRulesState, HQMSkater,
-    HQMSkaterHand, HQMTeam,
+    HQMGame, HQMObjectIndex, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam,
 };
-use crate::hqm_parse::{HQMClientToServerMessage, HQMMessageCodec, HQMMessageWriter};
-use crate::hqm_simulate::HQMSimulationEvent;
+use crate::hqm_parse;
+use crate::hqm_parse::{
+    write_message, write_objects, HQMClientToServerMessage, HQMMessageCodec, HQMMessageWriter,
+    HQMObjectPacket,
+};
 
-const GAME_HEADER: &[u8] = b"Hock";
+pub(crate) const GAME_HEADER: &[u8] = b"Hock";
 
 struct HQMServerReceivedData {
     addr: SocketAddr,
@@ -50,7 +52,7 @@ impl HQMClientVersion {
         }
     }
 
-    fn has_rules(self) -> bool {
+    pub(crate) fn has_rules(self) -> bool {
         match self {
             HQMClientVersion::Vanilla => false,
             HQMClientVersion::Ping => false,
@@ -81,24 +83,18 @@ pub struct HQMServerPlayerList {
 }
 
 impl HQMServerPlayerList {
-    pub fn len(&self) -> usize {
-        self.players.len()
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (HQMServerPlayerIndex, Option<&HQMServerPlayer>)> {
+    pub fn iter(&self) -> impl Iterator<Item = (HQMServerPlayerIndex, &HQMServerPlayer)> {
         self.players
             .iter()
             .enumerate()
-            .map(|(i, p)| (HQMServerPlayerIndex(i), p.as_ref()))
+            .filter_map(|(i, p)| p.as_ref().map(|p| (HQMServerPlayerIndex(i), p)))
     }
 
-    fn iter_mut(
-        &mut self,
-    ) -> impl Iterator<Item = (HQMServerPlayerIndex, Option<&mut HQMServerPlayer>)> {
+    fn iter_mut(&mut self) -> impl Iterator<Item = (HQMServerPlayerIndex, &mut HQMServerPlayer)> {
         self.players
             .iter_mut()
             .enumerate()
-            .map(|(i, p)| (HQMServerPlayerIndex(i), p.as_mut()))
+            .filter_map(|(i, p)| p.as_mut().map(|p| (HQMServerPlayerIndex(i), p)))
     }
 
     pub fn get(
@@ -315,7 +311,9 @@ pub struct HQMServer {
     replay_queue: VecDeque<ReplayElement>,
     requested_replays: VecDeque<(u32, u32, Option<HQMServerPlayerIndex>)>,
     game_id: u32,
+    pub game_step: u32,
     pub is_muted: bool,
+    pub start_time: DateTime<Utc>,
     reqwest_client: reqwest::Client,
 
     has_current_game_been_active: bool,
@@ -408,13 +406,11 @@ impl HQMServer {
     fn player_count(&self) -> usize {
         let mut player_count = 0;
         for (_, player) in self.players.iter() {
-            if let Some(player) = player {
-                let is_actual_player = match player.data {
-                    HQMServerPlayerData::NetworkPlayer { .. } => true,
-                };
-                if is_actual_player {
-                    player_count += 1;
-                }
+            let is_actual_player = match player.data {
+                HQMServerPlayerData::NetworkPlayer { .. } => true,
+            };
+            if is_actual_player {
+                player_count += 1;
             }
         }
         player_count
@@ -708,19 +704,15 @@ impl HQMServer {
     }
 
     fn list_players(&mut self, receiver_index: HQMServerPlayerIndex, first_index: usize) {
-        let mut found = 0;
-
-        for player_index in first_index..self.players.len() {
-            let player_index = HQMServerPlayerIndex(player_index);
-            if let Some(player) = self.players.get(player_index) {
-                let msg = format!("{}: {}", player_index, player.player_name);
-                self.messages
-                    .add_directed_server_chat_message(msg, receiver_index);
-                found += 1;
-                if found >= 5 {
-                    break;
-                }
-            }
+        for (player_index, player) in self
+            .players
+            .iter()
+            .filter(|(x, _)| x.0 >= first_index)
+            .take(5)
+        {
+            let msg = format!("{}: {}", player_index, player.player_name);
+            self.messages
+                .add_directed_server_chat_message(msg, receiver_index);
         }
     }
 
@@ -818,13 +810,11 @@ impl HQMServer {
     ) -> Option<(HQMServerPlayerIndex, Rc<String>)> {
         let mut found = None;
         for (player_index, player) in self.players.iter() {
-            if let Some(player) = player {
-                if player.player_name.as_str() == name {
-                    if found.is_none() {
-                        found = Some((player_index, player.player_name.clone()));
-                    } else {
-                        return None;
-                    }
+            if player.player_name.as_str() == name {
+                if found.is_none() {
+                    found = Some((player_index, player.player_name.clone()));
+                } else {
+                    return None;
                 }
             }
         }
@@ -838,12 +828,10 @@ impl HQMServer {
         let name = name.to_lowercase();
         let mut found = smallvec::SmallVec::<[_; 64]>::new();
         for (player_index, player) in self.players.iter() {
-            if let Some(player) = player {
-                if player.player_name.to_lowercase().contains(&name) {
-                    found.push((player_index, player.player_name.clone()));
-                    if found.len() >= 5 {
-                        break;
-                    }
+            if player.player_name.to_lowercase().contains(&name) {
+                found.push((player_index, player.player_name.clone()));
+                if found.len() >= 5 {
+                    break;
                 }
             }
         }
@@ -957,10 +945,7 @@ impl HQMServer {
             self.players.remove_player(player_index);
 
             if is_admin {
-                let admin_found = self
-                    .players
-                    .iter()
-                    .any(|(_, x)| x.map_or(false, |x| x.is_admin));
+                let admin_found = self.players.iter().any(|(_, x)| x.is_admin);
 
                 if !admin_found {
                     self.allow_join = true;
@@ -982,16 +967,6 @@ impl HQMServer {
             }
         }
         false
-    }
-
-    pub fn spawn_skater_at_spawnpoint(
-        &mut self,
-        player_index: HQMServerPlayerIndex,
-        team: HQMTeam,
-        spawn_point: HQMSpawnPoint,
-    ) -> Option<HQMObjectIndex> {
-        let (pos, rot) = get_spawnpoint(&self.game.world.rink, team, spawn_point);
-        self.spawn_skater(player_index, team, pos, rot)
     }
 
     pub fn spawn_skater(
@@ -1063,11 +1038,9 @@ impl HQMServer {
 
                 let mut matching_indices = smallvec::SmallVec::<[_; 32]>::new();
                 for (player_index, player) in self.players.iter() {
-                    if let Some(player) = player {
-                        if let Some((_, player_team)) = player.object {
-                            if player_team == team {
-                                matching_indices.push(player_index);
-                            }
+                    if let Some((_, player_team)) = player.object {
+                        if player_team == team {
+                            matching_indices.push(player_index);
                         }
                     }
                 }
@@ -1086,47 +1059,47 @@ impl HQMServer {
         return self
             .players
             .iter()
-            .find(|(_, x)| match x {
-                Some(x) => {
-                    if let HQMServerPlayerData::NetworkPlayer { data } = &x.data {
-                        data.addr == addr
-                    } else {
-                        false
-                    }
+            .find(|(_, x)| {
+                if let HQMServerPlayerData::NetworkPlayer { data } = &x.data {
+                    data.addr == addr
+                } else {
+                    false
                 }
-                None => false,
             })
             .map(|x| x.0);
     }
 
     fn find_empty_player_slot(&self) -> Option<HQMServerPlayerIndex> {
-        return self.players.iter().find(|(_, x)| x.is_none()).map(|x| x.0);
+        return self
+            .players
+            .players
+            .iter()
+            .position(|x| x.is_none())
+            .map(HQMServerPlayerIndex);
     }
 
     fn game_step<B: HQMServerBehaviour>(&mut self, behaviour: &mut B) {
-        self.game.game_step = self.game.game_step.wrapping_add(1);
+        self.game_step = self.game_step.wrapping_add(1);
 
         behaviour.before_tick(self);
 
         for (_, player) in self.players.iter() {
-            if let Some(player) = player {
-                if let Some((object_index, _)) = player.object {
-                    if let Some(skater) = self.game.world.objects.get_skater_mut(object_index) {
-                        skater.input = player.input.clone()
-                    }
+            if let Some((object_index, _)) = player.object {
+                if let Some(skater) = self.game.world.objects.get_skater_mut(object_index) {
+                    skater.input = player.input.clone()
                 }
             }
         }
 
         let events = self.game.world.simulate_step();
 
-        let packets = get_packets(&self.game.world.objects.objects);
+        let packets = hqm_parse::get_packets(&self.game.world.objects.objects);
 
         behaviour.after_tick(self, &events);
 
         if self.history_length > 0 {
             let new_replay_tick = ReplayTick {
-                game_step: self.game.game_step,
+                game_step: self.game_step,
                 packets: packets.clone(),
             };
 
@@ -1152,14 +1125,10 @@ impl HQMServer {
             .players
             .iter_mut()
             .filter_map(|(player_index, player)| {
-                if let Some(player) = player {
-                    if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
-                        data.inactivity += 1;
-                        if data.inactivity > 500 {
-                            Some((player_index, player.player_name.clone()))
-                        } else {
-                            None
-                        }
+                if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
+                    data.inactivity += 1;
+                    if data.inactivity > 500 {
+                        Some((player_index, player.player_name.clone()))
                     } else {
                         None
                     }
@@ -1184,7 +1153,12 @@ impl HQMServer {
         write_buf: &mut BytesMut,
     ) {
         if self.player_count() != 0 {
-            self.has_current_game_been_active = true;
+            if !self.has_current_game_been_active {
+                self.start_time = Utc::now();
+                self.has_current_game_been_active = true;
+                info!("New game {} started", self.game_id);
+            }
+
             let (game_step, forced_view) = tokio::task::block_in_place(|| {
                 self.remove_inactive_players(behaviour);
 
@@ -1211,7 +1185,7 @@ impl HQMServer {
                     (game_step, forced_view)
                 } else {
                     self.game_step(behaviour);
-                    (self.game.game_step, None)
+                    (self.game_step, None)
                 }
             });
 
@@ -1219,9 +1193,7 @@ impl HQMServer {
                 match rec {
                     HQMWaitingMessageReceiver::All => {
                         for (_, player) in self.players.iter_mut() {
-                            if let Some(player) = player {
-                                player.add_message(message.clone());
-                            }
+                            player.add_message(message.clone());
                         }
                     }
                     HQMWaitingMessageReceiver::Specific(player_index) => {
@@ -1251,7 +1223,7 @@ impl HQMServer {
             )
             .await;
 
-            let game_step = self.game.game_step;
+            let game_step = self.game_step;
             while let Some((start_step, end_step, force_view)) = self.requested_replays.pop_front()
             {
                 let i_end = game_step.saturating_sub(end_step) as usize;
@@ -1277,14 +1249,14 @@ impl HQMServer {
     }
 
     pub fn new_game(&mut self, new_game: HQMGame) {
-        let old_game = std::mem::replace(&mut self.game, new_game);
-
+        self.game = new_game;
         self.game_id += 1;
         self.messages.clear();
-        let old_replay_data = std::mem::replace(&mut self.replay_data, BytesMut::new());
+
         self.replay_msg_pos = 0;
         self.packet = u32::MAX;
         self.replay_last_packet = u32::MAX;
+        self.game_step = u32::MAX;
 
         self.saved_packets.clear();
         self.saved_pings.clear();
@@ -1292,7 +1264,7 @@ impl HQMServer {
         self.replay_queue.clear();
         self.has_current_game_been_active = false;
 
-        info!("New game {} started", self.game_id);
+        let old_replay_data = std::mem::replace(&mut self.replay_data, BytesMut::new());
 
         if self.config.replays_enabled == ReplayEnabled::On && !old_replay_data.is_empty() {
             let size = old_replay_data.len();
@@ -1301,7 +1273,7 @@ impl HQMServer {
             replay_data.put_u32_le(size as u32);
             replay_data.put_slice(&old_replay_data);
             let replay_data = replay_data.freeze();
-            let time = old_game.start_time.format("%Y-%m-%dT%H%M%S").to_string();
+            let time = self.start_time.format("%Y-%m-%dT%H%M%S").to_string();
             let file_name = format!("{}.{}.hrp", self.config.server_name, time);
             let server_name = self.config.server_name.clone();
             match self.config.replay_saving {
@@ -1413,14 +1385,14 @@ impl HQMServer {
 
         let packets = &self.saved_packets;
 
-        write_objects(&mut writer, packets, self.packet, self.replay_last_packet);
+        hqm_parse::write_objects(&mut writer, packets, self.packet, self.replay_last_packet);
         self.replay_last_packet = self.packet;
 
         writer.write_bits(16, remaining_messages as u32);
         writer.write_bits(16, self.replay_msg_pos as u32);
 
         for message in replay_messages_to_send {
-            write_message(&mut writer, Rc::as_ref(message));
+            hqm_parse::write_message(&mut writer, Rc::as_ref(message));
         }
         self.replay_msg_pos = self.messages.replay_messages.len();
         writer.replay_fix();
@@ -1476,6 +1448,8 @@ pub async fn run_server<B: HQMServerBehaviour>(
         saved_history: VecDeque::new(),
         has_current_game_been_active: false,
         history_length: 0,
+        game_step: u32::MAX,
+        start_time: Default::default(),
     };
     info!("Server started, new game {} started", 1);
 
@@ -1566,180 +1540,6 @@ pub async fn run_server<B: HQMServerBehaviour>(
                 }) = x {
                     server.handle_message(addr, & socket, data, & mut behaviour, & mut write_buf).await;
                 }
-            }
-        }
-    }
-}
-
-fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage) {
-    match message {
-        HQMMessage::Chat {
-            player_index,
-            message,
-        } => {
-            writer.write_bits(6, 2);
-            writer.write_bits(
-                6,
-                match *player_index {
-                    Some(x) => x.0 as u32,
-                    None => u32::MAX,
-                },
-            );
-            let message_bytes = message.as_bytes();
-            let size = min(63, message_bytes.len());
-            writer.write_bits(6, size as u32);
-
-            for i in 0..size {
-                writer.write_bits(7, message_bytes[i] as u32);
-            }
-        }
-        HQMMessage::Goal {
-            team,
-            goal_player_index,
-            assist_player_index,
-        } => {
-            writer.write_bits(6, 1);
-            writer.write_bits(2, team.get_num());
-            writer.write_bits(
-                6,
-                match *goal_player_index {
-                    Some(x) => x.0 as u32,
-                    None => u32::MAX,
-                },
-            );
-            writer.write_bits(
-                6,
-                match *assist_player_index {
-                    Some(x) => x.0 as u32,
-                    None => u32::MAX,
-                },
-            );
-        }
-        HQMMessage::PlayerUpdate {
-            player_name,
-            object,
-            player_index,
-            in_server,
-        } => {
-            writer.write_bits(6, 0);
-            writer.write_bits(6, player_index.0 as u32);
-            writer.write_bits(1, if *in_server { 1 } else { 0 });
-            let (object_index, team_num) = match object {
-                Some((i, team)) => (i.0 as u32, team.get_num()),
-                None => (u32::MAX, u32::MAX),
-            };
-            writer.write_bits(2, team_num);
-            writer.write_bits(6, object_index);
-
-            let name_bytes = player_name.as_bytes();
-            for i in 0usize..31 {
-                let v = if i < name_bytes.len() {
-                    name_bytes[i]
-                } else {
-                    0
-                };
-                writer.write_bits(7, v as u32);
-            }
-        }
-    };
-}
-
-fn write_objects(
-    writer: &mut HQMMessageWriter,
-    packets: &VecDeque<[HQMObjectPacket; 32]>,
-    current_packet: u32,
-    known_packet: u32,
-) {
-    let current_packets = packets[0].as_slice();
-
-    let old_packets = {
-        let diff = if known_packet == u32::MAX {
-            None
-        } else {
-            current_packet.checked_sub(known_packet)
-        };
-        if let Some(diff) = diff {
-            let index = diff as usize;
-            if index < 192 && index > 0 {
-                packets.get(index)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    writer.write_u32_aligned(current_packet);
-    writer.write_u32_aligned(known_packet);
-
-    for i in 0..32 {
-        let current_packet = &current_packets[i];
-        let old_packet = old_packets.map(|x| &x[i]);
-        match current_packet {
-            HQMObjectPacket::Puck(puck) => {
-                let old_puck = old_packet.and_then(|x| match x {
-                    HQMObjectPacket::Puck(old_puck) => Some(old_puck),
-                    _ => None,
-                });
-                writer.write_bits(1, 1);
-                writer.write_bits(2, 1); // Puck type
-                writer.write_pos(17, puck.pos.0, old_puck.map(|puck| puck.pos.0));
-                writer.write_pos(17, puck.pos.1, old_puck.map(|puck| puck.pos.1));
-                writer.write_pos(17, puck.pos.2, old_puck.map(|puck| puck.pos.2));
-                writer.write_pos(31, puck.rot.0, old_puck.map(|puck| puck.rot.0));
-                writer.write_pos(31, puck.rot.1, old_puck.map(|puck| puck.rot.1));
-            }
-            HQMObjectPacket::Skater(skater) => {
-                let old_skater = old_packet.and_then(|x| match x {
-                    HQMObjectPacket::Skater(old_skater) => Some(old_skater),
-                    _ => None,
-                });
-                writer.write_bits(1, 1);
-                writer.write_bits(2, 0); // Skater type
-                writer.write_pos(17, skater.pos.0, old_skater.map(|skater| skater.pos.0));
-                writer.write_pos(17, skater.pos.1, old_skater.map(|skater| skater.pos.1));
-                writer.write_pos(17, skater.pos.2, old_skater.map(|skater| skater.pos.2));
-                writer.write_pos(31, skater.rot.0, old_skater.map(|skater| skater.rot.0));
-                writer.write_pos(31, skater.rot.1, old_skater.map(|skater| skater.rot.1));
-                writer.write_pos(
-                    13,
-                    skater.stick_pos.0,
-                    old_skater.map(|skater| skater.stick_pos.0),
-                );
-                writer.write_pos(
-                    13,
-                    skater.stick_pos.1,
-                    old_skater.map(|skater| skater.stick_pos.1),
-                );
-                writer.write_pos(
-                    13,
-                    skater.stick_pos.2,
-                    old_skater.map(|skater| skater.stick_pos.2),
-                );
-                writer.write_pos(
-                    25,
-                    skater.stick_rot.0,
-                    old_skater.map(|skater| skater.stick_rot.0),
-                );
-                writer.write_pos(
-                    25,
-                    skater.stick_rot.1,
-                    old_skater.map(|skater| skater.stick_rot.1),
-                );
-                writer.write_pos(
-                    16,
-                    skater.head_rot,
-                    old_skater.map(|skater| skater.head_rot),
-                );
-                writer.write_pos(
-                    16,
-                    skater.body_rot,
-                    old_skater.map(|skater| skater.body_rot),
-                );
-            }
-            HQMObjectPacket::None => {
-                writer.write_bits(1, 0);
             }
         }
     }
@@ -1846,56 +1646,6 @@ async fn send_updates(
     }
 }
 
-fn get_packets(objects: &[HQMGameObject]) -> [HQMObjectPacket; 32] {
-    let mut packets = arr![HQMObjectPacket::None; 32];
-    for i in 0usize..32 {
-        let packet = match &objects[i] {
-            HQMGameObject::Puck(puck) => HQMObjectPacket::Puck(puck.get_packet()),
-            HQMGameObject::Player(player) => HQMObjectPacket::Skater(player.get_packet()),
-            HQMGameObject::None => HQMObjectPacket::None,
-        };
-        packets[i] = packet;
-    }
-    packets
-}
-
-pub fn get_spawnpoint(
-    rink: &HQMRink,
-    team: HQMTeam,
-    spawn_point: HQMSpawnPoint,
-) -> (Point3<f32>, Rotation3<f32>) {
-    match team {
-        HQMTeam::Red => match spawn_point {
-            HQMSpawnPoint::Center => {
-                let (z, rot) = ((rink.length / 2.0) + 3.0, 0.0);
-                let pos = Point3::new(rink.width / 2.0, 2.0, z);
-                let rot = Rotation3::from_euler_angles(0.0, rot, 0.0);
-                (pos, rot)
-            }
-            HQMSpawnPoint::Bench => {
-                let z = (rink.length / 2.0) + 4.0;
-                let pos = Point3::new(0.5, 2.0, z);
-                let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
-                (pos, rot)
-            }
-        },
-        HQMTeam::Blue => match spawn_point {
-            HQMSpawnPoint::Center => {
-                let (z, rot) = ((rink.length / 2.0) - 3.0, PI);
-                let pos = Point3::new(rink.width / 2.0, 2.0, z);
-                let rot = Rotation3::from_euler_angles(0.0, rot, 0.0);
-                (pos, rot)
-            }
-            HQMSpawnPoint::Bench => {
-                let z = (rink.length / 2.0) - 4.0;
-                let pos = Point3::new(0.5, 2.0, z);
-                let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
-                (pos, rot)
-            }
-        },
-    }
-}
-
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum HQMMuteStatus {
     NotMuted,
@@ -1904,16 +1654,16 @@ pub enum HQMMuteStatus {
 }
 pub struct HQMNetworkPlayerData {
     pub addr: SocketAddr,
-    client_version: HQMClientVersion,
+    pub(crate) client_version: HQMClientVersion,
     inactivity: u32,
-    known_packet: u32,
-    known_msgpos: usize,
+    pub(crate) known_packet: u32,
+    pub(crate) known_msgpos: usize,
     chat_rep: Option<u8>,
-    deltatime: u32,
+    pub(crate) deltatime: u32,
     last_ping: VecDeque<f32>,
-    view_player_index: HQMServerPlayerIndex,
+    pub(crate) view_player_index: HQMServerPlayerIndex,
     pub game_id: u32,
-    messages: Vec<Rc<HQMMessage>>,
+    pub(crate) messages: Vec<Rc<HQMMessage>>,
 }
 
 pub enum HQMServerPlayerData {
@@ -2047,12 +1797,6 @@ pub struct PingData {
     pub deviation: f32,
 }
 
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMSpawnPoint {
-    Center,
-    Bench,
-}
-
 #[derive(Debug, Clone)]
 pub enum ReplaySaving {
     File,
@@ -2076,55 +1820,4 @@ pub struct HQMServerConfiguration {
     pub replay_saving: ReplaySaving,
     pub server_name: String,
     pub server_service: Option<String>,
-}
-
-pub trait HQMServerBehaviour {
-    fn init(&mut self, _server: &mut HQMServer) {}
-
-    fn before_tick(&mut self, server: &mut HQMServer);
-    fn after_tick(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]);
-    fn handle_command(
-        &mut self,
-        _server: &mut HQMServer,
-        _cmd: &str,
-        _arg: &str,
-        _player_index: HQMServerPlayerIndex,
-    ) {
-    }
-
-    fn create_game(&mut self) -> HQMGame;
-
-    fn before_player_exit(&mut self, _server: &mut HQMServer, _player_index: HQMServerPlayerIndex) {
-    }
-
-    fn after_player_join(&mut self, _server: &mut HQMServer, _player_index: HQMServerPlayerIndex) {}
-
-    fn get_number_of_players(&self) -> u32;
-
-    fn save_replay_data(&self, _server: &HQMServer) -> bool {
-        false
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum HQMObjectPacket {
-    None,
-    Puck(HQMPuckPacket),
-    Skater(HQMSkaterPacket),
-}
-
-#[derive(Debug, Clone)]
-pub struct HQMSkaterPacket {
-    pub pos: (u32, u32, u32),
-    pub rot: (u32, u32),
-    pub stick_pos: (u32, u32, u32),
-    pub stick_rot: (u32, u32),
-    pub head_rot: u32,
-    pub body_rot: u32,
-}
-
-#[derive(Debug, Clone)]
-pub struct HQMPuckPacket {
-    pub pos: (u32, u32, u32),
-    pub rot: (u32, u32),
 }
