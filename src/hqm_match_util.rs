@@ -415,7 +415,7 @@ impl HQMMatch {
                         self.twoline_pass_status = HQMTwoLinePassStatus::No;
                         server
                             .messages
-                            .add_server_chat_message_str("Two-line pass waved off");
+                            .add_server_chat_message("Two-line pass waved off");
                     }
                 }
                 if let HQMIcingStatus::Warning(team, side) = self.icing_status {
@@ -423,9 +423,7 @@ impl HQMMatch {
                         self.call_icing(server, other_team, side);
                     } else {
                         self.icing_status = HQMIcingStatus::No;
-                        server
-                            .messages
-                            .add_server_chat_message_str("Icing waved off");
+                        server.messages.add_server_chat_message("Icing waved off");
                     }
                 }
             }
@@ -462,7 +460,7 @@ impl HQMMatch {
                 match self.config.icing {
                     HQMIcingConfiguration::Touch => {
                         self.icing_status = HQMIcingStatus::Warning(team, side);
-                        server.messages.add_server_chat_message_str("Icing warning");
+                        server.messages.add_server_chat_message("Icing warning");
                     }
                     HQMIcingConfiguration::NoTouch => {
                         self.call_icing(server, team, side);
@@ -489,9 +487,7 @@ impl HQMMatch {
                     HQMOffsideConfiguration::Delayed => {
                         self.offside_status =
                             HQMOffsideStatus::Warning(team, side, transition, player);
-                        server
-                            .messages
-                            .add_server_chat_message_str("Offside warning");
+                        server.messages.add_server_chat_message("Offside warning");
                     }
                     HQMOffsideConfiguration::Immediate => {
                         self.call_offside(server, team, side, transition, false);
@@ -516,9 +512,7 @@ impl HQMMatch {
         }
         if let HQMOffsideStatus::Warning(warning_team, _, _, _) = self.offside_status {
             if warning_team != team {
-                server
-                    .messages
-                    .add_server_chat_message_str("Offside waved off");
+                server.messages.add_server_chat_message("Offside waved off");
             }
         }
         if let Some(HQMPass {
@@ -599,7 +593,7 @@ impl HQMMatch {
                 HQMTwoLinePassStatus::Warning(team, side, from, players_past_line);
             server
                 .messages
-                .add_server_chat_message_str("Two-line pass warning");
+                .add_server_chat_message("Two-line pass warning");
         }
     }
 
@@ -609,9 +603,7 @@ impl HQMMatch {
         {
             if let HQMOffsideStatus::Warning(t, _, _, _) = self.offside_status {
                 if team.get_other_team() == t {
-                    server
-                        .messages
-                        .add_server_chat_message_str("Offside waved off");
+                    server.messages.add_server_chat_message("Offside waved off");
                 }
             }
             self.offside_status = HQMOffsideStatus::Neutral;
@@ -632,7 +624,7 @@ impl HQMMatch {
                 self.twoline_pass_status = HQMTwoLinePassStatus::No;
                 server
                     .messages
-                    .add_server_chat_message_str("Two-line pass waved off");
+                    .add_server_chat_message("Two-line pass waved off");
             }
         }
     }
@@ -722,7 +714,7 @@ impl HQMMatch {
         self.next_faceoff_spot = faceoff_spot;
         self.pause_timer = time_break;
         self.offside_status = HQMOffsideStatus::Offside(team);
-        server.messages.add_server_chat_message_str("Offside");
+        server.messages.add_server_chat_message("Offside");
     }
 
     fn call_twoline_pass(
@@ -745,7 +737,7 @@ impl HQMMatch {
         self.next_faceoff_spot = faceoff_spot;
         self.pause_timer = time_break;
         self.twoline_pass_status = HQMTwoLinePassStatus::Offside(team);
-        server.messages.add_server_chat_message_str("Two-line pass");
+        server.messages.add_server_chat_message("Two-line pass");
     }
 
     fn call_icing(&mut self, server: &mut HQMServer, team: HQMTeam, side: HQMRinkSide) {
@@ -754,7 +746,7 @@ impl HQMMatch {
         self.next_faceoff_spot = HQMRinkFaceoffSpot::DefensiveZone(team, side);
         self.pause_timer = time_break;
         self.icing_status = HQMIcingStatus::Icing(team);
-        server.messages.add_server_chat_message_str("Icing");
+        server.messages.add_server_chat_message("Icing");
     }
 
     pub fn after_tick(
@@ -778,9 +770,7 @@ impl HQMMatch {
             if let HQMOffsideStatus::Warning(team, _, _, _) = self.offside_status {
                 if !has_players_in_offensive_zone(server, team, None) {
                     self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
-                    server
-                        .messages
-                        .add_server_chat_message_str("Offside waved off");
+                    server.messages.add_server_chat_message("Offside waved off");
                 }
             }
 
@@ -812,7 +802,7 @@ impl HQMMatch {
         if let Some((start_replay, end_replay, force_view)) = self.start_next_replay {
             if end_replay <= server.game_step {
                 server.add_replay_to_queue(start_replay, end_replay, force_view);
-                server.messages.add_server_chat_message_str("Goal replay");
+                server.messages.add_server_chat_message("Goal replay");
                 self.start_next_replay = None;
             }
         }

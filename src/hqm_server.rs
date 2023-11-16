@@ -195,59 +195,42 @@ impl HQMServerMessages {
         self.waiting_messages.clear();
     }
 
-    pub fn add_user_chat_message(&mut self, message: String, sender_index: HQMServerPlayerIndex) {
+    pub fn add_user_chat_message(
+        &mut self,
+        message: impl Into<Cow<'static, str>>,
+        sender_index: HQMServerPlayerIndex,
+    ) {
         let chat = HQMMessage::Chat {
             player_index: Some(sender_index),
-            message: Cow::Owned(message),
+            message: message.into(),
         };
         self.add_global_message(chat, false, true);
     }
 
-    pub fn add_server_chat_message(&mut self, message: String) {
+    pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
         let chat = HQMMessage::Chat {
             player_index: None,
-            message: Cow::Owned(message),
-        };
-        self.add_global_message(chat, false, true);
-    }
-
-    pub fn add_server_chat_message_str(&mut self, message: &'static str) {
-        let chat = HQMMessage::Chat {
-            player_index: None,
-            message: Cow::Borrowed(message),
+            message: message.into(),
         };
         self.add_global_message(chat, false, true);
     }
 
     pub fn add_directed_chat_message(
         &mut self,
-        message: String,
+        message: impl Into<Cow<'static, str>>,
         receiver_index: HQMServerPlayerIndex,
         sender_index: Option<HQMServerPlayerIndex>,
     ) {
         let chat = HQMMessage::Chat {
             player_index: sender_index,
-            message: Cow::Owned(message),
-        };
-        self.add_directed_message(chat, receiver_index);
-    }
-
-    pub fn add_directed_chat_message_str(
-        &mut self,
-        message: &'static str,
-        receiver_index: HQMServerPlayerIndex,
-        sender_index: Option<HQMServerPlayerIndex>,
-    ) {
-        let chat = HQMMessage::Chat {
-            player_index: sender_index,
-            message: Cow::Borrowed(message),
+            message: message.into(),
         };
         self.add_directed_message(chat, receiver_index);
     }
 
     pub fn add_directed_user_chat_message(
         &mut self,
-        message: String,
+        message: impl Into<Cow<'static, str>>,
         receiver_index: HQMServerPlayerIndex,
         sender_index: HQMServerPlayerIndex,
     ) {
@@ -256,18 +239,10 @@ impl HQMServerMessages {
 
     pub fn add_directed_server_chat_message(
         &mut self,
-        message: String,
+        message: impl Into<Cow<'static, str>>,
         receiver_index: HQMServerPlayerIndex,
     ) {
         self.add_directed_chat_message(message, receiver_index, None);
-    }
-
-    pub fn add_directed_server_chat_message_str(
-        &mut self,
-        message: &'static str,
-        receiver_index: HQMServerPlayerIndex,
-    ) {
-        self.add_directed_chat_message_str(message, receiver_index, None);
     }
 
     pub fn add_goal_message(
@@ -534,7 +509,7 @@ impl HQMServer {
             ) {
                 if let Some(skater) = server.world.objects.get_skater_mut(object_index) {
                     if server.values.period != 0 {
-                        server.messages.add_directed_server_chat_message_str(
+                        server.messages.add_directed_server_chat_message(
                             "Stick hand will change after next intermission",
                             msg_player_index,
                         );
@@ -642,9 +617,9 @@ impl HQMServer {
                     let matches = self.player_search(arg);
                     if matches.is_empty() {
                         self.messages
-                            .add_directed_server_chat_message_str("No matches found", player_index);
+                            .add_directed_server_chat_message("No matches found", player_index);
                     } else if matches.len() > 1 {
-                        self.messages.add_directed_server_chat_message_str(
+                        self.messages.add_directed_server_chat_message(
                             "Multiple matches found, use /ping X",
                             player_index,
                         );
@@ -670,9 +645,9 @@ impl HQMServer {
                     let matches = self.player_search(arg);
                     if matches.is_empty() {
                         self.messages
-                            .add_directed_server_chat_message_str("No matches found", player_index);
+                            .add_directed_server_chat_message("No matches found", player_index);
                     } else if matches.len() > 1 {
-                        self.messages.add_directed_server_chat_message_str(
+                        self.messages.add_directed_server_chat_message(
                             "Multiple matches found, use /view X",
                             player_index,
                         );
@@ -691,7 +666,7 @@ impl HQMServer {
                     if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
                         if data.view_player_index != player_index {
                             data.view_player_index = player_index;
-                            self.messages.add_directed_server_chat_message_str(
+                            self.messages.add_directed_server_chat_message(
                                 "View has been restored",
                                 player_index,
                             );
@@ -723,7 +698,7 @@ impl HQMServer {
         let matches = self.player_search(name);
         if matches.is_empty() {
             self.messages
-                .add_directed_server_chat_message_str("No matches found", player_index);
+                .add_directed_server_chat_message("No matches found", player_index);
             return;
         }
         for (found_player_index, found_player_name) in matches.into_iter().take(5) {
@@ -744,7 +719,7 @@ impl HQMServer {
             if let Some(player) = self.players.get_mut(player_index) {
                 if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
                     if player.object.is_some() {
-                        self.messages.add_directed_server_chat_message_str(
+                        self.messages.add_directed_server_chat_message(
                             "You must be a spectator to change view",
                             player_index,
                         );
@@ -755,7 +730,7 @@ impl HQMServer {
                             self.messages
                                 .add_directed_server_chat_message(msg, player_index);
                         } else {
-                            self.messages.add_directed_server_chat_message_str(
+                            self.messages.add_directed_server_chat_message(
                                 "View has been restored",
                                 player_index,
                             );
@@ -764,10 +739,8 @@ impl HQMServer {
                 }
             }
         } else {
-            self.messages.add_directed_server_chat_message_str(
-                "No player with this ID exists",
-                player_index,
-            );
+            self.messages
+                .add_directed_server_chat_message("No player with this ID exists", player_index);
         }
     }
 
@@ -794,16 +767,14 @@ impl HQMServer {
                 self.messages
                     .add_directed_server_chat_message(msg2, player_index);
             } else {
-                self.messages.add_directed_server_chat_message_str(
+                self.messages.add_directed_server_chat_message(
                     "This player is not a connected player",
                     player_index,
                 );
             }
         } else {
-            self.messages.add_directed_server_chat_message_str(
-                "No player with this ID exists",
-                player_index,
-            );
+            self.messages
+                .add_directed_server_chat_message("No player with this ID exists", player_index);
         }
     }
 
@@ -1831,6 +1802,7 @@ pub struct HQMServerConfiguration {
     pub server_service: Option<String>,
 }
 
+#[derive(Debug, Clone)]
 pub struct HQMInitialGameValues {
     pub values: HQMGameValues,
     pub puck_slots: usize,

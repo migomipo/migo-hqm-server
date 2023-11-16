@@ -306,7 +306,7 @@ impl HQMShootoutBehaviour {
                 }
                 server.messages.add_goal_message(*team, None, None);
             } else {
-                server.messages.add_server_chat_message_str("Miss");
+                server.messages.add_server_chat_message("Miss");
             }
             *state = HQMShootoutAttemptState::Over {
                 timer: 500,

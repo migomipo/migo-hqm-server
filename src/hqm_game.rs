@@ -146,6 +146,7 @@ impl HQMGameWorld {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct HQMGameValues {
     pub rules_state: HQMRulesState,
 

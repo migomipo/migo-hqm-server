@@ -572,7 +572,7 @@ impl HQMMatch {
         if !twoline_str.is_empty() {
             server
                 .messages
-                .add_directed_server_chat_message_str(twoline_str, receiver_index);
+                .add_directed_server_chat_message(twoline_str, receiver_index);
         }
 
         if self.config.mercy > 0 {

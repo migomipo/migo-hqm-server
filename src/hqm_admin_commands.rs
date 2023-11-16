@@ -8,7 +8,7 @@ use tracing::info;
 
 impl HQMServer {
     pub fn admin_deny_message(&mut self, player_index: HQMServerPlayerIndex) {
-        self.messages.add_directed_server_chat_message_str(
+        self.messages.add_directed_server_chat_message(
             "Please log in before using that command",
             player_index,
         );
@@ -184,7 +184,7 @@ impl HQMServer {
                 "Wrong administrator password"
             };
             self.messages
-                .add_directed_server_chat_message_str(msg, player_index);
+                .add_directed_server_chat_message(msg, player_index);
         }
     }
 
@@ -196,7 +196,7 @@ impl HQMServer {
                     self.messages.add_server_chat_message(msg);
                     if let Err(_) = restart(server_service) {
                         self.messages
-                            .add_directed_server_chat_message_str("Restart failed", player_index);
+                            .add_directed_server_chat_message("Restart failed", player_index);
                     }
                 } else {
                     self.admin_deny_message(player_index);
@@ -293,12 +293,12 @@ impl HQMServer {
                             }
                         } else {
                             if ban_player {
-                                self.messages.add_directed_server_chat_message_str(
+                                self.messages.add_directed_server_chat_message(
                                     "You cannot ban yourself",
                                     admin_player_index,
                                 );
                             } else {
-                                self.messages.add_directed_server_chat_message_str(
+                                self.messages.add_directed_server_chat_message(
                                     "You cannot kick yourself",
                                     admin_player_index,
                                 );
@@ -388,12 +388,12 @@ impl HQMServer {
                     }
                 } else {
                     if ban_player {
-                        self.messages.add_directed_server_chat_message_str(
+                        self.messages.add_directed_server_chat_message(
                             "You cannot ban yourself",
                             admin_player_index,
                         );
                     } else {
-                        self.messages.add_directed_server_chat_message_str(
+                        self.messages.add_directed_server_chat_message(
                             "You cannot kick yourself",
                             admin_player_index,
                         );
