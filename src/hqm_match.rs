@@ -1,11 +1,11 @@
 use tracing::info;
 
 use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
-use migo_hqm_server::hqm_game::{HQMGame, HQMTeam};
+use migo_hqm_server::hqm_game::HQMTeam;
 use migo_hqm_server::hqm_match_util::{
     get_spawnpoint, HQMMatch, HQMMatchConfiguration, HQMSpawnPoint,
 };
-use migo_hqm_server::hqm_server::{HQMServer, HQMServerPlayerIndex};
+use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -104,12 +104,12 @@ impl HQMMatchBehaviour {
                 )
             }
 
-            if server.game.period == 0
-                && server.game.time > 2000
+            if server.values.period == 0
+                && server.values.time > 2000
                 && new_red_player_count > 0
                 && new_blue_player_count > 0
             {
-                server.game.time = 2000;
+                server.values.time = 2000;
             }
         }
     }
@@ -352,8 +352,12 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         };
     }
 
-    fn create_game(&mut self) -> HQMGame {
-        self.m.create_game()
+    fn get_initial_game_values(&mut self) -> HQMInitialGameValues {
+        self.m.get_initial_game_values()
+    }
+
+    fn game_started(&mut self, server: &mut HQMServer) {
+        self.m.game_started(server);
     }
 
     fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
@@ -366,7 +370,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
     }
 
     fn save_replay_data(&self, server: &HQMServer) -> bool {
-        server.game.period > 0
+        server.values.period > 0
     }
 }
 
@@ -384,7 +388,7 @@ fn add_player(
         return;
     }
 
-    let (pos, rot) = get_spawnpoint(&server.game.world.rink, team, spawn_point);
+    let (pos, rot) = get_spawnpoint(&server.world.rink, team, spawn_point);
 
     if server.spawn_skater(player_index, team, pos, rot).is_some() {
         info!(

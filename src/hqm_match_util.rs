@@ -1,8 +1,10 @@
 use crate::hqm_game::{
-    HQMGame, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRink, HQMRinkLine, HQMRulesState,
-    HQMTeam,
+    HQMGameValues, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRink, HQMRinkLine,
+    HQMRulesState, HQMTeam,
 };
-use crate::hqm_server::{HQMServer, HQMServerPlayer, HQMServerPlayerIndex, HQMServerPlayerList};
+use crate::hqm_server::{
+    HQMInitialGameValues, HQMServer, HQMServerPlayer, HQMServerPlayerIndex, HQMServerPlayerList,
+};
 
 use crate::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
@@ -121,15 +123,14 @@ impl HQMMatch {
     fn do_faceoff(&mut self, server: &mut HQMServer) {
         let positions = get_faceoff_positions(&server.players, &self.preferred_positions);
 
-        server.game.world.clear_pucks();
+        server.world.clear_pucks();
         self.puck_touches.clear();
 
-        let next_faceoff_spot = get_faceoff_spot(&server.game.world.rink, self.next_faceoff_spot);
+        let next_faceoff_spot = get_faceoff_spot(&server.world.rink, self.next_faceoff_spot);
 
         let puck_pos = next_faceoff_spot.center_position + &(1.5f32 * Vector3::y());
 
         server
-            .game
             .world
             .create_puck_object(puck_pos, Rotation3::identity());
 
@@ -145,7 +146,7 @@ impl HQMMatch {
             }
         }
 
-        let rink = &server.game.world.rink;
+        let rink = &server.world.rink;
         self.icing_status = HQMIcingStatus::No;
         self.offside_status = if rink
             .red_lines_and_net
@@ -172,11 +173,11 @@ impl HQMMatch {
         let time_gameover = self.config.time_intermission * 100;
         let time_break = self.config.time_break * 100;
 
-        let red_score = server.game.red_score;
-        let blue_score = server.game.blue_score;
-        let old_game_over = server.game.game_over;
-        server.game.game_over =
-            if server.game.period > self.config.periods && red_score != blue_score {
+        let red_score = server.values.red_score;
+        let blue_score = server.values.blue_score;
+        let old_game_over = server.values.game_over;
+        server.values.game_over =
+            if server.values.period > self.config.periods && red_score != blue_score {
                 true
             } else if self.config.mercy > 0
                 && (red_score.saturating_sub(blue_score) >= self.config.mercy
@@ -190,9 +191,9 @@ impl HQMMatch {
             } else {
                 false
             };
-        if server.game.game_over && !old_game_over {
+        if server.values.game_over && !old_game_over {
             self.pause_timer = self.pause_timer.max(time_gameover);
-        } else if !server.game.game_over && old_game_over {
+        } else if !server.values.game_over && old_game_over {
             self.pause_timer = self.pause_timer.max(time_break);
         }
     }
@@ -207,10 +208,10 @@ impl HQMMatch {
 
         match team {
             HQMTeam::Red => {
-                server.game.red_score += 1;
+                server.values.red_score += 1;
             }
             HQMTeam::Blue => {
-                server.game.blue_score += 1;
+                server.values.blue_score += 1;
             }
         };
 
@@ -222,7 +223,7 @@ impl HQMMatch {
             puck_speed_across_line,
             puck_speed_from_stick,
             last_touch,
-        ) = if let Some(this_puck) = server.game.world.objects.get_puck_mut(puck_index) {
+        ) = if let Some(this_puck) = server.world.objects.get_puck_mut(puck_index) {
             let mut goal_scorer_index = None;
             let mut assist_index = None;
             let mut goal_scorer_first_touch = 0;
@@ -305,8 +306,8 @@ impl HQMMatch {
 
         server.messages.add_server_chat_message(s);
 
-        if server.game.time < 1000 {
-            let time = server.game.time;
+        if server.values.time < 1000 {
+            let time = server.values.time;
             let seconds = time / 100;
             let centi = time % 100;
 
@@ -333,8 +334,8 @@ impl HQMMatch {
         }
         HQMMatchEvent::Goal {
             team,
-            time: server.game.time,
-            period: server.game.period,
+            time: server.values.time,
+            period: server.values.period,
             goal: goal_scorer_index,
             assist: assist_index,
             speed: puck_speed_from_stick,
@@ -372,16 +373,16 @@ impl HQMMatch {
     ) {
         if let Some((player_index, touching_team, _)) = server.players.get_from_object_index(player)
         {
-            if let Some(puck) = server.game.world.objects.get_puck_mut(puck_index) {
+            if let Some(puck) = server.world.objects.get_puck_mut(puck_index) {
                 add_touch(
                     puck,
                     self.puck_touches.entry(puck_index),
                     player_index,
                     player,
                     touching_team,
-                    server.game.time,
+                    server.values.time,
                 );
-                let side = if puck.body.pos.x <= &server.game.world.rink.width / 2.0 {
+                let side = if puck.body.pos.x <= &server.world.rink.width / 2.0 {
                     HQMRinkSide::Left
                 } else {
                     HQMRinkSide::Right
@@ -575,8 +576,8 @@ impl HQMMatch {
         is_offensive_line: bool,
     ) {
         let team_line = match team {
-            HQMTeam::Red => &server.game.world.rink.red_lines_and_net,
-            HQMTeam::Blue => &server.game.world.rink.blue_lines_and_net,
+            HQMTeam::Red => &server.world.rink.red_lines_and_net,
+            HQMTeam::Blue => &server.world.rink.blue_lines_and_net,
         };
         let line = if is_offensive_line {
             &team_line.offensive_line
@@ -679,9 +680,9 @@ impl HQMMatch {
             }
 
             if self.pause_timer > 0
-                || server.game.time == 0
-                || server.game.game_over
-                || server.game.period == 0
+                || server.values.time == 0
+                || server.values.game_over
+                || server.values.period == 0
             {
                 return;
             }
@@ -761,12 +762,12 @@ impl HQMMatch {
         events: &[HQMSimulationEvent],
     ) -> Vec<HQMMatchEvent> {
         let mut match_events = vec![];
-        if server.game.time == 0 && server.game.period > 1 {
+        if server.values.time == 0 && server.values.period > 1 {
             self.handle_events_end_of_period(server, events);
         } else if self.pause_timer > 0
-            || server.game.time == 0
-            || server.game.game_over
-            || server.game.period == 0
+            || server.values.time == 0
+            || server.values.game_over
+            || server.values.period == 0
             || self.paused
         {
             // Nothing
@@ -802,7 +803,7 @@ impl HQMMatch {
                 }
             };
 
-            server.game.rules_state = rules_state;
+            server.values.rules_state = rules_state;
         }
 
         self.update_clock(server);
@@ -826,20 +827,20 @@ impl HQMMatch {
                 self.pause_timer -= 1;
                 if self.pause_timer == 0 {
                     self.is_pause_goal = false;
-                    if server.game.game_over {
-                        server.new_game(self.create_game());
+                    if server.values.game_over {
+                        server.new_game(self.get_initial_game_values());
                     } else {
-                        if server.game.time == 0 {
-                            server.game.time = period_length;
+                        if server.values.time == 0 {
+                            server.values.time = period_length;
                         }
 
                         self.do_faceoff(server);
                     }
                 }
             } else {
-                server.game.time = server.game.time.saturating_sub(1);
-                if server.game.time == 0 {
-                    server.game.period += 1;
+                server.values.time = server.values.time.saturating_sub(1);
+                if server.values.time == 0 {
+                    server.values.period += 1;
                     self.pause_timer = intermission_time;
                     self.is_pause_goal = false;
                     self.step_where_period_ended = server.game_step;
@@ -849,7 +850,7 @@ impl HQMMatch {
                 }
             }
         }
-        server.game.goal_message_timer = if self.is_pause_goal {
+        server.values.goal_message_timer = if self.is_pause_goal {
             self.pause_timer
         } else {
             0
@@ -867,7 +868,18 @@ impl HQMMatch {
         self.preferred_positions.remove(&player_index);
     }
 
-    pub fn create_game(&mut self) -> HQMGame {
+    pub fn get_initial_game_values(&mut self) -> HQMInitialGameValues {
+        let mut values = HQMGameValues::default();
+
+        values.time = self.config.time_warmup * 100;
+        HQMInitialGameValues {
+            values,
+            puck_slots: self.config.warmup_pucks,
+            physics_configuration: self.config.physics_config.clone(),
+            blue_line: self.config.blue_line_location,
+        }
+    }
+    pub fn game_started(&mut self, server: &mut HQMServer) {
         self.paused = false;
         self.pause_timer = 0;
         self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
@@ -875,27 +887,19 @@ impl HQMMatch {
         self.offside_status = HQMOffsideStatus::Neutral;
         self.twoline_pass_status = HQMTwoLinePassStatus::No;
         self.start_next_replay = None;
-
         let warmup_pucks = self.config.warmup_pucks;
 
-        let mut game = HQMGame::new(
-            warmup_pucks,
-            self.config.physics_config.clone(),
-            self.config.blue_line_location,
-        );
-        let puck_line_start = game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
+        let puck_line_start = server.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {
             let pos = Point3::new(
                 puck_line_start + 0.8 * (i as f32),
                 1.5,
-                game.world.rink.length / 2.0,
+                server.world.rink.length / 2.0,
             );
             let rot = Rotation3::identity();
-            game.world.create_puck_object(pos, rot);
+            server.world.create_puck_object(pos, rot);
         }
-        game.time = self.config.time_warmup * 100;
-        game
     }
 }
 
@@ -1061,7 +1065,7 @@ pub fn is_past_line(
 ) -> bool {
     if let Some((object_index, skater_team)) = player.object {
         if skater_team == team {
-            if let Some(skater) = server.game.world.objects.get_skater(object_index) {
+            if let Some(skater) = server.world.objects.get_skater(object_index) {
                 let feet_pos =
                     &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
                 let dot = (&feet_pos - &line.point).dot(&line.normal);
@@ -1082,8 +1086,8 @@ pub fn has_players_in_offensive_zone(
     ignore_player: Option<HQMServerPlayerIndex>,
 ) -> bool {
     let line = match team {
-        HQMTeam::Red => &server.game.world.rink.red_lines_and_net.offensive_line,
-        HQMTeam::Blue => &server.game.world.rink.blue_lines_and_net.offensive_line,
+        HQMTeam::Red => &server.world.rink.red_lines_and_net.offensive_line,
+        HQMTeam::Blue => &server.world.rink.blue_lines_and_net.offensive_line,
     };
 
     for (player_index, player) in server.players.iter() {

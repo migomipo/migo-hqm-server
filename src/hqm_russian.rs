@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use tracing::info;
 
 use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
-use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
-use migo_hqm_server::hqm_server::{HQMServer, HQMServerPlayerIndex};
+use migo_hqm_server::hqm_game::{HQMGameValues, HQMPhysicsConfiguration, HQMTeam};
+use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate;
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::f32::consts::FRAC_PI_2;
@@ -109,7 +109,7 @@ impl HQMRussianBehaviour {
                 player_count: &mut usize,
                 team_max: usize,
             ) {
-                let mid_z = server.game.world.rink.length / 2.0;
+                let mid_z = server.world.rink.length / 2.0;
                 let z = match team {
                     HQMTeam::Red => mid_z + 12.0,
                     HQMTeam::Blue => mid_z - 12.0,
@@ -157,16 +157,15 @@ impl HQMRussianBehaviour {
     }
 
     fn place_puck_for_team(&mut self, server: &mut HQMServer, team: HQMTeam) {
-        server.game.world.clear_pucks();
+        server.world.clear_pucks();
 
         let z = match team {
             HQMTeam::Red => 55.0,
             HQMTeam::Blue => 6.0,
         };
-        let puck_pos = Point3::new(server.game.world.rink.width / 2.0, 0.5, z);
+        let puck_pos = Point3::new(server.world.rink.width / 2.0, 0.5, z);
 
         server
-            .game
             .world
             .create_puck_object(puck_pos, Rotation3::identity());
 
@@ -196,7 +195,7 @@ impl HQMRussianBehaviour {
             }
             HQMRussianStatus::Game { in_zone, round, .. } => {
                 if *in_zone != team {
-                    server.game.time = 2000;
+                    server.values.time = 2000;
                     *in_zone = team;
                     if team == HQMTeam::Red {
                         *round += 1;
@@ -219,10 +218,10 @@ impl HQMRussianBehaviour {
     }
 
     fn init(&mut self, server: &mut HQMServer) {
-        server.game.period = 1;
-        server.game.time = 2000;
+        server.values.period = 1;
+        server.values.time = 2000;
 
-        server.game.world.clear_pucks();
+        server.world.clear_pucks();
 
         let s = format!("Each team will get {} attempts", self.attempts);
         server.messages.add_server_chat_message(s);
@@ -244,18 +243,18 @@ impl HQMRussianBehaviour {
 
         let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
         for (index, player_index) in red_players.into_iter().enumerate() {
-            let z = (server.game.world.rink.length / 2.0) + (12.0 + index as f32);
+            let z = (server.world.rink.length / 2.0) + (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
             server.spawn_skater(player_index, HQMTeam::Red, pos, rot.clone());
         }
         for (index, player_index) in blue_players.into_iter().enumerate() {
-            let z = (server.game.world.rink.length / 2.0) - (12.0 + index as f32);
+            let z = (server.world.rink.length / 2.0) - (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
             server.spawn_skater(player_index, HQMTeam::Blue, pos, rot.clone());
         }
     }
 
-    fn check_ending(&mut self, game: &mut HQMGame) {
+    fn check_ending(&mut self, game: &mut HQMGameValues) {
         if let HQMRussianStatus::Game { in_zone, round, .. } = self.status {
             let red_attempts_taken = round + if in_zone == HQMTeam::Blue { 1 } else { 0 };
             let blue_attempts_taken = round;
@@ -283,7 +282,7 @@ impl HQMRussianBehaviour {
                 info!("{} ({}) reset game", player.player_name, player_index);
                 let msg = format!("Game reset by {}", player.player_name);
 
-                server.new_game(self.create_game());
+                server.new_game(self.get_initial_game_values());
 
                 server.messages.add_server_chat_message(msg);
             } else {
@@ -345,13 +344,13 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                     } else if team == HQMTeam::Blue {
                         blue_player_count += 1;
                     }
-                    if let Some(skater) = server.game.world.objects.get_skater_mut(object_index) {
+                    if let Some(skater) = server.world.objects.get_skater_mut(object_index) {
                         let line = if team == HQMTeam::Red {
                             red_player_count += 1;
-                            &server.game.world.rink.red_lines_and_net.defensive_line
+                            &server.world.rink.red_lines_and_net.defensive_line
                         } else {
                             blue_player_count += 1;
-                            &server.game.world.rink.blue_lines_and_net.defensive_line
+                            &server.world.rink.blue_lines_and_net.defensive_line
                         };
 
                         let p = &line.point;
@@ -379,18 +378,17 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
 
         if let HQMRussianStatus::WaitingForGame = self.status {
             if red_player_count > 0 && blue_player_count > 0 {
-                server.game.time = server.game.time.saturating_sub(1);
-                if server.game.time == 0 {
+                server.values.time = server.values.time.saturating_sub(1);
+                if server.values.time == 0 {
                     self.init(server);
                 }
             } else {
-                server.game.time = 1000;
+                server.values.time = 1000;
             }
         } else if let HQMRussianStatus::GameOver { timer } = &mut self.status {
             *timer = timer.saturating_sub(1);
             if *timer == 0 {
-                let new_game = self.create_game();
-                server.new_game(new_game);
+                server.new_game(self.get_initial_game_values());
             }
         } else if let HQMRussianStatus::Game {
             in_zone,
@@ -399,10 +397,10 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
         } = self.status
         {
             if goal_scored {
-                server.game.goal_message_timer = server.game.goal_message_timer.saturating_sub(1);
-                if server.game.goal_message_timer == 0 {
+                server.values.goal_message_timer = server.values.goal_message_timer.saturating_sub(1);
+                if server.values.goal_message_timer == 0 {
                     self.place_puck_for_team(server, in_zone);
-                    server.game.time = 2000;
+                    server.values.time = 2000;
                     self.status = HQMRussianStatus::Game {
                         in_zone,
                         round,
@@ -416,10 +414,10 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                             // Goal!
                             match *team {
                                 HQMTeam::Red => {
-                                    server.game.red_score += 1;
+                                    server.values.red_score += 1;
                                 }
                                 HQMTeam::Blue => {
-                                    server.game.blue_score += 1;
+                                    server.values.blue_score += 1;
                                 }
                             };
                             self.status = HQMRussianStatus::Game {
@@ -427,9 +425,9 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                                 round,
                                 goal_scored: true,
                             };
-                            server.game.goal_message_timer = 300;
+                            server.values.goal_message_timer = 300;
                             server.messages.add_goal_message(*team, None, None);
-                            self.check_ending(&mut server.game);
+                            self.check_ending(&mut server.values);
                         }
                         HQMSimulationEvent::PuckTouch { player, .. } => {
                             if let Some((_, touching_team, _)) =
@@ -443,17 +441,17 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                             self.fix_status(server, other_team);
                         }
                         HQMSimulationEvent::PuckPassedDefensiveLine { .. } => {
-                            self.check_ending(&mut server.game);
+                            self.check_ending(&mut server.values);
                         }
                         HQMSimulationEvent::PuckPassedGoalLine { .. } => {
-                            self.check_ending(&mut server.game);
+                            self.check_ending(&mut server.values);
                         }
                         _ => {}
                     }
                 }
-                server.game.time = server.game.time.saturating_sub(1);
-                if server.game.time == 0 {
-                    self.check_ending(&mut server.game);
+                server.values.time = server.values.time.saturating_sub(1);
+                if server.values.time == 0 {
+                    self.check_ending(&mut server.values);
                     match self.status {
                         HQMRussianStatus::Game { in_zone, .. } => {
                             let other_team = in_zone.get_other_team();
@@ -486,12 +484,20 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
         }
     }
 
-    fn create_game(&mut self) -> HQMGame {
-        self.status = HQMRussianStatus::WaitingForGame;
-        let mut game = HQMGame::new(1, self.physics_config.clone(), self.blue_line_location);
+    fn get_initial_game_values(&mut self) -> HQMInitialGameValues {
+        HQMInitialGameValues {
+            values: HQMGameValues {
+                time: 1000,
+                ..Default::default()
+            },
+            puck_slots: 1,
+            physics_configuration: self.physics_config.clone(),
+            blue_line: self.blue_line_location,
+        }
+    }
 
-        game.time = 1000;
-        game
+    fn game_started(&mut self, _server: &mut HQMServer) {
+        self.status = HQMRussianStatus::WaitingForGame;
     }
 
     fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: HQMServerPlayerIndex) {

@@ -21,7 +21,8 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::hqm_game::{
-    HQMGame, HQMObjectIndex, HQMPlayerInput, HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam,
+    HQMGameValues, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPlayerInput,
+    HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam,
 };
 use crate::hqm_parse;
 use crate::hqm_parse::{
@@ -307,7 +308,8 @@ pub struct HQMServer {
     pub(crate) ban_list: HashSet<std::net::IpAddr>,
     pub(crate) allow_join: bool,
     pub config: HQMServerConfiguration,
-    pub game: HQMGame,
+    pub values: HQMGameValues,
+    pub world: HQMGameWorld,
     replay_queue: VecDeque<ReplayElement>,
     requested_replays: VecDeque<(u32, u32, Option<HQMServerPlayerIndex>)>,
     game_id: u32,
@@ -529,8 +531,8 @@ impl HQMServer {
                 msg_player_index: HQMServerPlayerIndex,
                 hand: HQMSkaterHand,
             ) {
-                if let Some(skater) = server.game.world.objects.get_skater_mut(object_index) {
-                    if server.game.period != 0 {
+                if let Some(skater) = server.world.objects.get_skater_mut(object_index) {
+                    if server.values.period != 0 {
                         server.messages.add_directed_server_chat_message_str(
                             "Stick hand will change after next intermission",
                             msg_player_index,
@@ -930,7 +932,7 @@ impl HQMServer {
             let is_admin = player.is_admin;
 
             if let Some((object_index, _)) = player.object {
-                self.game.world.remove_player(object_index);
+                self.world.remove_player(object_index);
             }
 
             let update = HQMMessage::PlayerUpdate {
@@ -957,7 +959,7 @@ impl HQMServer {
     pub fn move_to_spectator(&mut self, player_index: HQMServerPlayerIndex) -> bool {
         if let Some(player) = self.players.get_mut(player_index) {
             if let Some((object_index, _)) = player.object {
-                if self.game.world.remove_player(object_index) {
+                if self.world.remove_player(object_index) {
                     player.object = None;
                     let update = player.get_update_message(player_index);
                     self.messages.add_global_message(update, true, true);
@@ -978,7 +980,7 @@ impl HQMServer {
     ) -> Option<HQMObjectIndex> {
         if let Some(player) = self.players.get_mut(player_index) {
             if let Some((object_index, _)) = player.object {
-                if let Some(skater) = self.game.world.objects.get_skater_mut(object_index) {
+                if let Some(skater) = self.world.objects.get_skater_mut(object_index) {
                     *skater = HQMSkater::new(pos, rot, player.hand, player.mass);
                     let object = Some((object_index, team));
                     player.object = object;
@@ -987,8 +989,7 @@ impl HQMServer {
                 }
             } else {
                 if let Some(skater) =
-                    self.game
-                        .world
+                    self.world
                         .create_player_object(pos, rot, player.hand, player.mass)
                 {
                     if let HQMServerPlayerData::NetworkPlayer { data } = &mut player.data {
@@ -1085,15 +1086,15 @@ impl HQMServer {
 
         for (_, player) in self.players.iter() {
             if let Some((object_index, _)) = player.object {
-                if let Some(skater) = self.game.world.objects.get_skater_mut(object_index) {
+                if let Some(skater) = self.world.objects.get_skater_mut(object_index) {
                     skater.input = player.input.clone()
                 }
             }
         }
 
-        let events = self.game.world.simulate_step();
+        let events = self.world.simulate_step();
 
-        let packets = hqm_parse::get_packets(&self.game.world.objects.objects);
+        let packets = hqm_parse::get_packets(&self.world.objects.objects);
 
         behaviour.after_tick(self, &events);
 
@@ -1156,6 +1157,7 @@ impl HQMServer {
             if !self.has_current_game_been_active {
                 self.start_time = Utc::now();
                 self.has_current_game_been_active = true;
+                behaviour.game_started(self);
                 info!("New game {} started", self.game_id);
             }
 
@@ -1208,13 +1210,13 @@ impl HQMServer {
                 self.game_id,
                 &self.saved_packets,
                 game_step,
-                self.game.game_over,
-                self.game.red_score,
-                self.game.blue_score,
-                self.game.time,
-                self.game.goal_message_timer,
-                self.game.period,
-                self.game.rules_state,
+                self.values.game_over,
+                self.values.red_score,
+                self.values.blue_score,
+                self.values.time,
+                self.values.goal_message_timer,
+                self.values.period,
+                self.values.rules_state,
                 self.packet,
                 &self.players.players,
                 socket,
@@ -1242,14 +1244,15 @@ impl HQMServer {
             }
         } else if self.has_current_game_been_active {
             info!("Game {} abandoned", self.game_id);
-            let new_game = behaviour.create_game();
-            self.new_game(new_game);
+            self.new_game(behaviour.get_initial_game_values());
+            behaviour.game_started(self);
             self.allow_join = true;
         }
     }
 
-    pub fn new_game(&mut self, new_game: HQMGame) {
-        self.game = new_game;
+    pub fn new_game(&mut self, v: HQMInitialGameValues) {
+        self.values = v.values;
+        self.world = HQMGameWorld::new(v.puck_slots, v.physics_configuration, v.blue_line);
         self.game_id += 1;
         self.messages.clear();
 
@@ -1371,17 +1374,17 @@ impl HQMServer {
         writer.write_byte_aligned(5);
         writer.write_bits(
             1,
-            match self.game.game_over {
+            match self.values.game_over {
                 true => 1,
                 false => 0,
             },
         );
-        writer.write_bits(8, self.game.red_score);
-        writer.write_bits(8, self.game.blue_score);
-        writer.write_bits(16, self.game.time);
+        writer.write_bits(8, self.values.red_score);
+        writer.write_bits(8, self.values.blue_score);
+        writer.write_bits(16, self.values.time);
 
-        writer.write_bits(16, self.game.goal_message_timer);
-        writer.write_bits(8, self.game.period); // 8.1
+        writer.write_bits(16, self.values.goal_message_timer);
+        writer.write_bits(8, self.values.period); // 8.1
 
         let packets = &self.saved_packets;
 
@@ -1420,7 +1423,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
     for _ in 0..64 {
         player_vec.push(None);
     }
-    let first_game = behaviour.create_game();
+    let initial_values = behaviour.get_initial_game_values();
 
     let reqwest_client = reqwest::Client::new();
 
@@ -1431,7 +1434,12 @@ pub async fn run_server<B: HQMServerBehaviour>(
         messages: HQMServerMessages::new(),
         ban_list: HashSet::new(),
         allow_join: true,
-        game: first_game,
+        values: initial_values.values,
+        world: HQMGameWorld::new(
+            initial_values.puck_slots,
+            initial_values.physics_configuration,
+            initial_values.blue_line,
+        ),
         is_muted: false,
         config,
         game_id: 1,
@@ -1451,7 +1459,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
         game_step: u32::MAX,
         start_time: Default::default(),
     };
-    info!("Server started, new game {} started", 1);
+    info!("Server started");
 
     behaviour.init(&mut server);
 
@@ -1820,4 +1828,11 @@ pub struct HQMServerConfiguration {
     pub replay_saving: ReplaySaving,
     pub server_name: String,
     pub server_service: Option<String>,
+}
+
+pub struct HQMInitialGameValues {
+    pub values: HQMGameValues,
+    pub puck_slots: usize,
+    pub physics_configuration: HQMPhysicsConfiguration,
+    pub blue_line: f32,
 }

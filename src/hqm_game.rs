@@ -15,6 +15,23 @@ pub struct HQMGameWorld {
     pub physics_config: HQMPhysicsConfiguration,
 }
 
+impl HQMGameWorld {
+    pub(crate) fn new(
+        puck_slots: usize,
+        physics_config: HQMPhysicsConfiguration,
+        blue_line_location: f32,
+    ) -> Self {
+        HQMGameWorld {
+            objects: HQMGameWorldObjectList {
+                objects: vec![HQMGameObject::None; 32],
+            },
+            puck_slots,
+            rink: HQMRink::new(30.0, 61.0, 8.5, blue_line_location),
+            physics_config,
+        }
+    }
+}
+
 pub struct HQMGameWorldObjectList {
     pub(crate) objects: Vec<HQMGameObject>,
 }
@@ -130,9 +147,9 @@ impl HQMGameWorld {
     }
 }
 
-pub struct HQMGame {
+pub struct HQMGameValues {
     pub rules_state: HQMRulesState,
-    pub world: HQMGameWorld,
+
     pub red_score: u32,
     pub blue_score: u32,
     pub period: u32,
@@ -155,31 +172,12 @@ pub struct HQMPhysicsConfiguration {
     pub max_player_shift_speed: f32,
     pub player_shift_turning: f32,
 }
-
-impl HQMGame {
-    pub fn new(
-        puck_slots: usize,
-        config: HQMPhysicsConfiguration,
-        blue_line_location: f32,
-    ) -> Self {
-        let mut object_vec = Vec::with_capacity(32);
-        for _ in 0..32 {
-            object_vec.push(HQMGameObject::None);
-        }
-        let rink = HQMRink::new(30.0, 61.0, 8.5, blue_line_location);
-
-        HQMGame {
+impl Default for HQMGameValues {
+    fn default() -> Self {
+        HQMGameValues {
             rules_state: HQMRulesState::Regular {
                 offside_warning: false,
                 icing_warning: false,
-            },
-            world: HQMGameWorld {
-                objects: HQMGameWorldObjectList {
-                    objects: object_vec,
-                },
-                puck_slots,
-                rink,
-                physics_config: config,
             },
             red_score: 0,
             blue_score: 0,

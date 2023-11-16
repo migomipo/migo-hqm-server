@@ -13,7 +13,7 @@ impl HQMMatch {
                 info!("{} ({}) reset game", player.player_name, player_index);
                 let msg = format!("Game reset by {}", player.player_name);
 
-                server.new_game(self.create_game());
+                server.new_game(self.get_initial_game_values());
 
                 server.messages.add_server_chat_message(msg);
             } else {
@@ -25,11 +25,11 @@ impl HQMMatch {
     pub fn start_game(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
-                if server.game.period == 0 && server.game.time > 1 {
+                if server.values.period == 0 && server.values.time > 1 {
                     info!("{} ({}) started game", player.player_name, player_index);
                     let msg = format!("Game started by {}", player.player_name);
                     self.paused = false;
-                    server.game.time = 1;
+                    server.values.time = 1;
 
                     server.messages.add_server_chat_message(msg);
                 }
@@ -79,7 +79,7 @@ impl HQMMatch {
     ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
-                server.game.time = input_time;
+                server.values.time = input_time;
 
                 let input_minutes = input_time / (60 * 100);
                 let input_rest = input_time % (60 * 100);
@@ -110,7 +110,7 @@ impl HQMMatch {
             if player.is_admin {
                 match input_team {
                     HQMTeam::Red => {
-                        server.game.red_score = input_score;
+                        server.values.red_score = input_score;
 
                         info!(
                             "{} ({}) changed red score to {}",
@@ -120,7 +120,7 @@ impl HQMMatch {
                         server.messages.add_server_chat_message(msg);
                     }
                     HQMTeam::Blue => {
-                        server.game.blue_score = input_score;
+                        server.values.blue_score = input_score;
 
                         info!(
                             "{} ({}) changed blue score to {}",
@@ -145,7 +145,7 @@ impl HQMMatch {
     ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
-                server.game.period = input_period;
+                server.values.period = input_period;
 
                 info!(
                     "{} ({}) set period to {}",
@@ -496,7 +496,7 @@ impl HQMMatch {
     }
 
     pub fn faceoff(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
-        if !server.game.game_over {
+        if !server.values.game_over {
             if let Some(player) = server.players.get(player_index) {
                 if player.is_admin {
                     self.pause_timer = 5 * 100;

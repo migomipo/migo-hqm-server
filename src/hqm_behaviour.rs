@@ -1,5 +1,4 @@
-use crate::hqm_game::HQMGame;
-use crate::hqm_server::{HQMServer, HQMServerPlayerIndex};
+use crate::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex};
 use crate::hqm_simulate::HQMSimulationEvent;
 
 pub trait HQMServerBehaviour {
@@ -16,7 +15,8 @@ pub trait HQMServerBehaviour {
     ) {
     }
 
-    fn create_game(&mut self) -> HQMGame;
+    fn get_initial_game_values(&mut self) -> HQMInitialGameValues;
+    fn game_started(&mut self, _server: &mut HQMServer);
 
     fn before_player_exit(&mut self, _server: &mut HQMServer, _player_index: HQMServerPlayerIndex) {
     }

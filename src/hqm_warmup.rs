@@ -1,7 +1,7 @@
 use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
-use migo_hqm_server::hqm_game::{HQMGame, HQMPhysicsConfiguration, HQMTeam};
+use migo_hqm_server::hqm_game::{HQMPhysicsConfiguration, HQMTeam};
 use migo_hqm_server::hqm_match_util::{get_spawnpoint, HQMSpawnPoint};
-use migo_hqm_server::hqm_server::{HQMServer, HQMServerPlayerIndex};
+use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3};
 
@@ -48,7 +48,7 @@ impl HQMPermanentWarmup {
             team: HQMTeam,
             spawn_point: HQMSpawnPoint,
         ) {
-            let (pos, rot) = get_spawnpoint(&server.game.world.rink, team, spawn_point);
+            let (pos, rot) = get_spawnpoint(&server.world.rink, team, spawn_point);
 
             server.spawn_skater(player_index, team, pos, rot);
         }
@@ -77,28 +77,33 @@ impl HQMServerBehaviour for HQMPermanentWarmup {
     ) {
     }
 
-    fn create_game(&mut self) -> HQMGame
-    where
-        Self: Sized,
-    {
+    fn get_number_of_players(&self) -> u32 {
+        0
+    }
+
+    fn get_initial_game_values(&mut self) -> HQMInitialGameValues {
         let warmup_pucks = self.pucks;
-        let mut game = HQMGame::new(warmup_pucks, self.physics_config.clone(), -10.0);
-        let puck_line_start = game.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
+
+        HQMInitialGameValues {
+            values: Default::default(),
+            puck_slots: warmup_pucks,
+            physics_configuration: self.physics_config.clone(),
+            blue_line: -10.0,
+        }
+    }
+
+    fn game_started(&mut self, server: &mut HQMServer) {
+        let warmup_pucks = self.pucks;
+        let puck_line_start = server.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {
             let pos = Point3::new(
                 puck_line_start + 0.8 * (i as f32),
                 1.5,
-                game.world.rink.length / 2.0,
+                server.world.rink.length / 2.0,
             );
             let rot = Rotation3::identity();
-            game.world.create_puck_object(pos, rot);
+            server.world.create_puck_object(pos, rot);
         }
-        game.time = 30000; // Permanently locked to 5 minutes
-        game
-    }
-
-    fn get_number_of_players(&self) -> u32 {
-        0
     }
 }
