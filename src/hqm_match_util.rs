@@ -1,9 +1,10 @@
 use crate::hqm_game::{
     HQMGameValues, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRink, HQMRinkLine,
-    HQMRulesState, HQMTeam,
+    HQMRulesState,
 };
 use crate::hqm_server::{
     HQMInitialGameValues, HQMServer, HQMServerPlayer, HQMServerPlayerIndex, HQMServerPlayerList,
+    HQMTeam,
 };
 
 use crate::hqm_simulate::HQMSimulationEvent;
@@ -1406,9 +1407,9 @@ pub fn get_spawnpoint(
 
 #[cfg(test)]
 mod tests {
-    use crate::hqm_game::HQMTeam;
     use crate::hqm_match_util::setup_position;
     use crate::hqm_server::HQMServerPlayerIndex;
+    use crate::hqm_server::HQMTeam;
     use std::collections::HashMap;
 
     #[test]

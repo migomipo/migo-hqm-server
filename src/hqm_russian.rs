@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use tracing::info;
 
 use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
-use migo_hqm_server::hqm_game::{HQMGameValues, HQMPhysicsConfiguration, HQMTeam};
-use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex};
+use migo_hqm_server::hqm_game::{HQMGameValues, HQMPhysicsConfiguration};
+use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex, HQMTeam};
 use migo_hqm_server::hqm_simulate;
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::f32::consts::FRAC_PI_2;
@@ -397,7 +397,8 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
         } = self.status
         {
             if goal_scored {
-                server.values.goal_message_timer = server.values.goal_message_timer.saturating_sub(1);
+                server.values.goal_message_timer =
+                    server.values.goal_message_timer.saturating_sub(1);
                 if server.values.goal_message_timer == 0 {
                     self.place_puck_for_team(server, in_zone);
                     server.values.time = 2000;

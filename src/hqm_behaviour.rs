@@ -16,7 +16,7 @@ pub trait HQMServerBehaviour {
     }
 
     fn get_initial_game_values(&mut self) -> HQMInitialGameValues;
-    fn game_started(&mut self, _server: &mut HQMServer);
+    fn game_started(&mut self, _server: &mut HQMServer) {}
 
     fn before_player_exit(&mut self, _server: &mut HQMServer, _player_index: HQMServerPlayerIndex) {
     }

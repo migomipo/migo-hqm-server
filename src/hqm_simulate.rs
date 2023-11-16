@@ -1,7 +1,8 @@
 use crate::hqm_game::{
     HQMBody, HQMGameObject, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck,
-    HQMRink, HQMRinkNet, HQMSkater, HQMSkaterCollisionBall, HQMSkaterHand, HQMTeam, LinesAndNet,
+    HQMRink, HQMRinkNet, HQMSkater, HQMSkaterCollisionBall, HQMSkaterHand, LinesAndNet,
 };
+use crate::hqm_server::HQMTeam;
 use nalgebra::{vector, Point3, Rotation3, Unit, Vector2, Vector3};
 use smallvec::SmallVec;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};

@@ -1,8 +1,8 @@
-use crate::hqm_game::HQMTeam;
 use crate::hqm_match_util::{
     HQMIcingConfiguration, HQMMatch, HQMOffsideConfiguration, HQMOffsideLineConfiguration,
     HQMTwoLinePassConfiguration, ALLOWED_POSITIONS,
 };
+use crate::hqm_server::HQMTeam;
 use crate::hqm_server::{HQMServer, HQMServerPlayerIndex};
 use tracing::info;
 

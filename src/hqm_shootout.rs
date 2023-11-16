@@ -1,5 +1,5 @@
-use migo_hqm_server::hqm_game::{HQMGameValues, HQMObjectIndex, HQMPhysicsConfiguration, HQMTeam};
-use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex};
+use migo_hqm_server::hqm_game::{HQMGameValues, HQMObjectIndex, HQMPhysicsConfiguration};
+use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex, HQMTeam};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
 use std::collections::HashMap;
@@ -275,12 +275,16 @@ impl HQMShootoutBehaviour {
             let remaining_red_attempts = attempts - red_attempts_taken;
             let remaining_blue_attempts = attempts - blue_attempts_taken;
 
-            server.values.game_over = if let Some(difference) =
-                server.values.red_score.checked_sub(server.values.blue_score)
+            server.values.game_over = if let Some(difference) = server
+                .values
+                .red_score
+                .checked_sub(server.values.blue_score)
             {
                 remaining_blue_attempts < difference
-            } else if let Some(difference) =
-                server.values.blue_score.checked_sub(server.values.red_score)
+            } else if let Some(difference) = server
+                .values
+                .blue_score
+                .checked_sub(server.values.red_score)
             {
                 remaining_red_attempts < difference
             } else {

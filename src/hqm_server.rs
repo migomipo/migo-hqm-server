@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::cmp::min;
 use std::collections::{HashSet, VecDeque};
 use std::error::Error;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -13,6 +13,7 @@ pub use crate::hqm_behaviour::HQMServerBehaviour;
 use bytes::{BufMut, BytesMut};
 use chrono::{DateTime, Utc};
 use nalgebra::{Point3, Rotation3};
+use std::fmt;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
@@ -22,7 +23,7 @@ use uuid::Uuid;
 
 use crate::hqm_game::{
     HQMGameValues, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPlayerInput,
-    HQMRulesState, HQMSkater, HQMSkaterHand, HQMTeam,
+    HQMRulesState, HQMSkater, HQMSkaterHand,
 };
 use crate::hqm_parse;
 use crate::hqm_parse::{
@@ -1835,4 +1836,35 @@ pub struct HQMInitialGameValues {
     pub puck_slots: usize,
     pub physics_configuration: HQMPhysicsConfiguration,
     pub blue_line: f32,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum HQMTeam {
+    Red,
+    Blue,
+}
+
+impl HQMTeam {
+    pub(crate) fn get_num(self) -> u32 {
+        match self {
+            HQMTeam::Red => 0,
+            HQMTeam::Blue => 1,
+        }
+    }
+
+    pub fn get_other_team(self) -> Self {
+        match self {
+            HQMTeam::Red => HQMTeam::Blue,
+            HQMTeam::Blue => HQMTeam::Red,
+        }
+    }
+}
+
+impl Display for HQMTeam {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            HQMTeam::Red => write!(f, "Red"),
+            HQMTeam::Blue => write!(f, "Blue"),
+        }
+    }
 }

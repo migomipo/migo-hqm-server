@@ -1,8 +1,7 @@
 use crate::hqm_parse;
 use nalgebra::{point, Matrix3, Point3, Rotation3, Unit, Vector2, Vector3};
 
-use std::fmt;
-use std::fmt::{Display, Formatter};
+use std::fmt::Formatter;
 
 use crate::hqm_parse::{HQMPuckPacket, HQMSkaterPacket};
 use arr_macro::arr;
@@ -715,37 +714,6 @@ pub(crate) enum HQMGameObject {
     None,
     Player(HQMSkater),
     Puck(HQMPuck),
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub enum HQMTeam {
-    Red,
-    Blue,
-}
-
-impl HQMTeam {
-    pub(crate) fn get_num(self) -> u32 {
-        match self {
-            HQMTeam::Red => 0,
-            HQMTeam::Blue => 1,
-        }
-    }
-
-    pub fn get_other_team(self) -> Self {
-        match self {
-            HQMTeam::Red => HQMTeam::Blue,
-            HQMTeam::Blue => HQMTeam::Red,
-        }
-    }
-}
-
-impl Display for HQMTeam {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            HQMTeam::Red => write!(f, "Red"),
-            HQMTeam::Blue => write!(f, "Blue"),
-        }
-    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

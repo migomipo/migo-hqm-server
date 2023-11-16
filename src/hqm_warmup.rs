@@ -1,7 +1,7 @@
 use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
-use migo_hqm_server::hqm_game::{HQMPhysicsConfiguration, HQMTeam};
+use migo_hqm_server::hqm_game::HQMPhysicsConfiguration;
 use migo_hqm_server::hqm_match_util::{get_spawnpoint, HQMSpawnPoint};
-use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex};
+use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex, HQMTeam};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3};
 

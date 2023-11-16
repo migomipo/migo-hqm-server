@@ -1,10 +1,10 @@
 use tracing::info;
 
 use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
-use migo_hqm_server::hqm_game::HQMTeam;
 use migo_hqm_server::hqm_match_util::{
     get_spawnpoint, HQMMatch, HQMMatchConfiguration, HQMSpawnPoint,
 };
+use migo_hqm_server::hqm_server::HQMTeam;
 use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::HashMap;
