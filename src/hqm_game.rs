@@ -199,19 +199,17 @@ pub struct HQMRinkLine {
 impl HQMRinkLine {
     pub(crate) fn sphere_reached_line(&self, pos: &Point3<f32>, radius: f32) -> bool {
         let dot = (pos - &self.point).dot(&self.normal);
-        let edge = self.width / 2.0;
-        dot - radius < edge
+        dot > -(self.width / 2.0) - radius
     }
 
     pub(crate) fn sphere_past_leading_edge(&self, pos: &Point3<f32>, radius: f32) -> bool {
         let dot = (pos - &self.point).dot(&self.normal);
-        let edge = -(self.width / 2.0);
-        dot + radius < edge
+        dot > (self.width / 2.0) + radius
     }
 
     pub fn point_past_middle_of_line(&self, pos: &Point3<f32>) -> bool {
         let dot = (pos - &self.point).dot(&self.normal);
-        dot < 0.0
+        dot > 0.0
     }
 }
 
@@ -373,14 +371,14 @@ impl HQMRink {
         let center_z = length / 2.0;
         let blue_zone_blueline_z = blue_line_distance_mid;
 
-        let red_line_normal = Vector3::z_axis();
-        let blue_line_normal = -Vector3::z_axis();
+        let red_line_normal = -Vector3::z_axis();
+        let blue_line_normal = Vector3::z_axis();
 
-        let red_net = HQMRinkNet::new(
+        let blue_net = HQMRinkNet::new(
             Point3::new(center_x, 0.0, goal_line_distance),
             Matrix3::identity(),
         );
-        let blue_net = HQMRinkNet::new(
+        let red_net = HQMRinkNet::new(
             Point3::new(center_x, 0.0, length - goal_line_distance),
             Matrix3::from_columns(&[-Vector3::x(), Vector3::y(), -Vector3::z()]),
         );

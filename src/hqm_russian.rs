@@ -354,11 +354,11 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                         };
 
                         let p = &line.point;
-                        let normal = &line.normal;
+                        let normal = -line.normal;
                         for collision_ball in skater.collision_balls.iter_mut() {
                             let pos = &collision_ball.pos;
                             let radius = collision_ball.radius;
-                            let overlap = (p - pos).dot(normal) + radius;
+                            let overlap = (p - pos).dot(&normal) + radius;
                             if overlap > 0.0 {
                                 let mut new = normal.scale(overlap * 0.03125)
                                     - collision_ball.velocity.scale(0.25);
@@ -411,9 +411,10 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
             } else {
                 for event in events {
                     match event {
-                        HQMSimulationEvent::PuckEnteredNet { team, .. } => {
+                        HQMSimulationEvent::PuckEnteredNet { team: net_team, .. } => {
+                            let team = net_team.get_other_team();
                             // Goal!
-                            match *team {
+                            match team {
                                 HQMTeam::Red => {
                                     server.values.red_score += 1;
                                 }
@@ -427,7 +428,7 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                                 goal_scored: true,
                             };
                             server.values.goal_message_timer = 300;
-                            server.messages.add_goal_message(*team, None, None);
+                            server.messages.add_goal_message(team, None, None);
                             self.check_ending(&mut server.values);
                         }
                         HQMSimulationEvent::PuckTouch { player, .. } => {

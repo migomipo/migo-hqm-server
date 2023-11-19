@@ -527,9 +527,8 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
     fn after_tick(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
         for event in events {
             match event {
-                HQMSimulationEvent::PuckEnteredNet {
-                    team: scoring_team, ..
-                } => {
+                HQMSimulationEvent::PuckEnteredNet { team: net_team, .. } => {
+                    let scoring_team = net_team.get_other_team();
                     if let HQMShootoutStatus::Game {
                         state,
                         team: attacking_team,
@@ -539,7 +538,7 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                         if let HQMShootoutAttemptState::Over { .. } = *state {
                             // Ignore
                         } else {
-                            let is_goal = *scoring_team == *attacking_team;
+                            let is_goal = scoring_team == *attacking_team;
                             self.end_attempt(server, is_goal);
                         }
                     }
@@ -578,14 +577,15 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
                         }
                     }
                 }
-                HQMSimulationEvent::PuckTouchedNet { team, .. } => {
+                HQMSimulationEvent::PuckTouchedNet { team: net_team, .. } => {
                     if let HQMShootoutStatus::Game {
                         state,
                         team: attacking_team,
                         ..
                     } = &mut self.status
                     {
-                        if *team == *attacking_team {
+                        let team = net_team.get_other_team();
+                        if team == *attacking_team {
                             if let HQMShootoutAttemptState::Attack { progress } = *state {
                                 *state = HQMShootoutAttemptState::NoMoreAttack {
                                     final_progress: progress,

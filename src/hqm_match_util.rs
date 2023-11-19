@@ -434,21 +434,22 @@ impl HQMMatch {
         &mut self,
         server: &mut HQMServer,
         events: &mut Vec<HQMMatchEvent>,
-        team: HQMTeam,
+        net_team: HQMTeam,
         puck: HQMObjectIndex,
     ) {
+        let team = net_team.get_other_team();
         match self.offside_status {
             HQMOffsideStatus::Warning(offside_team, side, position, _) if offside_team == team => {
                 self.call_offside(server, team, side, position, false);
             }
             HQMOffsideStatus::Offside(_) => {}
             _ => {
-                events.push(self.call_goal(server, team, puck));
+                events.push(self.call_goal(server, team.get_other_team(), puck));
             }
         }
     }
 
-    fn handle_puck_passed_goal_line(&mut self, server: &mut HQMServer, team: HQMTeam) {
+    fn handle_puck_passed_goal_line(&mut self, server: &mut HQMServer, line_team: HQMTeam) {
         if let Some(HQMPass {
             team: icing_team,
             side,
@@ -456,6 +457,7 @@ impl HQMMatch {
             ..
         }) = self.pass
         {
+            let team = line_team.get_other_team();
             if team == icing_team && transition <= HQMPassPosition::ReachedCenter {
                 match self.config.icing {
                     HQMIcingConfiguration::Touch => {
@@ -1059,9 +1061,7 @@ pub fn is_past_line(
             if let Some(skater) = server.world.objects.get_skater(object_index) {
                 let feet_pos =
                     &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
-                let dot = (&feet_pos - &line.point).dot(&line.normal);
-                let leading_edge = -(line.width / 2.0);
-                if dot < leading_edge {
+                if line.point_past_middle_of_line(&feet_pos) {
                     // Player is past line
                     return true;
                 }
