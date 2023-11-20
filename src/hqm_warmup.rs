@@ -88,7 +88,6 @@ impl HQMServerBehaviour for HQMPermanentWarmup {
             values: Default::default(),
             puck_slots: warmup_pucks,
             physics_configuration: self.physics_config.clone(),
-            blue_line: -10.0,
         }
     }
 

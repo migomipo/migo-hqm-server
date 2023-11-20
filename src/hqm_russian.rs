@@ -1,4 +1,4 @@
-use nalgebra::{Point3, Rotation3};
+use nalgebra::{Point3, Rotation3, Vector3};
 use std::collections::HashMap;
 use tracing::info;
 
@@ -26,23 +26,16 @@ enum HQMRussianStatus {
 pub(crate) struct HQMRussianBehaviour {
     attempts: u32,
     physics_config: HQMPhysicsConfiguration,
-    blue_line_location: f32,
     status: HQMRussianStatus,
     team_switch_timer: HashMap<HQMServerPlayerIndex, u32>,
     team_max: usize,
 }
 
 impl HQMRussianBehaviour {
-    pub fn new(
-        attempts: u32,
-        team_max: usize,
-        physics_config: HQMPhysicsConfiguration,
-        blue_line_location: f32,
-    ) -> Self {
+    pub fn new(attempts: u32, team_max: usize, physics_config: HQMPhysicsConfiguration) -> Self {
         HQMRussianBehaviour {
             attempts,
             physics_config,
-            blue_line_location,
             status: HQMRussianStatus::WaitingForGame,
             team_switch_timer: Default::default(),
             team_max,
@@ -345,16 +338,15 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
                         blue_player_count += 1;
                     }
                     if let Some(skater) = server.world.objects.get_skater_mut(object_index) {
-                        let line = if team == HQMTeam::Red {
+                        let (line, normal) = if team == HQMTeam::Red {
                             red_player_count += 1;
-                            &server.world.rink.red_lines_and_net.defensive_line
+                            (&server.world.rink.red_zone_blue_line, Vector3::z_axis())
                         } else {
                             blue_player_count += 1;
-                            &server.world.rink.blue_lines_and_net.defensive_line
+                            (&server.world.rink.blue_zone_blue_line, -Vector3::z_axis())
                         };
 
-                        let p = &line.point;
-                        let normal = -line.normal;
+                        let p = Point3::new(0.0, 0.0, line.z);
                         for collision_ball in skater.collision_balls.iter_mut() {
                             let pos = &collision_ball.pos;
                             let radius = collision_ball.radius;
@@ -494,7 +486,6 @@ impl HQMServerBehaviour for HQMRussianBehaviour {
             },
             puck_slots: 1,
             physics_configuration: self.physics_config.clone(),
-            blue_line: self.blue_line_location,
         }
     }
 

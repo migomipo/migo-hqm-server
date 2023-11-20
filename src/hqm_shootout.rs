@@ -759,7 +759,6 @@ impl HQMServerBehaviour for HQMShootoutBehaviour {
             },
             puck_slots: 1,
             physics_configuration: self.physics_config.clone(),
-            blue_line: -10.0,
         }
     }
 

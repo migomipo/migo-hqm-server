@@ -1224,7 +1224,7 @@ impl HQMServer {
 
     pub fn new_game(&mut self, v: HQMInitialGameValues) {
         self.values = v.values;
-        self.world = HQMGameWorld::new(v.puck_slots, v.physics_configuration, v.blue_line);
+        self.world = HQMGameWorld::new(v.puck_slots, v.physics_configuration);
         self.game_id += 1;
         self.messages.clear();
 
@@ -1410,7 +1410,6 @@ pub async fn run_server<B: HQMServerBehaviour>(
         world: HQMGameWorld::new(
             initial_values.puck_slots,
             initial_values.physics_configuration,
-            initial_values.blue_line,
         ),
         is_muted: false,
         config,
@@ -1807,7 +1806,6 @@ pub struct HQMInitialGameValues {
     pub values: HQMGameValues,
     pub puck_slots: usize,
     pub physics_configuration: HQMPhysicsConfiguration,
-    pub blue_line: f32,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

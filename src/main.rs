@@ -138,10 +138,6 @@ async fn main() -> std::io::Result<()> {
 
         let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, is_true);
 
-        let blue_line_location = get_optional(game_section, "blue_line_location", 22.86f32, |x| {
-            x.parse::<f32>().unwrap()
-        });
-
         let config = HQMServerConfiguration {
             welcome: welcome_str,
             password: server_password,
@@ -313,7 +309,6 @@ async fn main() -> std::io::Result<()> {
                     use_mph,
                     goal_replay,
                     physics_config,
-                    blue_line_location,
                     periods,
                 };
 
@@ -352,12 +347,7 @@ async fn main() -> std::io::Result<()> {
                     server_port,
                     public_address,
                     config,
-                    HQMRussianBehaviour::new(
-                        attempts,
-                        server_team_max,
-                        physics_config,
-                        blue_line_location,
-                    ),
+                    HQMRussianBehaviour::new(attempts, server_team_max, physics_config),
                 )
                 .await
             }

@@ -3,6 +3,7 @@ use nalgebra::{point, Matrix3, Point3, Rotation3, Unit, Vector2, Vector3};
 
 use std::fmt::Formatter;
 
+use crate::hqm_game::HQMRinkSideOfLine::{BlueSide, On, RedSide};
 use crate::hqm_parse::{HQMPuckPacket, HQMSkaterPacket};
 use arr_macro::arr;
 use std::f32::consts::PI;
@@ -15,17 +16,13 @@ pub struct HQMGameWorld {
 }
 
 impl HQMGameWorld {
-    pub(crate) fn new(
-        puck_slots: usize,
-        physics_config: HQMPhysicsConfiguration,
-        blue_line_location: f32,
-    ) -> Self {
+    pub(crate) fn new(puck_slots: usize, physics_config: HQMPhysicsConfiguration) -> Self {
         HQMGameWorld {
             objects: HQMGameWorldObjectList {
                 objects: vec![HQMGameObject::None; 32],
             },
             puck_slots,
-            rink: HQMRink::new(30.0, 61.0, 8.5, blue_line_location),
+            rink: HQMRink::new(30.0, 61.0, 8.5),
             physics_config,
         }
     }
@@ -191,25 +188,26 @@ impl Default for HQMGameValues {
 
 #[derive(Debug, Clone)]
 pub struct HQMRinkLine {
-    pub point: Point3<f32>,
+    pub z: f32,
     pub width: f32,
-    pub normal: Unit<Vector3<f32>>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HQMRinkSideOfLine {
+    BlueSide,
+    On,
+    RedSide,
+}
 impl HQMRinkLine {
-    pub(crate) fn sphere_reached_line(&self, pos: &Point3<f32>, radius: f32) -> bool {
-        let dot = (pos - &self.point).dot(&self.normal);
-        dot > -(self.width / 2.0) - radius
-    }
-
-    pub(crate) fn sphere_past_leading_edge(&self, pos: &Point3<f32>, radius: f32) -> bool {
-        let dot = (pos - &self.point).dot(&self.normal);
-        dot > (self.width / 2.0) + radius
-    }
-
-    pub fn point_past_middle_of_line(&self, pos: &Point3<f32>) -> bool {
-        let dot = (pos - &self.point).dot(&self.normal);
-        dot > 0.0
+    pub fn side_of_line(&self, pos: &Point3<f32>, radius: f32) -> HQMRinkSideOfLine {
+        let dot = pos.z - self.z;
+        if dot > (self.width / 2.0) + radius {
+            RedSide
+        } else if dot < (-self.width) - radius {
+            BlueSide
+        } else {
+            On
+        }
     }
 }
 
@@ -304,26 +302,20 @@ impl HQMRinkNet {
 }
 
 #[derive(Debug, Clone)]
-pub struct LinesAndNet {
-    pub net: HQMRinkNet,
-    pub mid_line: HQMRinkLine,
-    pub offensive_line: HQMRinkLine,
-    pub defensive_line: HQMRinkLine,
-}
-
-#[derive(Debug, Clone)]
 pub struct HQMRink {
     pub planes: Vec<(Point3<f32>, Unit<Vector3<f32>>)>,
     pub corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
-    pub red_lines_and_net: LinesAndNet,
-    pub blue_lines_and_net: LinesAndNet,
+    pub red_net: HQMRinkNet,
+    pub blue_net: HQMRinkNet,
+    pub center_line: HQMRinkLine,
+    pub red_zone_blue_line: HQMRinkLine,
+    pub blue_zone_blue_line: HQMRinkLine,
     pub width: f32,
     pub length: f32,
-    pub blue_line_distance: f32,
 }
 
 impl HQMRink {
-    fn new(width: f32, length: f32, corner_radius: f32, blue_line_distance: f32) -> Self {
+    fn new(width: f32, length: f32, corner_radius: f32) -> Self {
         let zero = Point3::new(0.0, 0.0, 0.0);
         let planes = vec![
             (zero.clone(), Vector3::y_axis()),
@@ -361,7 +353,7 @@ impl HQMRink {
         let line_width = 0.3; // IIHF rule 17iii, 17iv
         let goal_line_distance = 4.0; // IIHF rule 17iv
 
-        let blue_line_distance_neutral_zone_edge = blue_line_distance;
+        let blue_line_distance_neutral_zone_edge = 22.86;
         let blue_line_distance_mid = blue_line_distance_neutral_zone_edge - line_width / 2.0; // IIHF rule 17v and 17vi
                                                                                               // IIHF specifies distance between end boards and edge closest to the neutral zone, but my code specifies middle of line
 
@@ -371,9 +363,6 @@ impl HQMRink {
         let center_z = length / 2.0;
         let blue_zone_blueline_z = blue_line_distance_mid;
 
-        let red_line_normal = -Vector3::z_axis();
-        let blue_line_normal = Vector3::z_axis();
-
         let blue_net = HQMRinkNet::new(
             Point3::new(center_x, 0.0, goal_line_distance),
             Matrix3::identity(),
@@ -382,55 +371,30 @@ impl HQMRink {
             Point3::new(center_x, 0.0, length - goal_line_distance),
             Matrix3::from_columns(&[-Vector3::x(), Vector3::y(), -Vector3::z()]),
         );
-        let red_offensive_line = HQMRinkLine {
-            point: Point3::new(0.0, 0.0, blue_zone_blueline_z),
+
+        let red_zone_blue_line = HQMRinkLine {
+            z: red_zone_blueline_z,
             width: line_width,
-            normal: red_line_normal.clone(),
         };
-        let blue_offensive_line = HQMRinkLine {
-            point: Point3::new(0.0, 0.0, red_zone_blueline_z),
+        let blue_zone_blue_line = HQMRinkLine {
+            z: blue_zone_blueline_z,
             width: line_width,
-            normal: blue_line_normal.clone(),
         };
-        let red_defensive_line = HQMRinkLine {
-            point: Point3::new(0.0, 0.0, red_zone_blueline_z),
+        let center_line = HQMRinkLine {
+            z: center_z,
             width: line_width,
-            normal: red_line_normal.clone(),
-        };
-        let blue_defensive_line = HQMRinkLine {
-            point: Point3::new(0.0, 0.0, blue_zone_blueline_z),
-            width: line_width,
-            normal: blue_line_normal.clone(),
-        };
-        let red_midline = HQMRinkLine {
-            point: Point3::new(0.0, 0.0, center_z),
-            width: line_width,
-            normal: red_line_normal.clone(),
-        };
-        let blue_midline = HQMRinkLine {
-            point: Point3::new(0.0, 0.0, center_z),
-            width: line_width,
-            normal: blue_line_normal.clone(),
         };
 
         HQMRink {
             planes,
             corners,
-            red_lines_and_net: LinesAndNet {
-                net: red_net,
-                offensive_line: red_offensive_line,
-                defensive_line: red_defensive_line,
-                mid_line: red_midline,
-            },
-            blue_lines_and_net: LinesAndNet {
-                net: blue_net,
-                offensive_line: blue_offensive_line,
-                defensive_line: blue_defensive_line,
-                mid_line: blue_midline,
-            },
+            red_net,
+            blue_net,
+            center_line,
+            red_zone_blue_line,
+            blue_zone_blue_line,
             width,
             length,
-            blue_line_distance,
         }
     }
 }

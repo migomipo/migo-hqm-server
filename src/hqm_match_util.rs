@@ -7,6 +7,7 @@ use crate::hqm_server::{
     HQMTeam,
 };
 
+use crate::hqm_game::HQMRinkSideOfLine::{BlueSide, RedSide};
 use crate::hqm_simulate::HQMSimulationEvent;
 use nalgebra::{Point3, Rotation3, Vector3};
 use std::collections::hash_map::Entry;
@@ -52,7 +53,6 @@ pub struct HQMMatchConfiguration {
     pub twoline_pass: HQMTwoLinePassConfiguration,
     pub warmup_pucks: usize,
     pub physics_config: HQMPhysicsConfiguration,
-    pub blue_line_location: f32,
     pub use_mph: bool,
     pub goal_replay: bool,
 }
@@ -149,17 +149,9 @@ impl HQMMatch {
 
         let rink = &server.world.rink;
         self.icing_status = HQMIcingStatus::No;
-        self.offside_status = if rink
-            .red_lines_and_net
-            .offensive_line
-            .point_past_middle_of_line(&puck_pos)
-        {
+        self.offside_status = if rink.blue_zone_blue_line.side_of_line(&puck_pos, 0.0) == BlueSide {
             HQMOffsideStatus::InOffensiveZone(HQMTeam::Red)
-        } else if rink
-            .blue_lines_and_net
-            .offensive_line
-            .point_past_middle_of_line(&puck_pos)
-        {
+        } else if rink.red_zone_blue_line.side_of_line(&puck_pos, 0.0) == RedSide {
             HQMOffsideStatus::InOffensiveZone(HQMTeam::Blue)
         } else {
             HQMOffsideStatus::Neutral
@@ -444,7 +436,7 @@ impl HQMMatch {
             }
             HQMOffsideStatus::Offside(_) => {}
             _ => {
-                events.push(self.call_goal(server, team.get_other_team(), puck));
+                events.push(self.call_goal(server, team, puck));
             }
         }
     }
@@ -572,14 +564,13 @@ impl HQMMatch {
         pass_player: HQMServerPlayerIndex,
         is_offensive_line: bool,
     ) {
-        let team_line = match team {
-            HQMTeam::Red => &server.world.rink.red_lines_and_net,
-            HQMTeam::Blue => &server.world.rink.blue_lines_and_net,
-        };
         let line = if is_offensive_line {
-            &team_line.offensive_line
+            match team {
+                HQMTeam::Red => &server.world.rink.blue_zone_blue_line,
+                HQMTeam::Blue => &server.world.rink.red_zone_blue_line,
+            }
         } else {
-            &team_line.mid_line
+            &server.world.rink.center_line
         };
         let mut players_past_line = vec![];
         for (player_index, player) in server.players.iter() {
@@ -869,7 +860,6 @@ impl HQMMatch {
             values,
             puck_slots: self.config.warmup_pucks,
             physics_configuration: self.config.physics_config.clone(),
-            blue_line: self.config.blue_line_location,
         }
     }
     pub fn game_started(&mut self, server: &mut HQMServer) {
@@ -1061,7 +1051,9 @@ pub fn is_past_line(
             if let Some(skater) = server.world.objects.get_skater(object_index) {
                 let feet_pos =
                     &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
-                if line.point_past_middle_of_line(&feet_pos) {
+                if (team == HQMTeam::Red && line.side_of_line(&feet_pos, 0.0) == BlueSide)
+                    || (team == HQMTeam::Blue && line.side_of_line(&feet_pos, 0.0) == RedSide)
+                {
                     // Player is past line
                     return true;
                 }
@@ -1077,8 +1069,8 @@ pub fn has_players_in_offensive_zone(
     ignore_player: Option<HQMServerPlayerIndex>,
 ) -> bool {
     let line = match team {
-        HQMTeam::Red => &server.world.rink.red_lines_and_net.offensive_line,
-        HQMTeam::Blue => &server.world.rink.blue_lines_and_net.offensive_line,
+        HQMTeam::Red => &server.world.rink.blue_zone_blue_line,
+        HQMTeam::Blue => &server.world.rink.red_zone_blue_line,
     };
 
     for (player_index, player) in server.players.iter() {
@@ -1170,7 +1162,7 @@ fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot) -> HQMFaceoffSpot 
 
     let goal_line_distance = 4.0; // IIHF rule 17iv
 
-    let blue_line_distance_neutral_zone_edge = rink.blue_line_distance;
+    let blue_line_distance_neutral_zone_edge = rink.blue_zone_blue_line.z;
     // IIHF specifies distance between end boards and edge closest to the neutral zone, but my code specifies middle of line
     let distance_neutral_faceoff_spot = blue_line_distance_neutral_zone_edge + 1.5; // IIHF rule 18iv and 18vii
     let distance_zone_faceoff_spot = goal_line_distance + 6.0; // IIHF rule 18vi and 18vii
