@@ -7,13 +7,13 @@ use migo_hqm_server::hqm_match_util::{
 use migo_hqm_server::hqm_server::HQMTeam;
 use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex};
 use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
-use std::collections::HashMap;
-use std::rc::Rc;
+use std::collections::{HashMap, HashSet};
 
 pub struct HQMMatchBehaviour {
     pub m: HQMMatch,
     pub spawn_point: HQMSpawnPoint,
     pub(crate) team_switch_timer: HashMap<HQMServerPlayerIndex, u32>,
+    pub(crate) show_extra_messages: HashSet<HQMServerPlayerIndex>,
     pub team_max: usize,
 }
 
@@ -23,6 +23,7 @@ impl HQMMatchBehaviour {
             m: HQMMatch::new(config),
             spawn_point,
             team_switch_timer: Default::default(),
+            show_extra_messages: Default::default(),
             team_max,
         }
     }
@@ -60,6 +61,12 @@ impl HQMMatchBehaviour {
         for (player_index, player_name) in spectating_players {
             info!("{} ({}) is spectating", player_name, player_index);
             server.move_to_spectator(player_index);
+            let s = format!("{} is spectating", player_name);
+            for i in self.show_extra_messages.iter() {
+                server
+                    .messages
+                    .add_directed_server_chat_message(s.clone(), *i);
+            }
         }
         if !joining_red.is_empty() || !joining_blue.is_empty() {
             let (red_player_count, blue_player_count) = {
@@ -80,28 +87,42 @@ impl HQMMatchBehaviour {
             let mut new_blue_player_count = blue_player_count;
 
             for (player_index, player_name) in joining_red {
-                add_player(
+                if add_player(
                     &mut self.m,
                     player_index,
-                    player_name,
+                    &player_name,
                     server,
                     HQMTeam::Red,
                     self.spawn_point,
                     &mut new_red_player_count,
                     self.team_max,
-                )
+                ) {
+                    let s = format!("{} is playing for Red", player_name);
+                    for i in self.show_extra_messages.iter() {
+                        server
+                            .messages
+                            .add_directed_server_chat_message(s.clone(), *i);
+                    }
+                }
             }
             for (player_index, player_name) in joining_blue {
-                add_player(
+                if add_player(
                     &mut self.m,
                     player_index,
-                    player_name,
+                    &player_name,
                     server,
                     HQMTeam::Blue,
                     self.spawn_point,
                     &mut new_blue_player_count,
                     self.team_max,
-                )
+                ) {
+                    let s = format!("{} playing for Blue", player_name);
+                    for i in self.show_extra_messages.iter() {
+                        server
+                            .messages
+                            .add_directed_server_chat_message(s.clone(), *i);
+                    }
+                }
             }
 
             if server.values.period == 0
@@ -348,6 +369,23 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
             "rules" => {
                 self.m.msg_rules(server, player_index);
             }
+            "chatextend" => {
+                if arg.eq_ignore_ascii_case("true") || arg.eq_ignore_ascii_case("on") {
+                    if self.show_extra_messages.insert(player_index) {
+                        server.messages.add_directed_server_chat_message(
+                            "Team change messages activated",
+                            player_index,
+                        );
+                    }
+                } else if arg.eq_ignore_ascii_case("false") || arg.eq_ignore_ascii_case("off") {
+                    if self.show_extra_messages.remove(&player_index) {
+                        server.messages.add_directed_server_chat_message(
+                            "Team change messages de-activated",
+                            player_index,
+                        );
+                    }
+                }
+            }
             _ => {}
         };
     }
@@ -363,6 +401,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
     fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
         self.m.cleanup_player(player_index);
         self.team_switch_timer.remove(&player_index);
+        self.show_extra_messages.remove(&player_index);
     }
 
     fn get_number_of_players(&self) -> u32 {
@@ -377,15 +416,15 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
 fn add_player(
     m: &mut HQMMatch,
     player_index: HQMServerPlayerIndex,
-    player_name: Rc<String>,
+    player_name: &str,
     server: &mut HQMServer,
     team: HQMTeam,
     spawn_point: HQMSpawnPoint,
     player_count: &mut usize,
     team_max: usize,
-) {
+) -> bool {
     if *player_count >= team_max {
-        return;
+        return false;
     }
 
     let (pos, rot) = get_spawnpoint(&server.world.rink, team, spawn_point);
@@ -398,5 +437,8 @@ fn add_player(
         *player_count += 1;
 
         m.clear_started_goalie(player_index);
+        true
+    } else {
+        false
     }
 }
