@@ -116,7 +116,7 @@ impl HQMMatchBehaviour {
                     &mut new_blue_player_count,
                     self.team_max,
                 ) {
-                    let s = format!("{} playing for Blue", player_name);
+                    let s = format!("{} is playing for Blue", player_name);
                     for i in self.show_extra_messages.iter() {
                         server
                             .messages
