@@ -11,7 +11,7 @@ tokio = { version = "1", features = ["net", "time", "macros", "rt-multi-thread",
 rust-ini = "0.18" # INI For configuration
 bytes = "1.4"
 reqwest = { version = "0.11", default_features=false, features = ["multipart", "rustls-tls"] }
-tracing = "0.1.37"
+tracing = "0.1"
 tracing-subscriber = {version="0.3", features = ["parking_lot"]}
 tracing-appender = "0.2"
 chrono = "0.4"
