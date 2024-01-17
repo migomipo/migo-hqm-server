@@ -21,6 +21,9 @@ use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use async_stream::stream;
+use futures::{StreamExt};
+
 use crate::hqm_game::{
     HQMGameValues, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPlayerInput,
     HQMRulesState, HQMSkater, HQMSkaterHand,
@@ -32,11 +35,6 @@ use crate::hqm_parse::{
 };
 
 pub(crate) const GAME_HEADER: &[u8] = b"Hock";
-
-struct HQMServerReceivedData {
-    addr: SocketAddr,
-    data: HQMClientToServerMessage,
-}
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum HQMClientVersion {
@@ -1485,11 +1483,21 @@ pub async fn run_server<B: HQMServerBehaviour>(
             }
         });
     }
-    let (msg_sender, mut msg_receiver) = tokio::sync::mpsc::channel(256);
-    {
-        let socket = socket.clone();
+    enum Msg {
+        Time,
+        Message(SocketAddr, HQMClientToServerMessage),
+    }
 
-        tokio::spawn(async move {
+    let timeout_stream = stream! {
+        loop {
+            tick_timer.tick().await;
+            yield Msg::Time;
+        }
+    };
+    tokio::pin!(timeout_stream);
+    let packet_stream = {
+        let socket = socket.clone();
+        stream! {
             let mut buf = BytesMut::with_capacity(512);
             let codec = HQMMessageCodec;
             loop {
@@ -1498,30 +1506,29 @@ pub async fn run_server<B: HQMServerBehaviour>(
                 match socket.recv_buf_from(&mut buf).await {
                     Ok((_, addr)) => {
                         if let Ok(data) = codec.parse_message(&buf) {
-                            let _ = msg_sender.send(HQMServerReceivedData { addr, data }).await;
+                            yield Msg::Message(addr, data)
                         }
                     }
                     Err(_) => {}
                 }
             }
-        });
+        }
     };
+    tokio::pin!(packet_stream);
+
+    let mut stream = futures::stream_select!(timeout_stream, packet_stream);
     let mut write_buf = BytesMut::with_capacity(4096);
-    loop {
-        tokio::select! {
-            _ = tick_timer.tick() => {
-                server.tick(& socket, & mut behaviour, & mut write_buf).await;
-            }
-            x = msg_receiver.recv() => {
-                if let Some (HQMServerReceivedData {
-                    addr,
-                    data
-                }) = x {
-                    server.handle_message(addr, & socket, data, & mut behaviour, & mut write_buf).await;
-                }
+    while let Some(msg) = stream.next().await {
+        match msg {
+            Msg::Time => server.tick(&socket, &mut behaviour, &mut write_buf).await,
+            Msg::Message(addr, data) => {
+                server
+                    .handle_message(addr, &socket, data, &mut behaviour, &mut write_buf)
+                    .await
             }
         }
     }
+    Ok(())
 }
 
 async fn send_updates(
