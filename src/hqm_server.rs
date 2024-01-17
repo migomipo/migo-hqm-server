@@ -1485,40 +1485,21 @@ pub async fn run_server<B: HQMServerBehaviour>(
             }
         });
     }
-    let (msg_sender, mut msg_receiver) = tokio::sync::mpsc::channel(256);
-    {
-        let socket = socket.clone();
-
-        tokio::spawn(async move {
-            let mut buf = BytesMut::with_capacity(512);
-            let codec = HQMMessageCodec;
-            loop {
-                buf.clear();
-
-                match socket.recv_buf_from(&mut buf).await {
-                    Ok((_, addr)) => {
-                        if let Ok(data) = codec.parse_message(&buf) {
-                            let _ = msg_sender.send(HQMServerReceivedData { addr, data }).await;
-                        }
-                    }
-                    Err(_) => {}
-                }
-            }
-        });
-    };
+    let mut buf = BytesMut::with_capacity(512);
     let mut write_buf = BytesMut::with_capacity(4096);
+    let codec = HQMMessageCodec;
     loop {
         tokio::select! {
             _ = tick_timer.tick() => {
                 server.tick(& socket, & mut behaviour, & mut write_buf).await;
             }
-            x = msg_receiver.recv() => {
-                if let Some (HQMServerReceivedData {
-                    addr,
-                    data
-                }) = x {
-                    server.handle_message(addr, & socket, data, & mut behaviour, & mut write_buf).await;
+            x = socket.recv_buf_from(&mut buf) => {
+                if let Ok((_, addr)) = x {
+                    if let Ok(data) = codec.parse_message(&buf) {
+                        server.handle_message(addr, & socket, data, & mut behaviour, & mut write_buf).await;
+                    }
                 }
+                buf.clear();
             }
         }
     }
