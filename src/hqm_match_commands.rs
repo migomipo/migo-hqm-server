@@ -588,4 +588,55 @@ impl HQMMatch {
                 .add_directed_server_chat_message(msg, receiver_index);
         }
     }
+
+    pub fn set_spawn_offset(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex, rule: f32) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                self.config.spawn_point_offset = rule;
+
+                let msg = format!("Spawn point offset changed by {} to {}", player.player_name, rule);
+                info!(
+                    "{} ({}) changed spawn point offset parameter to {}",
+                    player.player_name, player_index, rule
+                );
+                server.messages.add_server_chat_message(msg);
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    pub fn set_spawn_player_altitude(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex, rule: f32) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                self.config.spawn_player_altitude = rule;
+
+                let msg = format!("Spawn player altitude changed by {} to {}", player.player_name, rule);
+                info!(
+                    "{} ({}) changed spawn player altitude parameter to {}",
+                    player.player_name, player_index, rule
+                );
+                server.messages.add_server_chat_message(msg);
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    pub fn set_spawn_puck_altitude(&mut self, server: &mut HQMServer, player_index: HQMServerPlayerIndex, rule: f32) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                self.config.spawn_puck_altitude = rule;
+
+                let msg = format!("Spawn puck altitude changed by {} to {}", player.player_name, rule);
+                info!(
+                    "{} ({}) changed spawn puck altitude parameter to {}",
+                    player.player_name, player_index, rule
+                );
+                server.messages.add_server_chat_message(msg);
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
 }
