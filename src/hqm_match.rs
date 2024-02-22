@@ -332,6 +332,21 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                                 self.m.set_goal_replay(server, player_index, arg);
                             }
                         }
+                        "spawnoffset" => {
+                            if let Ok(rule) = args[1].parse::<f32>() {
+                                self.m.set_spawn_offset(server, player_index, rule);
+                            }
+                        }
+                        "spawnplayeraltitude" => {
+                            if let Ok(rule) = args[1].parse::<f32>() {
+                                self.m.set_spawn_player_altitude(server, player_index, rule);
+                            }
+                        }
+                        "spawnpuckaltitude" => {
+                            if let Ok(rule) = args[1].parse::<f32>() {
+                                self.m.set_spawn_puck_altitude(server, player_index, rule);
+                            }
+                        }
                         _ => {}
                     }
                 }

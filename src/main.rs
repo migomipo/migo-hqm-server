@@ -290,6 +290,13 @@ async fn main() -> std::io::Result<()> {
                         _ => HQMSpawnPoint::Center,
                     });
 
+                let spawn_point_offset =
+                    get_optional(game_section, "spawn_offset", 2.75f32, |x| x.parse::<f32>().unwrap());
+
+                let spawn_player_altitude = get_optional(game_section, "spawn_player_altitude", 1.5f32, |x| x.parse::<f32>().unwrap());
+
+                let spawn_puck_altitude = get_optional(game_section, "spawn_puck_altitude", 1.5f32, |x| x.parse::<f32>().unwrap());
+
                 let use_mph = get_optional(game_section, "use_mph", false, is_true);
 
                 let goal_replay = get_optional(game_section, "goal_replay", false, is_true);
@@ -310,6 +317,9 @@ async fn main() -> std::io::Result<()> {
                     goal_replay,
                     physics_config,
                     periods,
+                    spawn_point_offset,
+                    spawn_player_altitude,
+                    spawn_puck_altitude
                 };
 
                 hqm_server::run_server(
