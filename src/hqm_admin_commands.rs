@@ -353,7 +353,7 @@ impl HQMServer {
 
                 if kick_player_index != admin_player_index {
                     if let Some(kick_player) = self.players.get(kick_player_index) {
-                        if let HQMServerPlayerData::NetworkPlayer { data } = &player.data {
+                        if let HQMServerPlayerData::NetworkPlayer { data } = &kick_player.data {
                             let kick_player_name = kick_player.player_name.clone();
                             let kick_ip = data.addr.ip().clone();
                             behaviour.before_player_exit(self, kick_player_index);
