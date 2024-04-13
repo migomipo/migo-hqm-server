@@ -22,7 +22,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use async_stream::stream;
-use futures::{StreamExt};
+use futures::StreamExt;
 
 use crate::hqm_game::{
     HQMGameValues, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPlayerInput,
@@ -947,11 +947,22 @@ impl HQMServer {
         team: HQMTeam,
         pos: Point3<f32>,
         rot: Rotation3<f32>,
+        keep_stick_position: bool,
     ) -> Option<HQMObjectIndex> {
         if let Some(player) = self.players.get_mut(player_index) {
             if let Some((object_index, _)) = player.object {
                 if let Some(skater) = self.world.objects.get_skater_mut(object_index) {
-                    *skater = HQMSkater::new(pos, rot, player.hand, player.mass);
+                    let mut new_skater = HQMSkater::new(pos, rot, player.hand, player.mass);
+                    if keep_stick_position {
+                        let stick_pos_diff = &skater.stick_pos - &skater.body.pos;
+                        let rot_change = skater.body.rot.rotation_to(&rot);
+                        let stick_rot_diff = skater.body.rot.rotation_to(&skater.stick_rot);
+
+                        new_skater.stick_pos = pos + (rot_change * stick_pos_diff);
+                        new_skater.stick_rot = &stick_rot_diff * &rot;
+                        new_skater.stick_placement = skater.stick_placement;
+                    }
+                    *skater = new_skater;
                     let object = Some((object_index, team));
                     player.object = object;
                     let update = player.get_update_message(player_index);

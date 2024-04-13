@@ -290,12 +290,22 @@ async fn main() -> std::io::Result<()> {
                         _ => HQMSpawnPoint::Center,
                     });
 
-                let spawn_point_offset =
-                    get_optional(game_section, "spawn_offset", 2.75f32, |x| x.parse::<f32>().unwrap());
+                let spawn_point_offset = get_optional(game_section, "spawn_offset", 2.75f32, |x| {
+                    x.parse::<f32>().unwrap()
+                });
 
-                let spawn_player_altitude = get_optional(game_section, "spawn_player_altitude", 1.5f32, |x| x.parse::<f32>().unwrap());
+                let spawn_player_altitude =
+                    get_optional(game_section, "spawn_player_altitude", 1.5f32, |x| {
+                        x.parse::<f32>().unwrap()
+                    });
 
-                let spawn_puck_altitude = get_optional(game_section, "spawn_puck_altitude", 1.5f32, |x| x.parse::<f32>().unwrap());
+                let spawn_puck_altitude =
+                    get_optional(game_section, "spawn_puck_altitude", 1.5f32, |x| {
+                        x.parse::<f32>().unwrap()
+                    });
+
+                let spawn_keep_stick_position =
+                    get_optional(game_section, "spawn_player_keep_stick", false, is_true);
 
                 let use_mph = get_optional(game_section, "use_mph", false, is_true);
 
@@ -319,7 +329,8 @@ async fn main() -> std::io::Result<()> {
                     periods,
                     spawn_point_offset,
                     spawn_player_altitude,
-                    spawn_puck_altitude
+                    spawn_puck_altitude,
+                    spawn_keep_stick_position,
                 };
 
                 hqm_server::run_server(

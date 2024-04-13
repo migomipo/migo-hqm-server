@@ -50,7 +50,7 @@ impl HQMPermanentWarmup {
         ) {
             let (pos, rot) = get_spawnpoint(&server.world.rink, team, spawn_point);
 
-            server.spawn_skater(player_index, team, pos, rot);
+            server.spawn_skater(player_index, team, pos, rot, false);
         }
 
         for (player_index, team) in joining_team {

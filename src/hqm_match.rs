@@ -444,7 +444,10 @@ fn add_player(
 
     let (pos, rot) = get_spawnpoint(&server.world.rink, team, spawn_point);
 
-    if server.spawn_skater(player_index, team, pos, rot).is_some() {
+    if server
+        .spawn_skater(player_index, team, pos, rot, false)
+        .is_some()
+    {
         info!(
             "{} ({}) has joined team {:?}",
             player_name, player_index, team

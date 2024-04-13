@@ -115,7 +115,7 @@ impl HQMRussianBehaviour {
                 }
 
                 if server
-                    .spawn_skater(player_index, team, pos.clone(), rot.clone())
+                    .spawn_skater(player_index, team, pos.clone(), rot.clone(), false)
                     .is_some()
                 {
                     info!(
@@ -238,12 +238,12 @@ impl HQMRussianBehaviour {
         for (index, player_index) in red_players.into_iter().enumerate() {
             let z = (server.world.rink.length / 2.0) + (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
-            server.spawn_skater(player_index, HQMTeam::Red, pos, rot.clone());
+            server.spawn_skater(player_index, HQMTeam::Red, pos, rot.clone(), false);
         }
         for (index, player_index) in blue_players.into_iter().enumerate() {
             let z = (server.world.rink.length / 2.0) - (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
-            server.spawn_skater(player_index, HQMTeam::Blue, pos, rot.clone());
+            server.spawn_skater(player_index, HQMTeam::Blue, pos, rot.clone(), false);
         }
     }
 

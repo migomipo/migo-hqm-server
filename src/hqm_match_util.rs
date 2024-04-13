@@ -57,7 +57,8 @@ pub struct HQMMatchConfiguration {
     pub goal_replay: bool,
     pub spawn_point_offset: f32,
     pub spawn_player_altitude: f32,
-    pub spawn_puck_altitude: f32
+    pub spawn_puck_altitude: f32,
+    pub spawn_keep_stick_position: bool,
 }
 
 pub enum HQMMatchEvent {
@@ -130,9 +131,15 @@ impl HQMMatch {
         server.world.clear_pucks();
         self.puck_touches.clear();
 
-        let next_faceoff_spot = get_faceoff_spot(&server.world.rink, self.next_faceoff_spot, self.config.spawn_point_offset, self.config.spawn_player_altitude);
+        let next_faceoff_spot = get_faceoff_spot(
+            &server.world.rink,
+            self.next_faceoff_spot,
+            self.config.spawn_point_offset,
+            self.config.spawn_player_altitude,
+        );
 
-        let puck_pos = next_faceoff_spot.center_position + &(self.config.spawn_puck_altitude * Vector3::y());
+        let puck_pos =
+            next_faceoff_spot.center_position + &(self.config.spawn_puck_altitude * Vector3::y());
 
         server
             .world
@@ -144,7 +151,13 @@ impl HQMMatch {
                 HQMTeam::Red => next_faceoff_spot.red_player_positions[faceoff_position].clone(),
                 HQMTeam::Blue => next_faceoff_spot.blue_player_positions[faceoff_position].clone(),
             };
-            server.spawn_skater(player_index, team, player_position, player_rotation);
+            server.spawn_skater(
+                player_index,
+                team,
+                player_position,
+                player_rotation,
+                self.config.spawn_keep_stick_position,
+            );
             if faceoff_position == "G" {
                 self.started_as_goalie.push(player_index);
             }
@@ -1154,7 +1167,12 @@ fn setup_position(
     }
 }
 
-fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot, spawn_point_offset: f32, spawn_player_altitude: f32) -> HQMFaceoffSpot {
+fn get_faceoff_spot(
+    rink: &HQMRink,
+    spot: HQMRinkFaceoffSpot,
+    spawn_point_offset: f32,
+    spawn_player_altitude: f32,
+) -> HQMFaceoffSpot {
     let length = rink.length;
     let width = rink.width;
 
@@ -1202,7 +1220,7 @@ fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot, spawn_point_offset
             is_close_to_right: bool,
 
             spawn_point_offset: f32,
-            spawn_player_altitude: f32
+            spawn_player_altitude: f32,
         ) -> HashMap<&'static str, (Point3<f32>, Rotation3<f32>)> {
             let mut player_positions = HashMap::new();
 
@@ -1221,7 +1239,10 @@ fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot, spawn_point_offset
             };
 
             let offsets = vec![
-                ("C", Vector3::new(0.0, spawn_player_altitude, spawn_point_offset)),
+                (
+                    "C",
+                    Vector3::new(0.0, spawn_player_altitude, spawn_point_offset),
+                ),
                 ("LM", Vector3::new(-2.0, spawn_player_altitude, m_z)),
                 ("RM", Vector3::new(2.0, spawn_player_altitude, m_z)),
                 ("LW", Vector3::new(-5.0, spawn_player_altitude, winger_z)),
@@ -1286,7 +1307,11 @@ fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot, spawn_point_offset
                 ),
                 (
                     "RRW",
-                    Vector3::new(far_right_winger_x, spawn_player_altitude, far_right_winger_z),
+                    Vector3::new(
+                        far_right_winger_x,
+                        spawn_player_altitude,
+                        far_right_winger_z,
+                    ),
                 ),
             ];
             for (s, offset) in offsets {
@@ -1308,7 +1333,7 @@ fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot, spawn_point_offset
             red_left,
             red_right,
             spawn_point_offset,
-            spawn_player_altitude
+            spawn_player_altitude,
         );
         let blue_player_positions = get_positions(
             &center_position,
@@ -1318,7 +1343,7 @@ fn get_faceoff_spot(rink: &HQMRink, spot: HQMRinkFaceoffSpot, spawn_point_offset
             blue_left,
             blue_right,
             spawn_point_offset,
-            spawn_player_altitude
+            spawn_player_altitude,
         );
 
         HQMFaceoffSpot {

@@ -127,7 +127,7 @@ impl HQMShootoutBehaviour {
                 };
                 pos += &attacking_rot * side;
             }
-            server.spawn_skater(player_index, team, pos, attacking_rot.clone());
+            server.spawn_skater(player_index, team, pos, attacking_rot.clone(), false);
         }
         for (index, player_index) in defending_players.into_iter().enumerate() {
             let mut pos = goalie_pos.clone();
@@ -141,7 +141,13 @@ impl HQMShootoutBehaviour {
                 };
                 pos += &defending_rot * side;
             }
-            server.spawn_skater(player_index, defending_team, pos, defending_rot.clone());
+            server.spawn_skater(
+                player_index,
+                defending_team,
+                pos,
+                defending_rot.clone(),
+                false,
+            );
         }
     }
 
@@ -226,7 +232,10 @@ impl HQMShootoutBehaviour {
                 }
                 let (pos, rot) = get_spawnpoint(&server.world.rink, team, HQMSpawnPoint::Bench);
 
-                if server.spawn_skater(player_index, team, pos, rot).is_some() {
+                if server
+                    .spawn_skater(player_index, team, pos, rot, false)
+                    .is_some()
+                {
                     info!(
                         "{} ({}) has joined team {:?}",
                         player_name, player_index, team
