@@ -663,4 +663,36 @@ impl HQMMatch {
             }
         }
     }
+
+    pub fn set_spawn_keep_stick(
+        &mut self,
+        server: &mut HQMServer,
+        player_index: HQMServerPlayerIndex,
+        setting: &str
+    ) {
+        if let Some(player) = server.players.get(player_index) {
+            if player.is_admin {
+                let v = match setting {
+                    "on" | "true" => Some(true),
+                    "off" | "false" => Some(false),
+                    _ => None
+                };
+                if let Some(v) = v {
+                    self.config.spawn_keep_stick_position = v;
+
+                    let msg = format!(
+                        "Spawn stick position keeping changed by {} to {}",
+                        player.player_name, v
+                    );
+                    info!(
+                    "{} ({}) changed spawn stick position keeping parameter to {}",
+                    player.player_name, player_index, v
+                );
+                    server.messages.add_server_chat_message(msg);
+                }
+            } else {
+                server.admin_deny_message(player_index);
+            }
+        }
+    }
 }

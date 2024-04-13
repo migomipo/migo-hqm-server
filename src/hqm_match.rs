@@ -346,6 +346,11 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                             if let Ok(rule) = args[1].parse::<f32>() {
                                 self.m.set_spawn_puck_altitude(server, player_index, rule);
                             }
+                        },
+                        "spawnstickkeep" => {
+                            if let Some(arg) = args.get(1) {
+                                self.m.set_spawn_keep_stick(server, player_index, arg);
+                            }
                         }
                         _ => {}
                     }
