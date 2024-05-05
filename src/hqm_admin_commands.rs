@@ -267,7 +267,7 @@ impl HQMServer {
                             self.remove_player(player_index, true);
 
                             if ban_player {
-                                self.ban_list.insert(player_addr.ip());
+                                self.ban.insert(player_addr.ip());
 
                                 info!(
                                     "{} ({}) banned {} ({})",
@@ -360,7 +360,7 @@ impl HQMServer {
                             self.remove_player(kick_player_index, true);
 
                             if ban_player {
-                                self.ban_list.insert(kick_ip);
+                                self.ban.insert(kick_ip);
 
                                 info!(
                                     "{} ({}) banned {} ({})",
@@ -409,11 +409,22 @@ impl HQMServer {
     pub(crate) fn clear_bans(&mut self, player_index: HQMServerPlayerIndex) {
         if let Some(player) = self.players.get(player_index) {
             if player.is_admin {
-                self.ban_list.clear();
+                self.ban.clear();
                 info!("{} ({}) cleared bans", player.player_name, player_index);
 
                 let msg = format!("Bans cleared by {}", player.player_name);
                 self.messages.add_server_chat_message(msg);
+            } else {
+                self.admin_deny_message(player_index);
+            }
+        }
+    }
+
+    pub(crate) fn reload_bans(&mut self, player_index: HQMServerPlayerIndex) {
+        if let Some(player) = self.players.get(player_index) {
+            if player.is_admin {
+                let channel = self.channel_sender.clone();
+                self.ban.reload(player.id, channel);
             } else {
                 self.admin_deny_message(player_index);
             }

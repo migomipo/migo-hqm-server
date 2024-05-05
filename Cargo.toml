@@ -20,6 +20,9 @@ smallvec = { version = "1.11", features = ["union", "const_generics"]}
 systemctl = "0.1.9"
 futures = "0.3"
 async-stream = { version = "0.3.5", features = [] }
+itertools = "0.12.1"
+parking_lot = "0.12.2"
+tokio-stream = "0.1.15"
 
 [profile.dev]
 opt-level = 2
