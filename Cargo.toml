@@ -8,16 +8,16 @@ edition = "2021"
 arr_macro = "0.2.1"
 nalgebra = "0.32"
 tokio = { version = "1", features = ["net", "time", "macros", "rt-multi-thread", "sync", "fs", "parking_lot"] }
-rust-ini = "0.18" # INI For configuration
-bytes = "1.4"
-reqwest = { version = "0.11", default_features=false, features = ["multipart", "rustls-tls"] }
+rust-ini = "0.21.0" # INI For configuration
+bytes = "1.6"
+reqwest = { version = "0.12", default_features=false, features = ["multipart", "rustls-tls"] }
 tracing = "0.1"
 tracing-subscriber = {version="0.3", features = ["parking_lot"]}
 tracing-appender = "0.2"
 chrono = "0.4"
-uuid = { version = "1.4", features = ["v4"] }
+uuid = { version = "1.8", features = ["v4"] }
 smallvec = { version = "1.11", features = ["union", "const_generics"]}
-systemctl = "0.1.9"
+systemctl = "0.3.1"
 futures = "0.3"
 async-stream = { version = "0.3.5", features = [] }
 itertools = "0.12.1"
