@@ -4,7 +4,7 @@ use std::collections::{HashSet, VecDeque};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use nalgebra::{Point3, Rotation3};
 use std::fmt;
 use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UdpSocket;
 use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
@@ -23,6 +23,13 @@ use uuid::Uuid;
 
 use async_stream::stream;
 use futures::StreamExt;
+use itertools::Itertools;
+use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify_debouncer_full::{
+    new_debouncer, DebounceEventHandler, DebounceEventResult, Debouncer, FileIdMap,
+};
+use parking_lot::Mutex;
+use tokio::runtime::Handle;
 
 use crate::hqm_game::{
     HQMGameValues, HQMGameWorld, HQMObjectIndex, HQMPhysicsConfiguration, HQMPlayerInput,
@@ -279,7 +286,7 @@ impl HQMServerMessages {
 pub struct HQMServer {
     pub players: HQMServerPlayerList,
     pub messages: HQMServerMessages,
-    pub(crate) ban_list: HashSet<std::net::IpAddr>,
+
     pub(crate) allow_join: bool,
     pub config: HQMServerConfiguration,
     pub values: HQMGameValues,
@@ -302,6 +309,8 @@ pub struct HQMServer {
     saved_packets: VecDeque<[HQMObjectPacket; 32]>,
     saved_pings: VecDeque<Instant>,
     saved_history: VecDeque<ReplayTick>,
+
+    pub(crate) ban: HQMBan,
 
     pub history_length: usize,
 }
@@ -474,7 +483,7 @@ impl HQMServer {
         }
 
         // Check ban list
-        if self.ban_list.contains(&addr.ip()) {
+        if self.ban.is_banned(addr.ip()) {
             return;
         }
 
@@ -1270,8 +1279,7 @@ impl HQMServer {
 
                         let mut file_handle = match File::create(path).await {
                             Ok(file) => file,
-                            Err(e) => {
-                                println!("{:?}", e);
+                            Err(_) => {
                                 return;
                             }
                         };
@@ -1408,12 +1416,22 @@ pub async fn run_server<B: HQMServerBehaviour>(
 
     let reqwest_client = reqwest::Client::new();
 
+    let ban = if let Some(ban_file) = config.ban_file.as_deref() {
+        let path = PathBuf::from(ban_file.to_string());
+        HQMBan::new_file(path).await
+    } else {
+        HQMBan::InMemory {
+            file: None,
+            ban_list: Default::default(),
+            watcher: None,
+        }
+    };
+
     let mut server = HQMServer {
         players: HQMServerPlayerList {
             players: player_vec,
         },
         messages: HQMServerMessages::new(),
-        ban_list: HashSet::new(),
         allow_join: true,
         values: initial_values.values,
         world: HQMGameWorld::new(
@@ -1435,6 +1453,9 @@ pub async fn run_server<B: HQMServerBehaviour>(
         saved_pings: VecDeque::with_capacity(100),
         saved_history: VecDeque::new(),
         has_current_game_been_active: false,
+
+        ban,
+
         history_length: 0,
         game_step: u32::MAX,
         start_time: Default::default(),
@@ -1499,13 +1520,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
         Message(SocketAddr, HQMClientToServerMessage),
     }
 
-    let timeout_stream = stream! {
-        loop {
-            tick_timer.tick().await;
-            yield Msg::Time;
-        }
-    };
-    tokio::pin!(timeout_stream);
+    let timeout_stream = tokio_stream::wrappers::IntervalStream::new(tick_timer).map(|_| Msg::Time);
     let packet_stream = {
         let socket = socket.clone();
         stream! {
@@ -1817,6 +1832,137 @@ pub struct HQMServerConfiguration {
     pub replay_saving: ReplaySaving,
     pub server_name: String,
     pub server_service: Option<String>,
+
+    pub ban_file: Option<String>,
+}
+
+pub(crate) enum HQMBan {
+    InMemory {
+        file: Option<PathBuf>,
+        ban_list: Arc<Mutex<HashSet<IpAddr>>>,
+        watcher: Option<Debouncer<RecommendedWatcher, FileIdMap>>,
+    },
+}
+
+impl HQMBan {
+    pub(crate) async fn new_file(path: PathBuf) -> Self {
+        let ban_list = Arc::new(Mutex::new(read_ban_file(&path).await.unwrap_or_else(|e| {
+            tracing::error!("Ban file error: {}", e);
+            HashSet::new()
+        })));
+        let handle = Handle::current();
+
+        struct BanFileEventHandler {
+            path: PathBuf,
+            ban_list: Arc<Mutex<HashSet<IpAddr>>>,
+            handle: Handle,
+        }
+
+        impl DebounceEventHandler for BanFileEventHandler {
+            fn handle_event(&mut self, event: DebounceEventResult) {
+                if let Ok(_) = event {
+                    let ban_list = self.ban_list.clone();
+                    let path = self.path.clone();
+                    self.handle.spawn(async move {
+                        if let Ok(res) = read_ban_file(&path).await {
+                            {
+                                let mut ban_list = ban_list.lock();
+                                *ban_list = res;
+                            }
+                        }
+                    });
+                }
+            }
+        }
+        let watcher = new_debouncer(
+            Duration::from_secs(1),
+            None,
+            BanFileEventHandler {
+                path: path.clone(),
+                ban_list: ban_list.clone(),
+                handle,
+            },
+        )
+        .and_then(|mut watcher| {
+            watcher
+                .watcher()
+                .watch(&path, RecursiveMode::NonRecursive)?;
+            Ok(watcher)
+        });
+
+        Self::InMemory {
+            ban_list,
+            file: Some(path),
+            watcher: watcher.ok(),
+        }
+    }
+
+    pub(crate) fn insert(&mut self, ip: IpAddr) {
+        match self {
+            HQMBan::InMemory { ban_list, file, .. } => {
+                let mut ban_list = ban_list.lock();
+                ban_list.insert(ip);
+                if let Some(file) = file {
+                    save_ban_to_file(&ban_list, file);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        match self {
+            HQMBan::InMemory { ban_list, file, .. } => {
+                let mut ban_list = ban_list.lock();
+                ban_list.clear();
+                if let Some(file) = file {
+                    save_ban_to_file(&ban_list, file);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn is_banned(&self, ip: IpAddr) -> bool {
+        match self {
+            HQMBan::InMemory { ban_list, .. } => {
+                let ban_list = ban_list.lock();
+                ban_list.contains(&ip)
+            }
+        }
+    }
+}
+
+async fn read_ban_file(path: &Path) -> Result<HashSet<IpAddr>, tokio::io::Error> {
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)
+        .await?;
+    let mut s = String::new();
+    f.read_to_string(&mut s).await?;
+    let mut res = HashSet::new();
+    for line in s.lines() {
+        if let Ok(ip) = line.parse::<IpAddr>() {
+            res.insert(ip);
+        }
+    }
+    Ok(res)
+}
+
+fn save_ban_to_file(bans: &HashSet<IpAddr>, path: &Path) {
+    let path = path.to_path_buf();
+    let s = bans.iter().map(|x| format!("{}\n", x)).join("");
+    tokio::spawn(async move {
+        let mut f = tokio::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .await?;
+        f.write_all(s.as_bytes()).await?;
+        f.flush().await?;
+        Ok::<_, tokio::io::Error>(())
+    });
 }
 
 #[derive(Debug, Clone)]
