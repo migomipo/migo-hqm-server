@@ -420,17 +420,6 @@ impl HQMServer {
         }
     }
 
-    pub(crate) fn reload_bans(&mut self, player_index: HQMServerPlayerIndex) {
-        if let Some(player) = self.players.get(player_index) {
-            if player.is_admin {
-                let channel = self.channel_sender.clone();
-                self.ban.reload(player.id, channel);
-            } else {
-                self.admin_deny_message(player_index);
-            }
-        }
-    }
-
     pub fn set_replay(&mut self, player_index: HQMServerPlayerIndex, rule: &str) {
         if let Some(player) = self.players.get(player_index) {
             if player.is_admin {

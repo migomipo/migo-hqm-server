@@ -24,7 +24,12 @@ use uuid::Uuid;
 use async_stream::stream;
 use futures::StreamExt;
 use itertools::Itertools;
+use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify_debouncer_full::{
+    new_debouncer, DebounceEventHandler, DebounceEventResult, Debouncer, FileIdMap,
+};
 use parking_lot::Mutex;
+use tokio::runtime::Handle;
 use tokio::sync::mpsc::Sender;
 
 use crate::hqm_game::{
@@ -355,20 +360,8 @@ impl HQMServer {
         }
     }
 
-    fn handle_channel_message(&mut self, msg: ChannelMessage) {
-        match msg {
-            ChannelMessage::ReloadBan(admin_id, success) => {
-                if let Some((index, _)) = self.players.iter().find(|(_, p)| p.id == admin_id) {
-                    if success {
-                        self.messages
-                            .add_directed_server_chat_message("Bans successfully reloaded", index)
-                    } else {
-                        self.messages
-                            .add_directed_server_chat_message("Bans failed to reload", index)
-                    }
-                }
-            }
-        }
+    fn handle_channel_message(&mut self, _msg: ChannelMessage) {
+        // No op for now
     }
 
     async fn request_info<'a, B: HQMServerBehaviour>(
@@ -602,9 +595,6 @@ impl HQMServer {
             }
             "clearbans" => {
                 self.clear_bans(player_index);
-            }
-            "reloadbans" => {
-                self.reload_bans(player_index);
             }
             "lefty" => {
                 self.set_hand(HQMSkaterHand::Left, player_index);
@@ -1440,6 +1430,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
         HQMBan::InMemory {
             file: None,
             ban_list: Default::default(),
+            watcher: None,
         }
     };
 
@@ -1580,9 +1571,7 @@ pub async fn run_server<B: HQMServerBehaviour>(
     Ok(())
 }
 
-pub(crate) enum ChannelMessage {
-    ReloadBan(Uuid, bool),
-}
+pub(crate) enum ChannelMessage {}
 
 async fn send_updates(
     game_id: u32,
@@ -1863,27 +1852,75 @@ pub struct HQMServerConfiguration {
     pub ban_file: Option<String>,
 }
 
-pub enum HQMBan {
+pub(crate) enum HQMBan {
     InMemory {
         file: Option<PathBuf>,
         ban_list: Arc<Mutex<HashSet<IpAddr>>>,
+        watcher: Option<Debouncer<RecommendedWatcher, FileIdMap>>,
     },
 }
 
 impl HQMBan {
     pub(crate) async fn new_file(path: PathBuf) -> Self {
+        let ban_list = Arc::new(Mutex::new(read_ban_file(&path).await.unwrap_or_else(|e| {
+            tracing::error!("Ban file error: {}", e);
+            HashSet::new()
+        })));
+        let handle = Handle::current();
+
+        struct BanFileEventHandler {
+            path: PathBuf,
+            ban_list: Arc<Mutex<HashSet<IpAddr>>>,
+            handle: Handle,
+        }
+
+        impl DebounceEventHandler for BanFileEventHandler {
+            fn handle_event(&mut self, event: DebounceEventResult) {
+                println!("{:?}", event);
+                if let Ok(_) = event {
+                    let ban_list = self.ban_list.clone();
+                    let path = self.path.clone();
+                    self.handle.spawn(async move {
+                        if let Ok(res) = read_ban_file(&path).await {
+                            {
+                                let mut ban_list = ban_list.lock();
+                                *ban_list = res;
+                            }
+
+                            //channel.send(ChannelMessage::ReloadBan(user_id, true)).await;
+                        } else {
+                            //channel.send(ChannelMessage::ReloadBan(user_id, false)).await;
+                        }
+                    });
+                }
+            }
+        }
+        let watcher = new_debouncer(
+            Duration::from_secs(1),
+            None,
+            BanFileEventHandler {
+                path: path.clone(),
+                ban_list: ban_list.clone(),
+                handle,
+            },
+        )
+        .and_then(|mut watcher| {
+            watcher
+                .watcher()
+                .watch(&path, RecursiveMode::NonRecursive)?;
+            Ok(watcher)
+        });
+
         Self::InMemory {
-            ban_list: Arc::new(Mutex::new(read_ban_file(&path).await.unwrap_or_else(|e| {
-                tracing::error!("Ban file error: {}", e);
-                HashSet::new()
-            }))),
+            ban_list,
             file: Some(path),
+            watcher: watcher.ok(),
         }
     }
 
     pub(crate) fn insert(&mut self, ip: IpAddr) {
         match self {
-            HQMBan::InMemory { ban_list, file } => {
+            HQMBan::InMemory { ban_list, file, .. } => {
                 let mut ban_list = ban_list.lock();
                 ban_list.insert(ip);
                 if let Some(file) = file {
@@ -1895,7 +1932,7 @@ impl HQMBan {
 
     pub(crate) fn clear(&mut self) {
         match self {
-            HQMBan::InMemory { ban_list, file } => {
+            HQMBan::InMemory { ban_list, file, .. } => {
                 let mut ban_list = ban_list.lock();
                 ban_list.clear();
                 if let Some(file) = file {
@@ -1908,36 +1945,9 @@ impl HQMBan {
     pub(crate) fn is_banned(&self, ip: IpAddr) -> bool {
         match self {
             HQMBan::InMemory { ban_list, .. } => {
-                let mut ban_list = ban_list.lock();
+                let ban_list = ban_list.lock();
                 ban_list.contains(&ip)
             }
-        }
-    }
-
-    pub(crate) fn reload(&mut self, user_id: Uuid, channel: Sender<ChannelMessage>) {
-        match self {
-            HQMBan::InMemory {
-                ban_list,
-                file: Some(file),
-            } => {
-                let ban_list = ban_list.clone();
-                let path = file.to_path_buf();
-                tokio::spawn(async move {
-                    if let Ok(res) = read_ban_file(&path).await {
-                        {
-                            let mut ban_list = ban_list.lock();
-                            *ban_list = res;
-                        }
-
-                        channel.send(ChannelMessage::ReloadBan(user_id, true)).await;
-                    } else {
-                        channel
-                            .send(ChannelMessage::ReloadBan(user_id, false))
-                            .await;
-                    }
-                });
-            }
-            _ => {}
         }
     }
 }
