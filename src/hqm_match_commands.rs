@@ -668,14 +668,14 @@ impl HQMMatch {
         &mut self,
         server: &mut HQMServer,
         player_index: HQMServerPlayerIndex,
-        setting: &str
+        setting: &str,
     ) {
         if let Some(player) = server.players.get(player_index) {
             if player.is_admin {
                 let v = match setting {
                     "on" | "true" => Some(true),
                     "off" | "false" => Some(false),
-                    _ => None
+                    _ => None,
                 };
                 if let Some(v) = v {
                     self.config.spawn_keep_stick_position = v;
@@ -685,9 +685,9 @@ impl HQMMatch {
                         player.player_name, v
                     );
                     info!(
-                    "{} ({}) changed spawn stick position keeping parameter to {}",
-                    player.player_name, player_index, v
-                );
+                        "{} ({}) changed spawn stick position keeping parameter to {}",
+                        player.player_name, player_index, v
+                    );
                     server.messages.add_server_chat_message(msg);
                 }
             } else {

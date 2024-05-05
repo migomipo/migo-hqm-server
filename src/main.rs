@@ -133,6 +133,8 @@ async fn main() -> std::io::Result<()> {
 
         let server_service = server_section.get("service").map(|x| x.to_owned());
 
+        let ban_file = server_section.get("ban_file").map(|x| x.to_owned());
+
         // Game
         let game_section = conf.section(Some("Game"));
 
@@ -146,6 +148,7 @@ async fn main() -> std::io::Result<()> {
             replay_saving,
             server_name,
             server_service,
+            ban_file,
         };
 
         // Physics
