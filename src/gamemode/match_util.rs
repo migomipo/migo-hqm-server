@@ -1,18 +1,14 @@
-use crate::hqm_game::{
-    HQMGameValues, HQMObjectIndex, HQMPhysicsConfiguration, HQMPuck, HQMRink, HQMRinkLine,
-    HQMRulesState,
-};
-use crate::hqm_server::{
-    HQMInitialGameValues, HQMServer, HQMServerPlayer, HQMServerPlayerIndex, HQMServerPlayerList,
-    HQMTeam,
-};
+use crate::game::{PlayerIndex, PuckObject, Rink, RinkLine, RulesState, ScoreboardValues, Team};
+use crate::gamemode::InitialGameValues;
 
-use crate::hqm_game::HQMRinkSideOfLine::{BlueSide, RedSide};
-use crate::hqm_simulate::HQMSimulationEvent;
+use crate::game::PhysicsEvent;
+use crate::game::RinkSideOfLine::{BlueSide, RedSide};
+use crate::gamemode::{Server, ServerMut, ServerPlayer, ServerPlayerList};
 use nalgebra::{Point3, Rotation3, Vector3};
+use reborrow::{Reborrow, ReborrowMut};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
-use std::f32::consts::{FRAC_PI_2, PI};
+use std::f32::consts::PI;
 
 pub const ALLOWED_POSITIONS: [&str; 18] = [
     "C", "LW", "RW", "LD", "RD", "G", "LM", "RM", "LLM", "RRM", "LLD", "RRD", "CM", "CD", "LW2",
@@ -20,26 +16,26 @@ pub const ALLOWED_POSITIONS: [&str; 18] = [
 ];
 
 #[derive(Debug, Clone)]
-pub struct HQMFaceoffSpot {
+pub struct FaceoffSpot {
     pub center_position: Point3<f32>,
     pub red_player_positions: HashMap<&'static str, (Point3<f32>, Rotation3<f32>)>,
     pub blue_player_positions: HashMap<&'static str, (Point3<f32>, Rotation3<f32>)>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum HQMRinkSide {
-    Left,
-    Right,
+pub enum RinkSide {
+    LowerHalfZ,
+    HigherHalfZ,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum HQMRinkFaceoffSpot {
+pub enum RinkFaceoffSpot {
     Center,
-    DefensiveZone(HQMTeam, HQMRinkSide),
-    Offside(HQMTeam, HQMRinkSide),
+    DefensiveZone(Team, RinkSide),
+    Offside(Team, RinkSide),
 }
 
-pub struct HQMMatchConfiguration {
+pub struct MatchConfiguration {
     pub time_period: u32,
     pub time_warmup: u32,
     pub time_break: u32,
@@ -47,12 +43,11 @@ pub struct HQMMatchConfiguration {
     pub mercy: u32,
     pub first_to: u32,
     pub periods: u32,
-    pub offside: HQMOffsideConfiguration,
-    pub icing: HQMIcingConfiguration,
-    pub offside_line: HQMOffsideLineConfiguration,
-    pub twoline_pass: HQMTwoLinePassConfiguration,
+    pub offside: OffsideConfiguration,
+    pub icing: IcingConfiguration,
+    pub offside_line: OffsideLineConfiguration,
+    pub twoline_pass: TwoLinePassConfiguration,
     pub warmup_pucks: usize,
-    pub physics_config: HQMPhysicsConfiguration,
     pub use_mph: bool,
     pub goal_replay: bool,
     pub spawn_point_offset: f32,
@@ -61,11 +56,11 @@ pub struct HQMMatchConfiguration {
     pub spawn_keep_stick_position: bool,
 }
 
-pub enum HQMMatchEvent {
+pub enum MatchEvent {
     Goal {
-        team: HQMTeam,
-        goal: Option<HQMServerPlayerIndex>,
-        assist: Option<HQMServerPlayerIndex>,
+        team: Team,
+        goal: Option<PlayerIndex>,
+        assist: Option<PlayerIndex>,
         speed: Option<f32>, // Raw meter/game tick (so meter per 1/100 of a second)
         speed_across_line: f32,
         time: u32,
@@ -73,37 +68,37 @@ pub enum HQMMatchEvent {
     },
 }
 
-pub struct HQMMatch {
-    pub config: HQMMatchConfiguration,
+pub struct Match {
+    pub config: MatchConfiguration,
     pub paused: bool,
     pub(crate) pause_timer: u32,
     is_pause_goal: bool,
-    next_faceoff_spot: HQMRinkFaceoffSpot,
-    icing_status: HQMIcingStatus,
-    offside_status: HQMOffsideStatus,
-    twoline_pass_status: HQMTwoLinePassStatus,
-    pass: Option<HQMPass>,
-    pub(crate) preferred_positions: HashMap<HQMServerPlayerIndex, &'static str>,
+    next_faceoff_spot: RinkFaceoffSpot,
+    icing_status: IcingStatus,
+    offside_status: OffsideStatus,
+    twoline_pass_status: TwoLinePassStatus,
+    pass: Option<Pass>,
+    pub(crate) preferred_positions: HashMap<PlayerIndex, &'static str>,
 
-    pub started_as_goalie: Vec<HQMServerPlayerIndex>,
+    pub started_as_goalie: Vec<PlayerIndex>,
     faceoff_game_step: u32,
     step_where_period_ended: u32,
     too_late_printed_this_period: bool,
-    start_next_replay: Option<(u32, u32, Option<HQMServerPlayerIndex>)>,
-    puck_touches: HashMap<HQMObjectIndex, VecDeque<HQMPuckTouch>>,
+    start_next_replay: Option<(u32, u32, Option<PlayerIndex>)>,
+    puck_touches: HashMap<usize, VecDeque<PuckTouch>>,
 }
 
-impl HQMMatch {
-    pub fn new(config: HQMMatchConfiguration) -> Self {
+impl Match {
+    pub fn new(config: MatchConfiguration) -> Self {
         Self {
             config,
             paused: false,
             pause_timer: 0,
             is_pause_goal: false,
-            next_faceoff_spot: HQMRinkFaceoffSpot::Center,
-            icing_status: HQMIcingStatus::No,
-            offside_status: HQMOffsideStatus::Neutral,
-            twoline_pass_status: HQMTwoLinePassStatus::No,
+            next_faceoff_spot: RinkFaceoffSpot::Center,
+            icing_status: IcingStatus::No,
+            offside_status: OffsideStatus::Neutral,
+            twoline_pass_status: TwoLinePassStatus::No,
             pass: None,
             preferred_positions: HashMap::new(),
             started_as_goalie: vec![],
@@ -115,7 +110,7 @@ impl HQMMatch {
         }
     }
 
-    pub fn clear_started_goalie(&mut self, player_index: HQMServerPlayerIndex) {
+    pub fn clear_started_goalie(&mut self, player_index: PlayerIndex) {
         if let Some(x) = self
             .started_as_goalie
             .iter()
@@ -125,14 +120,14 @@ impl HQMMatch {
         }
     }
 
-    fn do_faceoff(&mut self, server: &mut HQMServer) {
-        let positions = get_faceoff_positions(&server.players, &self.preferred_positions);
+    fn do_faceoff(&mut self, mut server: ServerMut) {
+        let positions = get_faceoff_positions(server.state().players(), &self.preferred_positions);
 
-        server.world.clear_pucks();
+        server.state_mut().remove_all_pucks();
         self.puck_touches.clear();
 
         let next_faceoff_spot = get_faceoff_spot(
-            &server.world.rink,
+            &server.rink(),
             self.next_faceoff_spot,
             self.config.spawn_point_offset,
             self.config.spawn_player_altitude,
@@ -142,16 +137,16 @@ impl HQMMatch {
             next_faceoff_spot.center_position + &(self.config.spawn_puck_altitude * Vector3::y());
 
         server
-            .world
-            .create_puck_object(puck_pos, Rotation3::identity());
+            .state_mut()
+            .spawn_puck(PuckObject::new(puck_pos, Rotation3::identity()));
 
         self.started_as_goalie.clear();
         for (player_index, (team, faceoff_position)) in positions {
             let (player_position, player_rotation) = match team {
-                HQMTeam::Red => next_faceoff_spot.red_player_positions[faceoff_position].clone(),
-                HQMTeam::Blue => next_faceoff_spot.blue_player_positions[faceoff_position].clone(),
+                Team::Red => next_faceoff_spot.red_player_positions[faceoff_position].clone(),
+                Team::Blue => next_faceoff_spot.blue_player_positions[faceoff_position].clone(),
             };
-            server.spawn_skater(
+            server.state_mut().spawn_skater(
                 player_index,
                 team,
                 player_position,
@@ -163,68 +158,64 @@ impl HQMMatch {
             }
         }
 
-        let rink = &server.world.rink;
-        self.icing_status = HQMIcingStatus::No;
+        let rink = server.rink();
+        self.icing_status = IcingStatus::No;
         self.offside_status = if rink.blue_zone_blue_line.side_of_line(&puck_pos, 0.0) == BlueSide {
-            HQMOffsideStatus::InOffensiveZone(HQMTeam::Red)
+            OffsideStatus::InOffensiveZone(Team::Red)
         } else if rink.red_zone_blue_line.side_of_line(&puck_pos, 0.0) == RedSide {
-            HQMOffsideStatus::InOffensiveZone(HQMTeam::Blue)
+            OffsideStatus::InOffensiveZone(Team::Blue)
         } else {
-            HQMOffsideStatus::Neutral
+            OffsideStatus::Neutral
         };
-        self.twoline_pass_status = HQMTwoLinePassStatus::No;
+        self.twoline_pass_status = TwoLinePassStatus::No;
         self.pass = None;
 
-        self.faceoff_game_step = server.game_step;
+        self.faceoff_game_step = server.game_step();
     }
 
-    pub(crate) fn update_game_over(&mut self, server: &mut HQMServer) {
+    pub(crate) fn update_game_over(&mut self, mut server: ServerMut) {
         let time_gameover = self.config.time_intermission * 100;
         let time_break = self.config.time_break * 100;
+        let values = server.scoreboard_mut();
 
-        let red_score = server.values.red_score;
-        let blue_score = server.values.blue_score;
-        let old_game_over = server.values.game_over;
-        server.values.game_over =
-            if server.values.period > self.config.periods && red_score != blue_score {
-                true
-            } else if self.config.mercy > 0
-                && (red_score.saturating_sub(blue_score) >= self.config.mercy
-                    || blue_score.saturating_sub(red_score) >= self.config.mercy)
-            {
-                true
-            } else if self.config.first_to > 0
-                && (red_score >= self.config.first_to || blue_score >= self.config.first_to)
-            {
-                true
-            } else {
-                false
-            };
-        if server.values.game_over && !old_game_over {
+        let red_score = values.red_score;
+        let blue_score = values.blue_score;
+        let old_game_over = values.game_over;
+        values.game_over = if values.period > self.config.periods && red_score != blue_score {
+            true
+        } else if self.config.mercy > 0
+            && (red_score.saturating_sub(blue_score) >= self.config.mercy
+                || blue_score.saturating_sub(red_score) >= self.config.mercy)
+        {
+            true
+        } else if self.config.first_to > 0
+            && (red_score >= self.config.first_to || blue_score >= self.config.first_to)
+        {
+            true
+        } else {
+            false
+        };
+        if values.game_over && !old_game_over {
             self.pause_timer = self.pause_timer.max(time_gameover);
-        } else if !server.values.game_over && old_game_over {
+        } else if !values.game_over && old_game_over {
             self.pause_timer = self.pause_timer.max(time_break);
         }
     }
 
-    fn call_goal(
-        &mut self,
-        server: &mut HQMServer,
-        team: HQMTeam,
-        puck_index: HQMObjectIndex,
-    ) -> HQMMatchEvent {
+    fn call_goal(&mut self, mut server: ServerMut, team: Team, puck_index: usize) -> MatchEvent {
         let time_break = self.config.time_break * 100;
+        let values = server.scoreboard_mut();
 
         match team {
-            HQMTeam::Red => {
-                server.values.red_score += 1;
+            Team::Red => {
+                values.red_score += 1;
             }
-            HQMTeam::Blue => {
-                server.values.blue_score += 1;
+            Team::Blue => {
+                values.blue_score += 1;
             }
         };
 
-        self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
+        self.next_faceoff_spot = RinkFaceoffSpot::Center;
 
         let (
             goal_scorer_index,
@@ -232,7 +223,7 @@ impl HQMMatch {
             puck_speed_across_line,
             puck_speed_from_stick,
             last_touch,
-        ) = if let Some(this_puck) = server.world.objects.get_puck_mut(puck_index) {
+        ) = if let Some(this_puck) = server.state().get_puck(puck_index) {
             let mut goal_scorer_index = None;
             let mut assist_index = None;
             let mut goal_scorer_first_touch = 0;
@@ -282,7 +273,7 @@ impl HQMMatch {
         };
 
         server
-            .messages
+            .state_mut()
             .add_goal_message(team, goal_scorer_index, assist_index);
 
         fn convert(puck_speed: f32, use_mph: bool) -> (f32, &'static str) {
@@ -313,23 +304,24 @@ impl HQMMatch {
         };
         let s = format!("{}{}", str1, str2);
 
-        server.messages.add_server_chat_message(s);
+        server.state_mut().add_server_chat_message(s);
 
-        if server.values.time < 1000 {
-            let time = server.values.time;
+        let values = server.scoreboard();
+        if values.time < 1000 {
+            let time = values.time;
             let seconds = time / 100;
             let centi = time % 100;
 
             let s = format!("{}.{:02} seconds left", seconds, centi);
-            server.messages.add_server_chat_message(s);
+            server.state_mut().add_server_chat_message(s);
         }
 
         self.pause_timer = time_break;
         self.is_pause_goal = true;
 
-        self.update_game_over(server);
+        self.update_game_over(server.rb_mut());
 
-        let gamestep = server.game_step;
+        let gamestep = server.game_step();
 
         if self.config.goal_replay {
             let force_view = goal_scorer_index.or(last_touch);
@@ -341,10 +333,11 @@ impl HQMMatch {
 
             self.pause_timer = self.pause_timer.saturating_sub(800).max(400);
         }
-        HQMMatchEvent::Goal {
+        let values = server.scoreboard();
+        MatchEvent::Goal {
             team,
-            time: server.values.time,
-            period: server.values.period,
+            time: values.time,
+            period: values.period,
             goal: goal_scorer_index,
             assist: assist_index,
             speed: puck_speed_from_stick,
@@ -352,15 +345,11 @@ impl HQMMatch {
         }
     }
 
-    fn handle_events_end_of_period(
-        &mut self,
-        server: &mut HQMServer,
-        events: &[HQMSimulationEvent],
-    ) {
+    fn handle_events_end_of_period(&mut self, mut server: ServerMut, events: &[PhysicsEvent]) {
         for event in events {
-            if let HQMSimulationEvent::PuckEnteredNet { .. } = event {
+            if let PhysicsEvent::PuckEnteredNet { .. } = event {
                 let time = server
-                    .game_step
+                    .game_step()
                     .saturating_sub(self.step_where_period_ended);
                 if time <= 300 && !self.too_late_printed_this_period {
                     let seconds = time / 100;
@@ -368,7 +357,7 @@ impl HQMMatch {
                     self.too_late_printed_this_period = true;
                     let s = format!("{}.{:02} seconds too late!", seconds, centi);
 
-                    server.messages.add_server_chat_message(s);
+                    server.state_mut().add_server_chat_message(s);
                 }
             }
         }
@@ -376,62 +365,65 @@ impl HQMMatch {
 
     fn handle_puck_touch(
         &mut self,
-        server: &mut HQMServer,
-        player: HQMObjectIndex,
-        puck_index: HQMObjectIndex,
+        mut server: ServerMut,
+        player_index: PlayerIndex,
+        puck_index: usize,
     ) {
-        if let Some((player_index, touching_team, _)) = server.players.get_from_object_index(player)
-        {
-            if let Some(puck) = server.world.objects.get_puck_mut(puck_index) {
-                add_touch(
-                    puck,
-                    self.puck_touches.entry(puck_index),
-                    player_index,
-                    player,
-                    touching_team,
-                    server.values.time,
-                );
-                let side = if puck.body.pos.x <= &server.world.rink.width / 2.0 {
-                    HQMRinkSide::Left
-                } else {
-                    HQMRinkSide::Right
-                };
-                self.pass = Some(HQMPass {
-                    team: touching_team,
-                    side,
-                    from: None,
-                    player: player_index,
-                });
-
-                let other_team = touching_team.get_other_team();
-
-                if let HQMOffsideStatus::Warning(team, side, position, i) = self.offside_status {
-                    if team == touching_team {
-                        let self_touch = player_index == i;
-
-                        self.call_offside(server, touching_team, side, position, self_touch);
-                        return;
-                    }
-                }
-                if let HQMTwoLinePassStatus::Warning(team, side, position, ref i) =
-                    self.twoline_pass_status
-                {
-                    if team == touching_team && i.contains(&player_index) {
-                        self.call_twoline_pass(server, touching_team, side, position);
-                        return;
+        if let Some(player) = server.state().players().get(player_index) {
+            if let Some(touching_team) = player.team() {
+                if let Some(puck) = server.state().get_puck(puck_index) {
+                    add_touch(
+                        puck,
+                        self.puck_touches.entry(puck_index),
+                        player_index,
+                        touching_team,
+                        server.scoreboard().time,
+                    );
+                    let side = if puck.body.pos.x <= server.rink().width / 2.0 {
+                        RinkSide::LowerHalfZ
                     } else {
-                        self.twoline_pass_status = HQMTwoLinePassStatus::No;
-                        server
-                            .messages
-                            .add_server_chat_message("Two-line pass waved off");
+                        RinkSide::HigherHalfZ
+                    };
+                    self.pass = Some(Pass {
+                        team: touching_team,
+                        side,
+                        from: None,
+                        player: player_index,
+                    });
+
+                    let other_team = touching_team.get_other_team();
+
+                    if let OffsideStatus::Warning(team, side, position, i) = self.offside_status {
+                        if team == touching_team {
+                            let self_touch = player_index == i;
+
+                            self.call_offside(server, touching_team, side, position, self_touch);
+                            return;
+                        }
                     }
-                }
-                if let HQMIcingStatus::Warning(team, side) = self.icing_status {
-                    if touching_team != team && !self.started_as_goalie.contains(&player_index) {
-                        self.call_icing(server, other_team, side);
-                    } else {
-                        self.icing_status = HQMIcingStatus::No;
-                        server.messages.add_server_chat_message("Icing waved off");
+                    if let TwoLinePassStatus::Warning(team, side, position, ref i) =
+                        self.twoline_pass_status
+                    {
+                        if team == touching_team && i.contains(&player_index) {
+                            self.call_twoline_pass(server, touching_team, side, position);
+                            return;
+                        } else {
+                            self.twoline_pass_status = TwoLinePassStatus::No;
+                            server
+                                .state_mut()
+                                .add_server_chat_message("Two-line pass waved off");
+                        }
+                    }
+                    if let IcingStatus::Warning(team, side) = self.icing_status {
+                        if touching_team != team && !self.started_as_goalie.contains(&player_index)
+                        {
+                            self.call_icing(server, other_team, side);
+                        } else {
+                            self.icing_status = IcingStatus::No;
+                            server
+                                .state_mut()
+                                .add_server_chat_message("Icing waved off");
+                        }
                     }
                 }
             }
@@ -440,25 +432,25 @@ impl HQMMatch {
 
     fn handle_puck_entered_net(
         &mut self,
-        server: &mut HQMServer,
-        events: &mut Vec<HQMMatchEvent>,
-        net_team: HQMTeam,
-        puck: HQMObjectIndex,
+        server: ServerMut,
+        events: &mut Vec<MatchEvent>,
+        net_team: Team,
+        puck: usize,
     ) {
         let team = net_team.get_other_team();
         match self.offside_status {
-            HQMOffsideStatus::Warning(offside_team, side, position, _) if offside_team == team => {
+            OffsideStatus::Warning(offside_team, side, position, _) if offside_team == team => {
                 self.call_offside(server, team, side, position, false);
             }
-            HQMOffsideStatus::Offside(_) => {}
+            OffsideStatus::Offside(_) => {}
             _ => {
                 events.push(self.call_goal(server, team, puck));
             }
         }
     }
 
-    fn handle_puck_passed_goal_line(&mut self, server: &mut HQMServer, line_team: HQMTeam) {
-        if let Some(HQMPass {
+    fn handle_puck_passed_goal_line(&mut self, mut server: ServerMut, line_team: Team) {
+        if let Some(Pass {
             team: icing_team,
             side,
             from: Some(transition),
@@ -466,104 +458,108 @@ impl HQMMatch {
         }) = self.pass
         {
             let team = line_team.get_other_team();
-            if team == icing_team && transition <= HQMPassPosition::ReachedCenter {
+            if team == icing_team && transition <= PassLocation::ReachedCenter {
                 match self.config.icing {
-                    HQMIcingConfiguration::Touch => {
-                        self.icing_status = HQMIcingStatus::Warning(team, side);
-                        server.messages.add_server_chat_message("Icing warning");
+                    IcingConfiguration::Touch => {
+                        self.icing_status = IcingStatus::Warning(team, side);
+                        server.state_mut().add_server_chat_message("Icing warning");
                     }
-                    HQMIcingConfiguration::NoTouch => {
+                    IcingConfiguration::NoTouch => {
                         self.call_icing(server, team, side);
                     }
-                    HQMIcingConfiguration::Off => {}
+                    IcingConfiguration::Off => {}
                 }
             }
         }
     }
 
-    fn puck_into_offside_zone(&mut self, server: &mut HQMServer, team: HQMTeam) {
-        if self.offside_status == HQMOffsideStatus::InOffensiveZone(team) {
+    fn puck_into_offside_zone(&mut self, mut server: ServerMut, team: Team) {
+        if self.offside_status == OffsideStatus::InOffensiveZone(team) {
             return;
         }
-        if let Some(HQMPass {
+        if let Some(Pass {
             team: pass_team,
             side,
             from: transition,
             player,
         }) = self.pass
         {
-            if team == pass_team && has_players_in_offensive_zone(&server, team, Some(player)) {
+            if team == pass_team && has_players_in_offensive_zone(server.rb(), team, Some(player)) {
                 match self.config.offside {
-                    HQMOffsideConfiguration::Delayed => {
+                    OffsideConfiguration::Delayed => {
                         self.offside_status =
-                            HQMOffsideStatus::Warning(team, side, transition, player);
-                        server.messages.add_server_chat_message("Offside warning");
+                            OffsideStatus::Warning(team, side, transition, player);
+                        server
+                            .state_mut()
+                            .add_server_chat_message("Offside warning");
                     }
-                    HQMOffsideConfiguration::Immediate => {
+                    OffsideConfiguration::Immediate => {
                         self.call_offside(server, team, side, transition, false);
                     }
-                    HQMOffsideConfiguration::Off => {
-                        self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+                    OffsideConfiguration::Off => {
+                        self.offside_status = OffsideStatus::InOffensiveZone(team);
                     }
                 }
             } else {
-                self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+                self.offside_status = OffsideStatus::InOffensiveZone(team);
             }
         } else {
-            self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
+            self.offside_status = OffsideStatus::InOffensiveZone(team);
         }
     }
 
-    fn handle_puck_entered_offensive_half(&mut self, server: &mut HQMServer, team: HQMTeam) {
-        if !matches!(&self.offside_status, HQMOffsideStatus::Offside(_))
-            && self.config.offside_line == HQMOffsideLineConfiguration::Center
+    fn handle_puck_entered_offensive_half(&mut self, mut server: ServerMut, team: Team) {
+        if !matches!(&self.offside_status, OffsideStatus::Offside(_))
+            && self.config.offside_line == OffsideLineConfiguration::Center
         {
-            self.puck_into_offside_zone(server, team);
+            self.puck_into_offside_zone(server.rb_mut(), team);
         }
-        if let HQMOffsideStatus::Warning(warning_team, _, _, _) = self.offside_status {
+        if let OffsideStatus::Warning(warning_team, _, _, _) = self.offside_status {
             if warning_team != team {
-                server.messages.add_server_chat_message("Offside waved off");
+                server
+                    .state_mut()
+                    .add_server_chat_message("Offside waved off");
             }
         }
-        if let Some(HQMPass {
+        if let Some(Pass {
             team: pass_team,
             side,
             from: Some(from),
             player: pass_player,
         }) = self.pass
         {
-            if self.twoline_pass_status == HQMTwoLinePassStatus::No && pass_team == team {
+            if self.twoline_pass_status == TwoLinePassStatus::No && pass_team == team {
                 let is_regular_twoline_pass_active = self.config.twoline_pass
-                    == HQMTwoLinePassConfiguration::Double
-                    || self.config.twoline_pass == HQMTwoLinePassConfiguration::On;
-                if from <= HQMPassPosition::ReachedOwnBlue && is_regular_twoline_pass_active {
+                    == TwoLinePassConfiguration::Double
+                    || self.config.twoline_pass == TwoLinePassConfiguration::On;
+                if from <= PassLocation::ReachedOwnBlue && is_regular_twoline_pass_active {
                     self.check_twoline_pass(server, team, side, from, pass_player, false);
                 }
             }
         }
     }
 
-    fn handle_puck_entered_offensive_zone(&mut self, server: &mut HQMServer, team: HQMTeam) {
-        if !matches!(&self.offside_status, HQMOffsideStatus::Offside(_))
-            && self.config.offside_line == HQMOffsideLineConfiguration::OffensiveBlue
+    fn handle_puck_entered_offensive_zone(&mut self, mut server: ServerMut, team: Team) {
+        if !matches!(&self.offside_status, OffsideStatus::Offside(_))
+            && self.config.offside_line == OffsideLineConfiguration::OffensiveBlue
         {
-            self.puck_into_offside_zone(server, team);
+            self.puck_into_offside_zone(server.rb_mut(), team);
         }
-        if let Some(HQMPass {
+        if let Some(Pass {
             team: pass_team,
             side,
             from: Some(from),
             player: pass_player,
         }) = self.pass
         {
-            if self.twoline_pass_status == HQMTwoLinePassStatus::No && pass_team == team {
+            if self.twoline_pass_status == TwoLinePassStatus::No && pass_team == team {
                 let is_forward_twoline_pass_active = self.config.twoline_pass
-                    == HQMTwoLinePassConfiguration::Double
-                    || self.config.twoline_pass == HQMTwoLinePassConfiguration::Forward;
+                    == TwoLinePassConfiguration::Double
+                    || self.config.twoline_pass == TwoLinePassConfiguration::Forward;
                 let is_threeline_pass_active =
-                    self.config.twoline_pass == HQMTwoLinePassConfiguration::ThreeLine;
-                if (from <= HQMPassPosition::ReachedCenter && is_forward_twoline_pass_active)
-                    || from <= HQMPassPosition::ReachedOwnBlue && is_threeline_pass_active
+                    self.config.twoline_pass == TwoLinePassConfiguration::ThreeLine;
+                if (from <= PassLocation::ReachedCenter && is_forward_twoline_pass_active)
+                    || from <= PassLocation::ReachedOwnBlue && is_threeline_pass_active
                 {
                     self.check_twoline_pass(server, team, side, from, pass_player, true);
                 }
@@ -573,53 +569,56 @@ impl HQMMatch {
 
     fn check_twoline_pass(
         &mut self,
-        server: &mut HQMServer,
-        team: HQMTeam,
-        side: HQMRinkSide,
-        from: HQMPassPosition,
-        pass_player: HQMServerPlayerIndex,
+        mut server: ServerMut,
+        team: Team,
+        side: RinkSide,
+        from: PassLocation,
+        pass_player: PlayerIndex,
         is_offensive_line: bool,
     ) {
         let line = if is_offensive_line {
             match team {
-                HQMTeam::Red => &server.world.rink.blue_zone_blue_line,
-                HQMTeam::Blue => &server.world.rink.red_zone_blue_line,
+                Team::Red => &server.rink().blue_zone_blue_line,
+                Team::Blue => &server.rink().red_zone_blue_line,
             }
         } else {
-            &server.world.rink.center_line
+            &server.rink().center_line
         };
         let mut players_past_line = vec![];
-        for (player_index, player) in server.players.iter() {
+        for player in server.state().players().iter() {
+            let player_index = player.index;
             if player_index == pass_player {
                 continue;
             }
-            if is_past_line(server, player, team, line) {
+            if is_past_line(player, team, line) {
                 players_past_line.push(player_index);
             }
         }
         if !players_past_line.is_empty() {
             self.twoline_pass_status =
-                HQMTwoLinePassStatus::Warning(team, side, from, players_past_line);
+                TwoLinePassStatus::Warning(team, side, from, players_past_line);
             server
-                .messages
+                .state_mut()
                 .add_server_chat_message("Two-line pass warning");
         }
     }
 
-    fn handle_puck_passed_defensive_line(&mut self, server: &mut HQMServer, team: HQMTeam) {
-        if !matches!(&self.offside_status, HQMOffsideStatus::Offside(_))
-            && self.config.offside_line == HQMOffsideLineConfiguration::OffensiveBlue
+    fn handle_puck_passed_defensive_line(&mut self, mut server: ServerMut, team: Team) {
+        if !matches!(&self.offside_status, OffsideStatus::Offside(_))
+            && self.config.offside_line == OffsideLineConfiguration::OffensiveBlue
         {
-            if let HQMOffsideStatus::Warning(t, _, _, _) = self.offside_status {
+            if let OffsideStatus::Warning(t, _, _, _) = self.offside_status {
                 if team.get_other_team() == t {
-                    server.messages.add_server_chat_message("Offside waved off");
+                    server
+                        .state_mut()
+                        .add_server_chat_message("Offside waved off");
                 }
             }
-            self.offside_status = HQMOffsideStatus::Neutral;
+            self.offside_status = OffsideStatus::Neutral;
         }
     }
 
-    fn update_pass(&mut self, team: HQMTeam, p: HQMPassPosition) {
+    fn update_pass(&mut self, team: Team, p: PassLocation) {
         if let Some(pass) = &mut self.pass {
             if pass.team == team && pass.from.is_none() {
                 pass.from = Some(p);
@@ -627,12 +626,12 @@ impl HQMMatch {
         }
     }
 
-    fn check_wave_off_twoline(&mut self, server: &mut HQMServer, team: HQMTeam) {
-        if let HQMTwoLinePassStatus::Warning(warning_team, _, _, _) = self.twoline_pass_status {
+    fn check_wave_off_twoline(&mut self, mut server: ServerMut, team: Team) {
+        if let TwoLinePassStatus::Warning(warning_team, _, _, _) = self.twoline_pass_status {
             if team != warning_team {
-                self.twoline_pass_status = HQMTwoLinePassStatus::No;
+                self.twoline_pass_status = TwoLinePassStatus::No;
                 server
-                    .messages
+                    .state_mut()
                     .add_server_chat_message("Two-line pass waved off");
             }
         }
@@ -640,52 +639,50 @@ impl HQMMatch {
 
     fn handle_events(
         &mut self,
-        server: &mut HQMServer,
-        events: &[HQMSimulationEvent],
-        match_events: &mut Vec<HQMMatchEvent>,
+        mut server: ServerMut,
+        events: &[PhysicsEvent],
+        match_events: &mut Vec<MatchEvent>,
     ) {
         for event in events {
             match *event {
-                HQMSimulationEvent::PuckEnteredNet { team, puck } => {
-                    self.handle_puck_entered_net(server, match_events, team, puck);
+                PhysicsEvent::PuckEnteredNet { team, puck } => {
+                    self.handle_puck_entered_net(server.rb_mut(), match_events, team, puck);
                 }
-                HQMSimulationEvent::PuckTouch { player, puck, .. } => {
-                    self.handle_puck_touch(server, player, puck);
+                PhysicsEvent::PuckTouch { player, puck, .. } => {
+                    self.handle_puck_touch(server.rb_mut(), player, puck);
                 }
-                HQMSimulationEvent::PuckReachedDefensiveLine { team, puck: _ } => {
-                    self.check_wave_off_twoline(server, team);
-                    self.update_pass(team, HQMPassPosition::ReachedOwnBlue);
+                PhysicsEvent::PuckReachedDefensiveLine { team, puck: _ } => {
+                    self.check_wave_off_twoline(server.rb_mut(), team);
+                    self.update_pass(team, PassLocation::ReachedOwnBlue);
                 }
-                HQMSimulationEvent::PuckPassedDefensiveLine { team, puck: _ } => {
-                    self.update_pass(team, HQMPassPosition::PassedOwnBlue);
-                    self.handle_puck_passed_defensive_line(server, team);
+                PhysicsEvent::PuckPassedDefensiveLine { team, puck: _ } => {
+                    self.update_pass(team, PassLocation::PassedOwnBlue);
+                    self.handle_puck_passed_defensive_line(server.rb_mut(), team);
                 }
-                HQMSimulationEvent::PuckReachedCenterLine { team, puck: _ } => {
-                    self.check_wave_off_twoline(server, team);
-                    self.update_pass(team, HQMPassPosition::ReachedCenter);
+                PhysicsEvent::PuckReachedCenterLine { team, puck: _ } => {
+                    self.check_wave_off_twoline(server.rb_mut(), team);
+                    self.update_pass(team, PassLocation::ReachedCenter);
                 }
-                HQMSimulationEvent::PuckPassedCenterLine { team, puck: _ } => {
-                    self.update_pass(team, HQMPassPosition::PassedCenter);
-                    self.handle_puck_entered_offensive_half(server, team);
+                PhysicsEvent::PuckPassedCenterLine { team, puck: _ } => {
+                    self.update_pass(team, PassLocation::PassedCenter);
+                    self.handle_puck_entered_offensive_half(server.rb_mut(), team);
                 }
-                HQMSimulationEvent::PuckReachedOffensiveZone { team, puck: _ } => {
-                    self.update_pass(team, HQMPassPosition::ReachedOffensive);
+                PhysicsEvent::PuckReachedOffensiveZone { team, puck: _ } => {
+                    self.update_pass(team, PassLocation::ReachedOffensive);
                 }
-                HQMSimulationEvent::PuckEnteredOffensiveZone { team, puck: _ } => {
-                    self.update_pass(team, HQMPassPosition::PassedOffensive);
-                    self.handle_puck_entered_offensive_zone(server, team);
+                PhysicsEvent::PuckEnteredOffensiveZone { team, puck: _ } => {
+                    self.update_pass(team, PassLocation::PassedOffensive);
+                    self.handle_puck_entered_offensive_zone(server.rb_mut(), team);
                 }
-                HQMSimulationEvent::PuckPassedGoalLine { team, puck: _ } => {
-                    self.handle_puck_passed_goal_line(server, team);
+                PhysicsEvent::PuckPassedGoalLine { team, puck: _ } => {
+                    self.handle_puck_passed_goal_line(server.rb_mut(), team);
                 }
                 _ => {}
             }
 
-            if self.pause_timer > 0
-                || server.values.time == 0
-                || server.values.game_over
-                || server.values.period == 0
-            {
+            let values = server.scoreboard();
+
+            if self.pause_timer > 0 || values.time == 0 || values.game_over || values.period == 0 {
                 return;
             }
         }
@@ -693,171 +690,173 @@ impl HQMMatch {
 
     fn call_offside(
         &mut self,
-        server: &mut HQMServer,
-        team: HQMTeam,
-        side: HQMRinkSide,
-        position: Option<HQMPassPosition>,
+        mut server: ServerMut,
+        team: Team,
+        side: RinkSide,
+        position: Option<PassLocation>,
         self_touch: bool,
     ) {
         let time_break = self.config.time_break * 100;
 
         let faceoff_spot = if self_touch {
             match self.config.offside_line {
-                HQMOffsideLineConfiguration::OffensiveBlue => {
-                    HQMRinkFaceoffSpot::Offside(team.get_other_team(), side)
+                OffsideLineConfiguration::OffensiveBlue => {
+                    RinkFaceoffSpot::Offside(team.get_other_team(), side)
                 }
-                HQMOffsideLineConfiguration::Center => HQMRinkFaceoffSpot::Center,
+                OffsideLineConfiguration::Center => RinkFaceoffSpot::Center,
             }
         } else {
             match position {
-                Some(p) if p <= HQMPassPosition::ReachedOwnBlue => {
-                    HQMRinkFaceoffSpot::DefensiveZone(team, side)
+                Some(p) if p <= PassLocation::ReachedOwnBlue => {
+                    RinkFaceoffSpot::DefensiveZone(team, side)
                 }
-                Some(p) if p <= HQMPassPosition::ReachedCenter => {
-                    HQMRinkFaceoffSpot::Offside(team, side)
-                }
-                _ => HQMRinkFaceoffSpot::Center,
+                Some(p) if p <= PassLocation::ReachedCenter => RinkFaceoffSpot::Offside(team, side),
+                _ => RinkFaceoffSpot::Center,
             }
         };
 
         self.next_faceoff_spot = faceoff_spot;
         self.pause_timer = time_break;
-        self.offside_status = HQMOffsideStatus::Offside(team);
-        server.messages.add_server_chat_message("Offside");
+        self.offside_status = OffsideStatus::Offside(team);
+        server.state_mut().add_server_chat_message("Offside");
     }
 
     fn call_twoline_pass(
         &mut self,
-        server: &mut HQMServer,
-        team: HQMTeam,
-        side: HQMRinkSide,
-        position: HQMPassPosition,
+        mut server: ServerMut,
+        team: Team,
+        side: RinkSide,
+        position: PassLocation,
     ) {
         let time_break = self.config.time_break * 100;
 
-        let faceoff_spot = if position <= HQMPassPosition::ReachedOwnBlue {
-            HQMRinkFaceoffSpot::DefensiveZone(team, side)
-        } else if position <= HQMPassPosition::ReachedCenter {
-            HQMRinkFaceoffSpot::Offside(team, side)
+        let faceoff_spot = if position <= PassLocation::ReachedOwnBlue {
+            RinkFaceoffSpot::DefensiveZone(team, side)
+        } else if position <= PassLocation::ReachedCenter {
+            RinkFaceoffSpot::Offside(team, side)
         } else {
-            HQMRinkFaceoffSpot::Center
+            RinkFaceoffSpot::Center
         };
 
         self.next_faceoff_spot = faceoff_spot;
         self.pause_timer = time_break;
-        self.twoline_pass_status = HQMTwoLinePassStatus::Offside(team);
-        server.messages.add_server_chat_message("Two-line pass");
+        self.twoline_pass_status = TwoLinePassStatus::Offside(team);
+        server.state_mut().add_server_chat_message("Two-line pass");
     }
 
-    fn call_icing(&mut self, server: &mut HQMServer, team: HQMTeam, side: HQMRinkSide) {
+    fn call_icing(&mut self, mut server: ServerMut, team: Team, side: RinkSide) {
         let time_break = self.config.time_break * 100;
 
-        self.next_faceoff_spot = HQMRinkFaceoffSpot::DefensiveZone(team, side);
+        self.next_faceoff_spot = RinkFaceoffSpot::DefensiveZone(team, side);
         self.pause_timer = time_break;
-        self.icing_status = HQMIcingStatus::Icing(team);
-        server.messages.add_server_chat_message("Icing");
+        self.icing_status = IcingStatus::Icing(team);
+        server.state_mut().add_server_chat_message("Icing");
     }
 
     pub fn after_tick(
         &mut self,
-        server: &mut HQMServer,
-        events: &[HQMSimulationEvent],
-    ) -> Vec<HQMMatchEvent> {
+        mut server: ServerMut,
+        events: &[PhysicsEvent],
+    ) -> Vec<MatchEvent> {
         let mut match_events = vec![];
-        if server.values.time == 0 && server.values.period > 1 {
-            self.handle_events_end_of_period(server, events);
+        let values = server.scoreboard();
+        if values.time == 0 && values.period > 1 {
+            self.handle_events_end_of_period(server.rb_mut(), events);
         } else if self.pause_timer > 0
-            || server.values.time == 0
-            || server.values.game_over
-            || server.values.period == 0
+            || values.time == 0
+            || values.game_over
+            || values.period == 0
             || self.paused
         {
             // Nothing
         } else {
-            self.handle_events(server, events, &mut match_events);
+            self.handle_events(server.rb_mut(), events, &mut match_events);
 
-            if let HQMOffsideStatus::Warning(team, _, _, _) = self.offside_status {
-                if !has_players_in_offensive_zone(server, team, None) {
-                    self.offside_status = HQMOffsideStatus::InOffensiveZone(team);
-                    server.messages.add_server_chat_message("Offside waved off");
+            if let OffsideStatus::Warning(team, _, _, _) = self.offside_status {
+                if !has_players_in_offensive_zone(server.rb(), team, None) {
+                    self.offside_status = OffsideStatus::InOffensiveZone(team);
+                    server
+                        .state_mut()
+                        .add_server_chat_message("Offside waved off");
                 }
             }
 
-            let rules_state = if matches!(self.offside_status, HQMOffsideStatus::Offside(_))
-                || matches!(self.twoline_pass_status, HQMTwoLinePassStatus::Offside(_))
+            let rules_state = if matches!(self.offside_status, OffsideStatus::Offside(_))
+                || matches!(self.twoline_pass_status, TwoLinePassStatus::Offside(_))
             {
-                HQMRulesState::Offside
-            } else if matches!(self.icing_status, HQMIcingStatus::Icing(_)) {
-                HQMRulesState::Icing
+                RulesState::Offside
+            } else if matches!(self.icing_status, IcingStatus::Icing(_)) {
+                RulesState::Icing
             } else {
-                let icing_warning = matches!(self.icing_status, HQMIcingStatus::Warning(_, _));
+                let icing_warning = matches!(self.icing_status, IcingStatus::Warning(_, _));
                 let offside_warning =
-                    matches!(self.offside_status, HQMOffsideStatus::Warning(_, _, _, _))
+                    matches!(self.offside_status, OffsideStatus::Warning(_, _, _, _))
                         || matches!(
                             self.twoline_pass_status,
-                            HQMTwoLinePassStatus::Warning(_, _, _, _)
+                            TwoLinePassStatus::Warning(_, _, _, _)
                         );
-                HQMRulesState::Regular {
+                RulesState::Regular {
                     offside_warning,
                     icing_warning,
                 }
             };
 
-            server.values.rules_state = rules_state;
+            server.scoreboard_mut().rules_state = rules_state;
         }
 
-        self.update_clock(server);
+        self.update_clock(server.rb_mut());
 
         if let Some((start_replay, end_replay, force_view)) = self.start_next_replay {
-            if end_replay <= server.game_step {
+            if end_replay <= server.game_step() {
                 server.add_replay_to_queue(start_replay, end_replay, force_view);
-                server.messages.add_server_chat_message("Goal replay");
+                server.state_mut().add_server_chat_message("Goal replay");
                 self.start_next_replay = None;
             }
         }
         match_events
     }
 
-    fn update_clock(&mut self, server: &mut HQMServer) {
+    fn update_clock(&mut self, mut server: ServerMut) {
         let period_length = self.config.time_period * 100;
         let intermission_time = self.config.time_intermission * 100;
+        let values = server.scoreboard_mut();
 
         if !self.paused {
             if self.pause_timer > 0 {
                 self.pause_timer -= 1;
                 if self.pause_timer == 0 {
                     self.is_pause_goal = false;
-                    if server.values.game_over {
+                    if values.game_over {
                         server.new_game(self.get_initial_game_values());
                     } else {
-                        if server.values.time == 0 {
-                            server.values.time = period_length;
+                        if values.time == 0 {
+                            values.time = period_length;
                         }
 
-                        self.do_faceoff(server);
+                        self.do_faceoff(server.rb_mut());
                     }
                 }
             } else {
-                server.values.time = server.values.time.saturating_sub(1);
-                if server.values.time == 0 {
-                    server.values.period += 1;
+                values.time = values.time.saturating_sub(1);
+                if values.time == 0 {
+                    values.period += 1;
                     self.pause_timer = intermission_time;
                     self.is_pause_goal = false;
-                    self.step_where_period_ended = server.game_step;
+                    self.step_where_period_ended = server.game_step();
                     self.too_late_printed_this_period = false;
-                    self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
-                    self.update_game_over(server);
+                    self.next_faceoff_spot = RinkFaceoffSpot::Center;
+                    self.update_game_over(server.rb_mut());
                 }
             }
         }
-        server.values.goal_message_timer = if self.is_pause_goal {
+        server.scoreboard_mut().goal_message_timer = if self.is_pause_goal {
             self.pause_timer
         } else {
             0
         };
     }
 
-    pub fn cleanup_player(&mut self, player_index: HQMServerPlayerIndex) {
+    pub fn cleanup_player(&mut self, player_index: PlayerIndex) {
         if let Some(x) = self
             .started_as_goalie
             .iter()
@@ -868,56 +867,58 @@ impl HQMMatch {
         self.preferred_positions.remove(&player_index);
     }
 
-    pub fn get_initial_game_values(&mut self) -> HQMInitialGameValues {
-        let mut values = HQMGameValues::default();
+    pub fn get_initial_game_values(&mut self) -> InitialGameValues {
+        let mut values = ScoreboardValues::default();
 
         values.time = self.config.time_warmup * 100;
-        HQMInitialGameValues {
+        InitialGameValues {
             values,
             puck_slots: self.config.warmup_pucks,
-            physics_configuration: self.config.physics_config.clone(),
         }
     }
-    pub fn game_started(&mut self, server: &mut HQMServer) {
+    pub fn game_started(&mut self, mut server: ServerMut) {
         self.paused = false;
         self.pause_timer = 0;
-        self.next_faceoff_spot = HQMRinkFaceoffSpot::Center;
-        self.icing_status = HQMIcingStatus::No;
-        self.offside_status = HQMOffsideStatus::Neutral;
-        self.twoline_pass_status = HQMTwoLinePassStatus::No;
+        self.next_faceoff_spot = RinkFaceoffSpot::Center;
+        self.icing_status = IcingStatus::No;
+        self.offside_status = OffsideStatus::Neutral;
+        self.twoline_pass_status = TwoLinePassStatus::No;
         self.start_next_replay = None;
         let warmup_pucks = self.config.warmup_pucks;
+        let rink = server.rink();
+        let width = rink.width;
+        let length = rink.length;
 
-        let puck_line_start = server.world.rink.width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
+        let puck_line_start = width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
 
         for i in 0..warmup_pucks {
             let pos = Point3::new(
                 puck_line_start + 0.8 * (i as f32),
                 self.config.spawn_puck_altitude,
-                server.world.rink.length / 2.0,
+                length / 2.0,
             );
             let rot = Rotation3::identity();
-            server.world.create_puck_object(pos, rot);
+            server.state_mut().spawn_puck(PuckObject::new(pos, rot));
         }
     }
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMIcingConfiguration {
+pub enum IcingConfiguration {
     Off,
     Touch,
     NoTouch,
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMOffsideConfiguration {
+pub enum OffsideConfiguration {
     Off,
     Delayed,
     Immediate,
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMTwoLinePassConfiguration {
+pub enum TwoLinePassConfiguration {
     Off,
     On,
     Forward,
@@ -926,14 +927,13 @@ pub enum HQMTwoLinePassConfiguration {
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMOffsideLineConfiguration {
+pub enum OffsideLineConfiguration {
     OffensiveBlue,
     Center,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum HQMPassPosition {
-    None,
+enum PassLocation {
     ReachedOwnBlue,
     PassedOwnBlue,
     ReachedCenter,
@@ -943,62 +943,50 @@ pub enum HQMPassPosition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HQMPass {
-    pub team: HQMTeam,
-    pub side: HQMRinkSide,
-    pub from: Option<HQMPassPosition>,
-    pub player: HQMServerPlayerIndex,
+struct Pass {
+    pub team: Team,
+    pub side: RinkSide,
+    pub from: Option<PassLocation>,
+    pub player: PlayerIndex,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum HQMIcingStatus {
-    No,                            // No icing
-    Warning(HQMTeam, HQMRinkSide), // Puck has reached the goal line, delayed icing
-    Icing(HQMTeam),                // Icing has been called
+enum IcingStatus {
+    No,                      // No icing
+    Warning(Team, RinkSide), // Puck has reached the goal line, delayed icing
+    Icing(Team),             // Icing has been called
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum HQMOffsideStatus {
-    Neutral,                  // No offside
-    InOffensiveZone(HQMTeam), // No offside, puck in offensive zone
-    Warning(
-        HQMTeam,
-        HQMRinkSide,
-        Option<HQMPassPosition>,
-        HQMServerPlayerIndex,
-    ), // Warning, puck entered offensive zone in an offside situation but not touched yet
-    Offside(HQMTeam),         // Offside has been called
+enum OffsideStatus {
+    Neutral,                                                    // No offside
+    InOffensiveZone(Team), // No offside, puck in offensive zone
+    Warning(Team, RinkSide, Option<PassLocation>, PlayerIndex), // Warning, puck entered offensive zone in an offside situation but not touched yet
+    Offside(Team),                                              // Offside has been called
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum HQMTwoLinePassStatus {
-    No, // No offside
-    Warning(
-        HQMTeam,
-        HQMRinkSide,
-        HQMPassPosition,
-        Vec<HQMServerPlayerIndex>,
-    ), // Warning, puck entered offensive zone in an offside situation but not touched yet
-    Offside(HQMTeam), // Offside has been called
+enum TwoLinePassStatus {
+    No,                                                      // No offside
+    Warning(Team, RinkSide, PassLocation, Vec<PlayerIndex>), // Warning, puck entered offensive zone in an offside situation but not touched yet
+    Offside(Team),                                           // Offside has been called
 }
 
 #[derive(Debug, Clone)]
-pub struct HQMPuckTouch {
-    pub player_index: HQMServerPlayerIndex,
-    pub skater_index: HQMObjectIndex,
-    pub team: HQMTeam,
+struct PuckTouch {
+    pub player_index: PlayerIndex,
+    pub team: Team,
     pub puck_pos: Point3<f32>,
     pub puck_speed: f32,
     pub first_time: u32,
     pub last_time: u32,
 }
 
-pub fn add_touch(
-    puck: &HQMPuck,
-    entry: Entry<HQMObjectIndex, VecDeque<HQMPuckTouch>>,
-    player_index: HQMServerPlayerIndex,
-    skater_index: HQMObjectIndex,
-    team: HQMTeam,
+fn add_touch(
+    puck: &PuckObject,
+    entry: Entry<usize, VecDeque<PuckTouch>>,
+    player_index: PlayerIndex,
+    team: Team,
     time: u32,
 ) {
     let puck_pos = puck.body.pos.clone();
@@ -1017,9 +1005,8 @@ pub fn add_touch(
         }
         _ => {
             touches.truncate(15);
-            touches.push_front(HQMPuckTouch {
+            touches.push_front(PuckTouch {
                 player_index,
-                skater_index,
                 team,
                 puck_pos,
                 puck_speed,
@@ -1030,70 +1017,66 @@ pub fn add_touch(
     }
 }
 
-pub fn get_faceoff_positions(
-    players: &HQMServerPlayerList,
-    preferred_positions: &HashMap<HQMServerPlayerIndex, &'static str>,
-) -> HashMap<HQMServerPlayerIndex, (HQMTeam, &'static str)> {
+fn get_faceoff_positions(
+    players: ServerPlayerList,
+    preferred_positions: &HashMap<PlayerIndex, &'static str>,
+) -> HashMap<PlayerIndex, (Team, &'static str)> {
     let mut res = HashMap::new();
 
     let mut red_players = smallvec::SmallVec::<[_; 32]>::new();
     let mut blue_players = smallvec::SmallVec::<[_; 32]>::new();
-    for (player_index, player) in players.iter() {
-        let team = player.object.map(|x| x.1);
+    for player in players.iter() {
+        let player_index = player.index;
+
+        let team = player.team();
 
         let preferred_position = preferred_positions.get(&player_index).map(|x| *x);
 
-        if team == Some(HQMTeam::Red) {
+        if team == Some(Team::Red) {
             red_players.push((player_index, preferred_position));
-        } else if team == Some(HQMTeam::Blue) {
+        } else if team == Some(Team::Blue) {
             blue_players.push((player_index, preferred_position));
         }
     }
 
-    setup_position(&mut res, &red_players, HQMTeam::Red);
-    setup_position(&mut res, &blue_players, HQMTeam::Blue);
+    setup_position(&mut res, &red_players, Team::Red);
+    setup_position(&mut res, &blue_players, Team::Blue);
 
     res
 }
 
-pub fn is_past_line(
-    server: &HQMServer,
-    player: &HQMServerPlayer,
-    team: HQMTeam,
-    line: &HQMRinkLine,
-) -> bool {
-    if let Some((object_index, skater_team)) = player.object {
+fn is_past_line(player: ServerPlayer, team: Team, line: &RinkLine) -> bool {
+    if let Some((skater_team, skater)) = player.skater() {
         if skater_team == team {
-            if let Some(skater) = server.world.objects.get_skater(object_index) {
-                let feet_pos =
-                    &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
-                if (team == HQMTeam::Red && line.side_of_line(&feet_pos, 0.0) == BlueSide)
-                    || (team == HQMTeam::Blue && line.side_of_line(&feet_pos, 0.0) == RedSide)
-                {
-                    // Player is past line
-                    return true;
-                }
+            let feet_pos =
+                &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
+            if (team == Team::Red && line.side_of_line(&feet_pos, 0.0) == BlueSide)
+                || (team == Team::Blue && line.side_of_line(&feet_pos, 0.0) == RedSide)
+            {
+                // Player is past line
+                return true;
             }
         }
     }
     false
 }
 
-pub fn has_players_in_offensive_zone(
-    server: &HQMServer,
-    team: HQMTeam,
-    ignore_player: Option<HQMServerPlayerIndex>,
+fn has_players_in_offensive_zone(
+    server: Server,
+    team: Team,
+    ignore_player: Option<PlayerIndex>,
 ) -> bool {
     let line = match team {
-        HQMTeam::Red => &server.world.rink.blue_zone_blue_line,
-        HQMTeam::Blue => &server.world.rink.red_zone_blue_line,
+        Team::Red => &server.rink().blue_zone_blue_line,
+        Team::Blue => &server.rink().red_zone_blue_line,
     };
 
-    for (player_index, player) in server.players.iter() {
+    for player in server.state().players().iter() {
+        let player_index = player.index;
         if Some(player_index) == ignore_player {
             continue;
         }
-        if is_past_line(server, player, team, line) {
+        if is_past_line(player, team, line) {
             return true;
         }
     }
@@ -1102,9 +1085,9 @@ pub fn has_players_in_offensive_zone(
 }
 
 fn setup_position(
-    positions: &mut HashMap<HQMServerPlayerIndex, (HQMTeam, &'static str)>,
-    players: &[(HQMServerPlayerIndex, Option<&'static str>)],
-    team: HQMTeam,
+    positions: &mut HashMap<PlayerIndex, (Team, &'static str)>,
+    players: &[(PlayerIndex, Option<&'static str>)],
+    team: Team,
 ) {
     let mut available_positions = Vec::from(ALLOWED_POSITIONS);
 
@@ -1168,11 +1151,11 @@ fn setup_position(
 }
 
 fn get_faceoff_spot(
-    rink: &HQMRink,
-    spot: HQMRinkFaceoffSpot,
+    rink: &Rink,
+    spot: RinkFaceoffSpot,
     spawn_point_offset: f32,
     spawn_player_altitude: f32,
-) -> HQMFaceoffSpot {
+) -> FaceoffSpot {
     let length = rink.length;
     let width = rink.width;
 
@@ -1346,7 +1329,7 @@ fn get_faceoff_spot(
             spawn_player_altitude,
         );
 
-        HQMFaceoffSpot {
+        FaceoffSpot {
             center_position,
             red_player_positions,
             blue_player_positions,
@@ -1354,79 +1337,37 @@ fn get_faceoff_spot(
     };
 
     match spot {
-        HQMRinkFaceoffSpot::Center => create_faceoff_spot(Point3::new(center_x, 0.0, center_z)),
-        HQMRinkFaceoffSpot::DefensiveZone(team, side) => {
+        RinkFaceoffSpot::Center => create_faceoff_spot(Point3::new(center_x, 0.0, center_z)),
+        RinkFaceoffSpot::DefensiveZone(team, side) => {
             let z = match team {
-                HQMTeam::Red => red_zone_faceoff_z,
-                HQMTeam::Blue => blue_zone_faceoff_z,
+                Team::Red => red_zone_faceoff_z,
+                Team::Blue => blue_zone_faceoff_z,
             };
             let x = match side {
-                HQMRinkSide::Left => left_faceoff_x,
-                HQMRinkSide::Right => right_faceoff_x,
+                RinkSide::LowerHalfZ => left_faceoff_x,
+                RinkSide::HigherHalfZ => right_faceoff_x,
             };
             create_faceoff_spot(Point3::new(x, 0.0, z))
         }
-        HQMRinkFaceoffSpot::Offside(team, side) => {
+        RinkFaceoffSpot::Offside(team, side) => {
             let z = match team {
-                HQMTeam::Red => red_neutral_faceoff_z,
-                HQMTeam::Blue => blue_neutral_faceoff_z,
+                Team::Red => red_neutral_faceoff_z,
+                Team::Blue => blue_neutral_faceoff_z,
             };
             let x = match side {
-                HQMRinkSide::Left => left_faceoff_x,
-                HQMRinkSide::Right => right_faceoff_x,
+                RinkSide::LowerHalfZ => left_faceoff_x,
+                RinkSide::HigherHalfZ => right_faceoff_x,
             };
             create_faceoff_spot(Point3::new(x, 0.0, z))
         }
-    }
-}
-
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum HQMSpawnPoint {
-    Center,
-    Bench,
-}
-pub fn get_spawnpoint(
-    rink: &HQMRink,
-    team: HQMTeam,
-    spawn_point: HQMSpawnPoint,
-) -> (Point3<f32>, Rotation3<f32>) {
-    match team {
-        HQMTeam::Red => match spawn_point {
-            HQMSpawnPoint::Center => {
-                let (z, rot) = ((rink.length / 2.0) + 3.0, 0.0);
-                let pos = Point3::new(rink.width / 2.0, 2.0, z);
-                let rot = Rotation3::from_euler_angles(0.0, rot, 0.0);
-                (pos, rot)
-            }
-            HQMSpawnPoint::Bench => {
-                let z = (rink.length / 2.0) + 4.0;
-                let pos = Point3::new(0.5, 2.0, z);
-                let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
-                (pos, rot)
-            }
-        },
-        HQMTeam::Blue => match spawn_point {
-            HQMSpawnPoint::Center => {
-                let (z, rot) = ((rink.length / 2.0) - 3.0, PI);
-                let pos = Point3::new(rink.width / 2.0, 2.0, z);
-                let rot = Rotation3::from_euler_angles(0.0, rot, 0.0);
-                (pos, rot)
-            }
-            HQMSpawnPoint::Bench => {
-                let z = (rink.length / 2.0) - 4.0;
-                let pos = Point3::new(0.5, 2.0, z);
-                let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
-                (pos, rot)
-            }
-        },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::hqm_match_util::setup_position;
-    use crate::hqm_server::HQMServerPlayerIndex;
-    use crate::hqm_server::HQMTeam;
+    use crate::game::PlayerIndex;
+    use crate::game::Team;
+    use crate::gamemode::match_util::setup_position;
     use std::collections::HashMap;
 
     #[test]
@@ -1436,68 +1377,53 @@ mod tests {
         let rw = "RW";
         let g = "G";
         let mut res1 = HashMap::new();
-        let players = vec![(HQMServerPlayerIndex(0), None)];
-        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
-        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
+        let players = vec![(PlayerIndex(0), None)];
+        setup_position(&mut res1, players.as_ref(), Team::Red);
+        assert_eq!(res1[&PlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(HQMServerPlayerIndex(0), Some(c))];
-        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
-        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
+        let players = vec![(PlayerIndex(0), Some(c))];
+        setup_position(&mut res1, players.as_ref(), Team::Red);
+        assert_eq!(res1[&PlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(HQMServerPlayerIndex(0), Some(lw))];
-        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
-        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
+        let players = vec![(PlayerIndex(0), Some(lw))];
+        setup_position(&mut res1, players.as_ref(), Team::Red);
+        assert_eq!(res1[&PlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(HQMServerPlayerIndex(0), Some(g))];
-        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
-        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
+        let players = vec![(PlayerIndex(0), Some(g))];
+        setup_position(&mut res1, players.as_ref(), Team::Red);
+        assert_eq!(res1[&PlayerIndex(0)].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![
-            (HQMServerPlayerIndex(0usize), Some(c)),
-            (HQMServerPlayerIndex(1), Some(lw)),
-        ];
-        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
-        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
-        assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
+        let players = vec![(PlayerIndex(0usize), Some(c)), (PlayerIndex(1), Some(lw))];
+        setup_position(&mut res1, players.as_ref(), Team::Red);
+        assert_eq!(res1[&PlayerIndex(0)].1, "C");
+        assert_eq!(res1[&PlayerIndex(1)].1, "LW");
 
         let mut res1 = HashMap::new();
-        let players = vec![
-            (HQMServerPlayerIndex(0), None),
-            (HQMServerPlayerIndex(1), Some(lw)),
-        ];
-        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
-        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
-        assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
+        let players = vec![(PlayerIndex(0), None), (PlayerIndex(1), Some(lw))];
+        setup_position(&mut res1, players.as_ref(), Team::Red);
+        assert_eq!(res1[&PlayerIndex(0)].1, "C");
+        assert_eq!(res1[&PlayerIndex(1)].1, "LW");
 
         let mut res1 = HashMap::new();
-        let players = vec![
-            (HQMServerPlayerIndex(0), Some(rw)),
-            (HQMServerPlayerIndex(1), Some(lw)),
-        ];
-        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
-        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
-        assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
+        let players = vec![(PlayerIndex(0), Some(rw)), (PlayerIndex(1), Some(lw))];
+        setup_position(&mut res1, players.as_ref(), Team::Red);
+        assert_eq!(res1[&PlayerIndex(0)].1, "C");
+        assert_eq!(res1[&PlayerIndex(1)].1, "LW");
 
         let mut res1 = HashMap::new();
-        let players = vec![
-            (HQMServerPlayerIndex(0), Some(g)),
-            (HQMServerPlayerIndex(1), Some(lw)),
-        ];
-        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
-        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "G");
-        assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "C");
+        let players = vec![(PlayerIndex(0), Some(g)), (PlayerIndex(1), Some(lw))];
+        setup_position(&mut res1, players.as_ref(), Team::Red);
+        assert_eq!(res1[&PlayerIndex(0)].1, "G");
+        assert_eq!(res1[&PlayerIndex(1)].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![
-            (HQMServerPlayerIndex(0usize), Some(c)),
-            (HQMServerPlayerIndex(1), Some(c)),
-        ];
-        setup_position(&mut res1, players.as_ref(), HQMTeam::Red);
-        assert_eq!(res1[&HQMServerPlayerIndex(0)].1, "C");
-        assert_eq!(res1[&HQMServerPlayerIndex(1)].1, "LW");
+        let players = vec![(PlayerIndex(0usize), Some(c)), (PlayerIndex(1), Some(c))];
+        setup_position(&mut res1, players.as_ref(), Team::Red);
+        assert_eq!(res1[&PlayerIndex(0)].1, "C");
+        assert_eq!(res1[&PlayerIndex(1)].1, "LW");
     }
 }

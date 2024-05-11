@@ -669,7 +669,7 @@ checksum = "f665ee40bc4a3c5590afb1e9677db74a508659dfd71e126420da8274909a0167"
 
 [[package]]
 name = "migo-hqm-server"
-version = "1.15.0"
+version = "1.16.0"
 dependencies = [
  "arr_macro",
  "async-stream",
@@ -680,6 +680,7 @@ dependencies = [
  "nalgebra",
  "notify-debouncer-full",
  "parking_lot",
+ "reborrow",
  "reqwest",
  "rust-ini",
  "smallvec",
@@ -987,6 +988,26 @@ name = "rawpointer"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
+
+[[package]]
+name = "reborrow"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
+dependencies = [
+ "reborrow-derive",
+]
+
+[[package]]
+name = "reborrow-derive"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58eaa5b826835abad866fa8045c54b199b7804a316feef51428931add14cbbbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "redox_syscall"

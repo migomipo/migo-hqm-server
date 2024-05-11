@@ -1,6 +1,5 @@
-use crate::hqm_game::{HQMGameObject, HQMPlayerInput};
-use crate::hqm_server::{HQMClientVersion, HQMMessage};
-use arr_macro::arr;
+use crate::game::PlayerInput;
+use crate::server::{HQMClientVersion, HQMMessage};
 use bytes::{BufMut, BytesMut};
 use nalgebra::storage::Storage;
 use nalgebra::{Matrix3, Vector2, Vector3, U1, U3};
@@ -36,7 +35,7 @@ pub enum HQMClientToServerMessage {
     },
     Update {
         current_game_id: u32,
-        input: HQMPlayerInput,
+        input: PlayerInput,
         deltatime: Option<u32>,
         new_known_packet: u32,
         known_msg_pos: usize,
@@ -113,7 +112,7 @@ impl HQMMessageCodec {
         let input_head_rot = parser.read_f32_aligned();
         let input_body_rot = parser.read_f32_aligned();
         let input_keys = parser.read_u32_aligned();
-        let input = HQMPlayerInput {
+        let input = PlayerInput {
             stick_angle: input_stick_angle,
             turn: input_turn,
             fwbw: input_fwbw,
@@ -537,14 +536,14 @@ impl<'a> HQMMessageReader<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum HQMObjectPacket {
+pub(crate) enum ObjectPacket {
     None,
-    Puck(HQMPuckPacket),
-    Skater(HQMSkaterPacket),
+    Puck(PuckPacket),
+    Skater(SkaterPacket),
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMSkaterPacket {
+pub(crate) struct SkaterPacket {
     pub pos: (u32, u32, u32),
     pub rot: (u32, u32),
     pub stick_pos: (u32, u32, u32),
@@ -554,7 +553,7 @@ pub(crate) struct HQMSkaterPacket {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HQMPuckPacket {
+pub(crate) struct PuckPacket {
     pub pos: (u32, u32, u32),
     pub rot: (u32, u32),
 }
@@ -613,7 +612,7 @@ pub(crate) fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage)
             writer.write_bits(6, player_index.0 as u32);
             writer.write_bits(1, if *in_server { 1 } else { 0 });
             let (object_index, team_num) = match object {
-                Some((i, team)) => (i.0 as u32, team.get_num()),
+                Some((i, team)) => (*i as u32, team.get_num()),
                 None => (u32::MAX, u32::MAX),
             };
             writer.write_bits(2, team_num);
@@ -634,7 +633,7 @@ pub(crate) fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage)
 
 pub(crate) fn write_objects(
     writer: &mut HQMMessageWriter,
-    packets: &VecDeque<[HQMObjectPacket; 32]>,
+    packets: &VecDeque<[ObjectPacket; 32]>,
     current_packet: u32,
     known_packet: u32,
 ) {
@@ -665,9 +664,9 @@ pub(crate) fn write_objects(
         let current_packet = &current_packets[i];
         let old_packet = old_packets.map(|x| &x[i]);
         match current_packet {
-            HQMObjectPacket::Puck(puck) => {
+            ObjectPacket::Puck(puck) => {
                 let old_puck = old_packet.and_then(|x| match x {
-                    HQMObjectPacket::Puck(old_puck) => Some(old_puck),
+                    ObjectPacket::Puck(old_puck) => Some(old_puck),
                     _ => None,
                 });
                 writer.write_bits(1, 1);
@@ -678,9 +677,9 @@ pub(crate) fn write_objects(
                 writer.write_pos(31, puck.rot.0, old_puck.map(|puck| puck.rot.0));
                 writer.write_pos(31, puck.rot.1, old_puck.map(|puck| puck.rot.1));
             }
-            HQMObjectPacket::Skater(skater) => {
+            ObjectPacket::Skater(skater) => {
                 let old_skater = old_packet.and_then(|x| match x {
-                    HQMObjectPacket::Skater(old_skater) => Some(old_skater),
+                    ObjectPacket::Skater(old_skater) => Some(old_skater),
                     _ => None,
                 });
                 writer.write_bits(1, 1);
@@ -726,22 +725,9 @@ pub(crate) fn write_objects(
                     old_skater.map(|skater| skater.body_rot),
                 );
             }
-            HQMObjectPacket::None => {
+            ObjectPacket::None => {
                 writer.write_bits(1, 0);
             }
         }
     }
-}
-
-pub(crate) fn get_packets(objects: &[HQMGameObject]) -> [HQMObjectPacket; 32] {
-    let mut packets = arr![HQMObjectPacket::None; 32];
-    for i in 0usize..32 {
-        let packet = match &objects[i] {
-            HQMGameObject::Puck(puck) => HQMObjectPacket::Puck(puck.get_packet()),
-            HQMGameObject::Player(player) => HQMObjectPacket::Skater(player.get_packet()),
-            HQMGameObject::None => HQMObjectPacket::None,
-        };
-        packets[i] = packet;
-    }
-    packets
 }

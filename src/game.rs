@@ -1,151 +1,20 @@
-use crate::hqm_parse;
+use crate::protocol;
 use nalgebra::{point, Matrix3, Point3, Rotation3, Unit, Vector2, Vector3};
 
-use std::fmt::Formatter;
-
-use crate::hqm_game::HQMRinkSideOfLine::{BlueSide, On, RedSide};
-use crate::hqm_parse::{HQMPuckPacket, HQMSkaterPacket};
+use crate::game::RinkSideOfLine::{BlueSide, On, RedSide};
+use crate::protocol::{PuckPacket, SkaterPacket};
 use arr_macro::arr;
 use std::f32::consts::PI;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
-pub struct HQMGameWorld {
-    pub objects: HQMGameWorldObjectList,
-    pub puck_slots: usize,
-    pub rink: HQMRink,
-    pub physics_config: HQMPhysicsConfiguration,
-}
-
-impl HQMGameWorld {
-    pub(crate) fn new(puck_slots: usize, physics_config: HQMPhysicsConfiguration) -> Self {
-        HQMGameWorld {
-            objects: HQMGameWorldObjectList {
-                objects: vec![HQMGameObject::None; 32],
-            },
-            puck_slots,
-            rink: HQMRink::new(30.0, 61.0, 8.5),
-            physics_config,
-        }
-    }
-}
-
-pub struct HQMGameWorldObjectList {
-    pub(crate) objects: Vec<HQMGameObject>,
-}
-
-impl HQMGameWorldObjectList {
-    pub fn get_puck(&self, HQMObjectIndex(object_index): HQMObjectIndex) -> Option<&HQMPuck> {
-        if let Some(HQMGameObject::Puck(puck)) = self.objects.get(object_index) {
-            Some(puck)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_puck_mut(
-        &mut self,
-        HQMObjectIndex(object_index): HQMObjectIndex,
-    ) -> Option<&mut HQMPuck> {
-        if let Some(HQMGameObject::Puck(puck)) = self.objects.get_mut(object_index) {
-            Some(puck)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_skater(&self, HQMObjectIndex(object_index): HQMObjectIndex) -> Option<&HQMSkater> {
-        if let Some(HQMGameObject::Player(skater)) = self.objects.get(object_index) {
-            Some(skater)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_skater_mut(
-        &mut self,
-        HQMObjectIndex(object_index): HQMObjectIndex,
-    ) -> Option<&mut HQMSkater> {
-        if let Some(HQMGameObject::Player(skater)) = self.objects.get_mut(object_index) {
-            Some(skater)
-        } else {
-            None
-        }
-    }
-}
-
-impl HQMGameWorld {
-    pub(crate) fn create_player_object(
-        &mut self,
-        start: Point3<f32>,
-        rot: Rotation3<f32>,
-        hand: HQMSkaterHand,
-        mass: f32,
-    ) -> Option<HQMObjectIndex> {
-        let object_slot = self.find_empty_player_slot();
-        if let Some(i) = object_slot {
-            self.objects.objects[i.0] =
-                HQMGameObject::Player(HQMSkater::new(start, rot, hand, mass));
-        }
-        return object_slot;
-    }
-
-    pub fn create_puck_object(
-        &mut self,
-        start: Point3<f32>,
-        rot: Rotation3<f32>,
-    ) -> Option<HQMObjectIndex> {
-        let object_slot = self.find_empty_puck_slot();
-        if let Some(i) = object_slot {
-            self.objects.objects[i.0] = HQMGameObject::Puck(HQMPuck::new(start, rot));
-        }
-        return object_slot;
-    }
-
-    fn find_empty_puck_slot(&self) -> Option<HQMObjectIndex> {
-        for i in 0..self.puck_slots {
-            if let HQMGameObject::None = self.objects.objects[i] {
-                return Some(HQMObjectIndex(i));
-            }
-        }
-        None
-    }
-
-    fn find_empty_player_slot(&self) -> Option<HQMObjectIndex> {
-        for i in self.puck_slots..self.objects.objects.len() {
-            if let HQMGameObject::None = self.objects.objects[i] {
-                return Some(HQMObjectIndex(i));
-            }
-        }
-        None
-    }
-
-    pub fn clear_pucks(&mut self) {
-        for x in self.objects.objects[0..self.puck_slots].iter_mut() {
-            *x = HQMGameObject::None;
-        }
-    }
-
-    pub(crate) fn remove_player(&mut self, HQMObjectIndex(i): HQMObjectIndex) -> bool {
-        if let r @ HQMGameObject::Player(_) = &mut self.objects.objects[i] {
-            *r = HQMGameObject::None;
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn remove_puck(&mut self, HQMObjectIndex(i): HQMObjectIndex) -> bool {
-        if let r @ HQMGameObject::Puck(_) = &mut self.objects.objects[i] {
-            *r = HQMGameObject::None;
-            true
-        } else {
-            false
-        }
-    }
-}
-
+/// Various time and scoreboard-related values.
+///
+/// These values are sent to the client and used to show period, time left, red and blue score,
+/// the big "Game Over" text and offside and icing calls.
 #[derive(Copy, Clone, Debug)]
-pub struct HQMGameValues {
-    pub rules_state: HQMRulesState,
+pub struct ScoreboardValues {
+    pub rules_state: RulesState,
 
     pub red_score: u32,
     pub blue_score: u32,
@@ -156,23 +25,10 @@ pub struct HQMGameValues {
     pub game_over: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct HQMPhysicsConfiguration {
-    pub gravity: f32,
-    pub limit_jump_speed: bool,
-    pub player_acceleration: f32,
-    pub player_deceleration: f32,
-    pub max_player_speed: f32,
-    pub puck_rink_friction: f32,
-    pub player_turning: f32,
-    pub player_shift_acceleration: f32,
-    pub max_player_shift_speed: f32,
-    pub player_shift_turning: f32,
-}
-impl Default for HQMGameValues {
+impl Default for ScoreboardValues {
     fn default() -> Self {
-        HQMGameValues {
-            rules_state: HQMRulesState::Regular {
+        ScoreboardValues {
+            rules_state: RulesState::Regular {
                 offside_warning: false,
                 icing_warning: false,
             },
@@ -186,20 +42,32 @@ impl Default for HQMGameValues {
     }
 }
 
+/// Physics properties that are used for player and puck movement in the physics engine.
 #[derive(Debug, Clone)]
-pub struct HQMRinkLine {
+pub struct PhysicsConfiguration {
+    pub gravity: f32,
+    pub limit_jump_speed: bool,
+    pub player_acceleration: f32,
+    pub player_deceleration: f32,
+    pub max_player_speed: f32,
+    pub puck_rink_friction: f32,
+    pub player_turning: f32,
+    pub player_shift_acceleration: f32,
+    pub max_player_shift_speed: f32,
+    pub player_shift_turning: f32,
+}
+
+/// Represents a line in the HQM rink.
+#[derive(Debug, Clone)]
+pub struct RinkLine {
+    /// Z coordinate of middle of line.
     pub z: f32,
+    /// Width of line.
     pub width: f32,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum HQMRinkSideOfLine {
-    BlueSide,
-    On,
-    RedSide,
-}
-impl HQMRinkLine {
-    pub fn side_of_line(&self, pos: &Point3<f32>, radius: f32) -> HQMRinkSideOfLine {
+impl RinkLine {
+    pub fn side_of_line(&self, pos: &Point3<f32>, radius: f32) -> RinkSideOfLine {
         let dot = pos.z - self.z;
         if dot > (self.width / 2.0) + radius {
             RedSide
@@ -211,8 +79,16 @@ impl HQMRinkLine {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RinkSideOfLine {
+    BlueSide,
+    On,
+    RedSide,
+}
+
+/// A rink net.
 #[derive(Debug, Clone)]
-pub struct HQMRinkNet {
+pub(crate) struct RinkNet {
     pub(crate) posts: Vec<(Point3<f32>, Point3<f32>, f32)>,
     pub(crate) surfaces: Vec<(Point3<f32>, Point3<f32>, Point3<f32>, Point3<f32>)>,
     pub(crate) left_post: Point3<f32>,
@@ -222,7 +98,7 @@ pub struct HQMRinkNet {
     pub(crate) right_post_inside: Vector3<f32>,
 }
 
-impl HQMRinkNet {
+impl RinkNet {
     fn new(pos: Point3<f32>, rot: Matrix3<f32>) -> Self {
         let front_width = 3.0;
         let back_width = 2.5;
@@ -252,7 +128,7 @@ impl HQMRinkNet {
             &pos + &rot * Vector3::new(back_half_width, 0.0, -lower_depth),
         );
 
-        HQMRinkNet {
+        RinkNet {
             posts: vec![
                 (front_lower_right.clone(), front_upper_right.clone(), 0.1875),
                 (front_lower_left.clone(), front_upper_left.clone(), 0.1875),
@@ -301,21 +177,31 @@ impl HQMRinkNet {
     }
 }
 
+/// A rink, with collision boundaries and nets.
+///
+/// In HQM, all coordinates are based in meters.
+///
+/// The X axis goes along the length of the rink,
+/// which is 61 meters long by default. The coordinates starts with 0.0 on the wall closest to the blue net, a
+/// and goes all the way up to 61.0 at the wall at the other end.
+///
+/// The Z axis goes along the width of the rink, which is 30 meters wide by default. The coordinates start with
+/// 0.0 at the left wall looking from the position of the red goalie, and goes up to 30.0 at the right wall.
 #[derive(Debug, Clone)]
-pub struct HQMRink {
-    pub planes: Vec<(Point3<f32>, Unit<Vector3<f32>>)>,
-    pub corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
-    pub red_net: HQMRinkNet,
-    pub blue_net: HQMRinkNet,
-    pub center_line: HQMRinkLine,
-    pub red_zone_blue_line: HQMRinkLine,
-    pub blue_zone_blue_line: HQMRinkLine,
+pub struct Rink {
+    pub(crate) planes: Vec<(Point3<f32>, Unit<Vector3<f32>>)>,
+    pub(crate) corners: Vec<(Point3<f32>, Vector3<f32>, f32)>,
+    pub(crate) red_net: RinkNet,
+    pub(crate) blue_net: RinkNet,
+    pub center_line: RinkLine,
+    pub red_zone_blue_line: RinkLine,
+    pub blue_zone_blue_line: RinkLine,
     pub width: f32,
     pub length: f32,
 }
 
-impl HQMRink {
-    fn new(width: f32, length: f32, corner_radius: f32) -> Self {
+impl Rink {
+    pub(crate) fn new(width: f32, length: f32, corner_radius: f32) -> Self {
         let zero = Point3::new(0.0, 0.0, 0.0);
         let planes = vec![
             (zero.clone(), Vector3::y_axis()),
@@ -363,29 +249,29 @@ impl HQMRink {
         let center_z = length / 2.0;
         let blue_zone_blueline_z = blue_line_distance_mid;
 
-        let blue_net = HQMRinkNet::new(
+        let blue_net = RinkNet::new(
             Point3::new(center_x, 0.0, goal_line_distance),
             Matrix3::identity(),
         );
-        let red_net = HQMRinkNet::new(
+        let red_net = RinkNet::new(
             Point3::new(center_x, 0.0, length - goal_line_distance),
             Matrix3::from_columns(&[-Vector3::x(), Vector3::y(), -Vector3::z()]),
         );
 
-        let red_zone_blue_line = HQMRinkLine {
+        let red_zone_blue_line = RinkLine {
             z: red_zone_blueline_z,
             width: line_width,
         };
-        let blue_zone_blue_line = HQMRinkLine {
+        let blue_zone_blue_line = RinkLine {
             z: blue_zone_blueline_z,
             width: line_width,
         };
-        let center_line = HQMRinkLine {
+        let center_line = RinkLine {
             z: center_z,
             width: line_width,
         };
 
-        HQMRink {
+        Rink {
             planes,
             corners,
             red_net,
@@ -399,8 +285,9 @@ impl HQMRink {
     }
 }
 
+/// Represents a physical body (both players and pucks) with a position, rotation and linear and angular velocities.
 #[derive(Debug, Clone)]
-pub struct HQMBody {
+pub struct PhysicsBody {
     pub pos: Point3<f32>,               // Measured in meters
     pub linear_velocity: Vector3<f32>,  // Measured in meters per hundred of a second
     pub rot: Rotation3<f32>,            // Rotation matrix
@@ -408,92 +295,38 @@ pub struct HQMBody {
     pub(crate) rot_mul: Vector3<f32>,
 }
 
+/// Represents a skater object.
+///
+/// If you set the position, rotation, and/or linear velocity directly without adjusting the collision balls,
+/// some weird things will happen with the inertia of the player. To fix this, use the reset_collision_balls method after
+/// changing the physics properties.
 #[derive(Debug, Clone)]
-pub struct HQMSkater {
-    pub body: HQMBody,
-    pub stick_pos: Point3<f32>,       // Measured in meters
-    pub stick_velocity: Vector3<f32>, // Measured in meters per hundred of a second
-    pub stick_rot: Rotation3<f32>,    // Rotation matrix
-    pub head_rot: f32,                // Radians
-    pub body_rot: f32,                // Radians
-    pub height: f32,
-    pub input: HQMPlayerInput,
-    pub jumped_last_frame: bool,
+pub struct SkaterObject {
+    pub body: PhysicsBody,
+    /// Stick position in absolute space, measured in meters.
+    pub stick_pos: Point3<f32>,
+    /// Stick velocity, measured in meters per hundred of a second
+    pub stick_velocity: Vector3<f32>,
+    /// Stick rotation.
+    pub stick_rot: Rotation3<f32>, // Rotation matrix
+    /// Left-right body rotation around the Y axis in radians. Left is negative and right is positive, and the normal range is -(7/8)π to (7/8)π.
+    pub head_rot: f32, // Radians
+    /// Forward-backward body rotation around the X axis in radians. Backwards is negative and forwards is positive, and the normal range is -π/2 to π/2.
+    pub body_rot: f32, // Radians
+    pub(crate) height: f32,
+    pub(crate) jumped_last_frame: bool,
     pub stick_placement: Vector2<f32>, // Azimuth and inclination in radians
     pub stick_placement_delta: Vector2<f32>, // Change in azimuth and inclination per hundred of a second
-    pub collision_balls: Vec<HQMSkaterCollisionBall>,
-    pub hand: HQMSkaterHand,
+    pub collision_balls: Vec<SkaterCollisionBall>,
+    pub hand: SkaterHand,
 }
 
-impl HQMSkater {
-    fn get_collision_balls(
-        pos: &Point3<f32>,
-        rot: &Rotation3<f32>,
-        linear_velocity: &Vector3<f32>,
-        mass: f32,
-    ) -> Vec<HQMSkaterCollisionBall> {
-        let mut collision_balls = Vec::with_capacity(6);
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(
-            Vector3::new(0.0, 0.0, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.225,
-            mass,
-        ));
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(
-            Vector3::new(0.25, 0.3125, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.25,
-            mass,
-        ));
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(
-            Vector3::new(-0.25, 0.3125, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.25,
-            mass,
-        ));
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(
-            Vector3::new(-0.1875, -0.1875, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.1875,
-            mass,
-        ));
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(
-            Vector3::new(0.1875, -0.1875, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.1875,
-            mass,
-        ));
-        collision_balls.push(HQMSkaterCollisionBall::from_skater(
-            Vector3::new(0.0, 0.5, 0.0),
-            pos,
-            &rot,
-            linear_velocity,
-            0.1875,
-            mass,
-        ));
-        collision_balls
-    }
-
-    pub(crate) fn new(
-        pos: Point3<f32>,
-        rot: Rotation3<f32>,
-        hand: HQMSkaterHand,
-        mass: f32,
-    ) -> Self {
+impl SkaterObject {
+    pub fn new(pos: Point3<f32>, rot: Rotation3<f32>, hand: SkaterHand) -> Self {
         let linear_velocity = Vector3::new(0.0, 0.0, 0.0);
-        let collision_balls = HQMSkater::get_collision_balls(&pos, &rot, &linear_velocity, mass);
-        HQMSkater {
-            body: HQMBody {
+        let collision_balls = SkaterObject::get_collision_balls(&pos, &rot, &linear_velocity, 1.0);
+        SkaterObject {
+            body: PhysicsBody {
                 pos: pos.clone(),
                 linear_velocity,
                 rot,
@@ -506,7 +339,6 @@ impl HQMSkater {
             head_rot: 0.0,
             body_rot: 0.0,
             height: 0.75,
-            input: HQMPlayerInput::default(),
             jumped_last_frame: false,
             stick_placement: Vector2::new(0.0, 0.0),
             stick_placement_delta: Vector2::new(0.0, 0.0),
@@ -515,11 +347,77 @@ impl HQMSkater {
         }
     }
 
-    pub(crate) fn get_packet(&self) -> HQMSkaterPacket {
-        let rot = hqm_parse::convert_matrix_to_network(31, &self.body.rot.matrix());
-        let stick_rot = hqm_parse::convert_matrix_to_network(25, &self.stick_rot.matrix());
+    pub fn reset_collision_balls(&mut self) {
+        self.collision_balls = Self::get_collision_balls(
+            &self.body.pos,
+            &self.body.rot,
+            &self.body.linear_velocity,
+            1.0,
+        );
+    }
+    fn get_collision_balls(
+        pos: &Point3<f32>,
+        rot: &Rotation3<f32>,
+        linear_velocity: &Vector3<f32>,
+        mass: f32,
+    ) -> Vec<SkaterCollisionBall> {
+        let mut collision_balls = Vec::with_capacity(6);
+        collision_balls.push(SkaterCollisionBall::from_skater(
+            Vector3::new(0.0, 0.0, 0.0),
+            pos,
+            rot,
+            linear_velocity,
+            0.225,
+            mass,
+        ));
+        collision_balls.push(SkaterCollisionBall::from_skater(
+            Vector3::new(0.25, 0.3125, 0.0),
+            pos,
+            rot,
+            linear_velocity,
+            0.25,
+            mass,
+        ));
+        collision_balls.push(SkaterCollisionBall::from_skater(
+            Vector3::new(-0.25, 0.3125, 0.0),
+            pos,
+            rot,
+            linear_velocity,
+            0.25,
+            mass,
+        ));
+        collision_balls.push(SkaterCollisionBall::from_skater(
+            Vector3::new(-0.1875, -0.1875, 0.0),
+            pos,
+            rot,
+            linear_velocity,
+            0.1875,
+            mass,
+        ));
+        collision_balls.push(SkaterCollisionBall::from_skater(
+            Vector3::new(0.1875, -0.1875, 0.0),
+            pos,
+            rot,
+            linear_velocity,
+            0.1875,
+            mass,
+        ));
+        collision_balls.push(SkaterCollisionBall::from_skater(
+            Vector3::new(0.0, 0.5, 0.0),
+            pos,
+            &rot,
+            linear_velocity,
+            0.1875,
+            mass,
+        ));
+        collision_balls
+    }
 
-        HQMSkaterPacket {
+    pub(crate) fn get_packet(&self) -> SkaterPacket {
+        let rot = protocol::convert_matrix_to_network(31, &self.body.rot.matrix());
+        let stick_rot = protocol::convert_matrix_to_network(25, &self.stick_rot.matrix());
+
+        SkaterPacket {
             pos: (
                 get_position(17, 1024.0 * self.body.pos.x),
                 get_position(17, 1024.0 * self.body.pos.y),
@@ -539,7 +437,7 @@ impl HQMSkater {
 }
 
 #[derive(Debug, Clone)]
-pub struct HQMSkaterCollisionBall {
+pub struct SkaterCollisionBall {
     pub offset: Vector3<f32>,
     pub pos: Point3<f32>,
     pub velocity: Vector3<f32>,
@@ -547,7 +445,7 @@ pub struct HQMSkaterCollisionBall {
     pub mass: f32,
 }
 
-impl HQMSkaterCollisionBall {
+impl SkaterCollisionBall {
     fn from_skater(
         offset: Vector3<f32>,
         skater_pos: &Point3<f32>,
@@ -557,7 +455,7 @@ impl HQMSkaterCollisionBall {
         mass: f32,
     ) -> Self {
         let pos = skater_pos + skater_rot * &offset;
-        HQMSkaterCollisionBall {
+        SkaterCollisionBall {
             offset,
             pos,
             velocity: velocity.clone_owned(),
@@ -567,20 +465,37 @@ impl HQMSkaterCollisionBall {
     }
 }
 
+/// Key and mouse inputs sent from the client to the server.
+///
 #[derive(Debug, Clone)]
-pub struct HQMPlayerInput {
+pub struct PlayerInput {
+    /// Stick angle. Normal range is -1 to 1.
     pub stick_angle: f32,
+    /// Left or right turning. Negative is left, positive is right. Normal range is -1 to 1.
     pub turn: f32,
+    /// Forward or backward movement. Negative is backwards, positive is forwards. Normal range is -1 to 1.
     pub fwbw: f32,
+    /// Stick position.
+    ///
+    /// The position is a vector with a X axis and a Y axis value, both in radians.
+    /// For the X axis, left is negative and right is positive, and the normal range is -π/2 to π/2.
+    /// For the Y axis, down is negative and up is positive, and the normal range is -(5/16)π to π/8
     pub stick: Vector2<f32>,
+
+    /// Left-right body rotation around the Y axis in radians. Left is negative and right is positive, and the normal range is -(7/8)π to (7/8)π.
     pub head_rot: f32,
+
+    /// Forward-backward body rotation around the X axis in radians. Backwards is negative and forwards is positive, and the normal range is -π/2 to π/2.
     pub body_rot: f32,
+
+    /// Key bit mask.
+    /// Some utility methods are provided to check whether certain keys are pressed.
     pub keys: u32,
 }
 
-impl Default for HQMPlayerInput {
+impl Default for PlayerInput {
     fn default() -> Self {
-        HQMPlayerInput {
+        PlayerInput {
             stick_angle: 0.0,
             turn: 0.0,
             fwbw: 0.0,
@@ -592,7 +507,7 @@ impl Default for HQMPlayerInput {
     }
 }
 
-impl HQMPlayerInput {
+impl PlayerInput {
     pub fn jump(&self) -> bool {
         self.keys & 0x1 != 0
     }
@@ -614,22 +529,23 @@ impl HQMPlayerInput {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum HQMSkaterHand {
+pub enum SkaterHand {
     Left,
     Right,
 }
 
+/// Represents an HQM puck.
 #[derive(Debug, Clone)]
-pub struct HQMPuck {
-    pub body: HQMBody,
+pub struct PuckObject {
+    pub body: PhysicsBody,
     pub radius: f32,
     pub height: f32,
 }
 
-impl HQMPuck {
-    fn new(pos: Point3<f32>, rot: Rotation3<f32>) -> Self {
-        HQMPuck {
-            body: HQMBody {
+impl PuckObject {
+    pub fn new(pos: Point3<f32>, rot: Rotation3<f32>) -> Self {
+        PuckObject {
+            body: PhysicsBody {
                 pos,
                 linear_velocity: Vector3::new(0.0, 0.0, 0.0),
                 rot,
@@ -641,9 +557,9 @@ impl HQMPuck {
         }
     }
 
-    pub(crate) fn get_packet(&self) -> HQMPuckPacket {
-        let rot = hqm_parse::convert_matrix_to_network(31, &self.body.rot.matrix());
-        HQMPuckPacket {
+    pub(crate) fn get_packet(&self) -> PuckPacket {
+        let rot = protocol::convert_matrix_to_network(31, &self.body.rot.matrix());
+        PuckPacket {
             pos: (
                 get_position(17, 1024.0 * self.body.pos.x),
                 get_position(17, 1024.0 * self.body.pos.y),
@@ -672,15 +588,9 @@ impl HQMPuck {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum HQMGameObject {
-    None,
-    Player(HQMSkater),
-    Puck(HQMPuck),
-}
-
+/// Rules state sent to the client.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum HQMRulesState {
+pub enum RulesState {
     Regular {
         offside_warning: bool,
         icing_warning: bool,
@@ -701,10 +611,64 @@ fn get_position(bits: u32, v: f32) -> u32 {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct HQMObjectIndex(pub usize);
+pub struct PlayerIndex(pub(crate) usize);
 
-impl std::fmt::Display for HQMObjectIndex {
+impl std::fmt::Display for PlayerIndex {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+impl std::str::FromStr for PlayerIndex {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(PlayerIndex)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum Team {
+    Red,
+    Blue,
+}
+
+impl Team {
+    pub(crate) fn get_num(self) -> u32 {
+        match self {
+            Team::Red => 0,
+            Team::Blue => 1,
+        }
+    }
+
+    pub fn get_other_team(self) -> Self {
+        match self {
+            Team::Red => Team::Blue,
+            Team::Blue => Team::Red,
+        }
+    }
+}
+
+impl Display for Team {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Team::Red => write!(f, "Red"),
+            Team::Blue => write!(f, "Blue"),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum PhysicsEvent {
+    PuckTouch { player: PlayerIndex, puck: usize },
+    PuckReachedDefensiveLine { team: Team, puck: usize },
+    PuckPassedDefensiveLine { team: Team, puck: usize },
+    PuckReachedCenterLine { team: Team, puck: usize },
+    PuckPassedCenterLine { team: Team, puck: usize },
+    PuckReachedOffensiveZone { team: Team, puck: usize },
+    PuckEnteredOffensiveZone { team: Team, puck: usize },
+
+    PuckEnteredNet { team: Team, puck: usize },
+    PuckPassedGoalLine { team: Team, puck: usize },
+    PuckTouchedNet { team: Team, puck: usize },
 }

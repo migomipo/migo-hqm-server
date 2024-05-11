@@ -1,26 +1,28 @@
 use tracing::info;
 
-use migo_hqm_server::hqm_behaviour::HQMServerBehaviour;
-use migo_hqm_server::hqm_match_util::{
-    get_spawnpoint, HQMMatch, HQMMatchConfiguration, HQMSpawnPoint,
-};
-use migo_hqm_server::hqm_server::HQMTeam;
-use migo_hqm_server::hqm_server::{HQMInitialGameValues, HQMServer, HQMServerPlayerIndex};
-use migo_hqm_server::hqm_simulate::HQMSimulationEvent;
 use std::collections::{HashMap, HashSet};
 
-pub struct HQMMatchBehaviour {
-    pub m: HQMMatch,
-    pub spawn_point: HQMSpawnPoint,
-    pub(crate) team_switch_timer: HashMap<HQMServerPlayerIndex, u32>,
-    pub(crate) show_extra_messages: HashSet<HQMServerPlayerIndex>,
+use crate::game::PhysicsEvent;
+use crate::game::{PlayerIndex, Team};
+pub use crate::gamemode::match_util::{
+    IcingConfiguration, Match, MatchConfiguration, OffsideConfiguration, OffsideLineConfiguration,
+    TwoLinePassConfiguration, ALLOWED_POSITIONS,
+};
+use crate::gamemode::util::{add_players, get_spawnpoint, SpawnPoint};
+use crate::gamemode::{ExitReason, GameMode, InitialGameValues, ServerMut, ServerMutParts};
+
+pub struct StandardMatchGameMode {
+    pub m: Match,
+    pub spawn_point: SpawnPoint,
+    pub(crate) team_switch_timer: HashMap<PlayerIndex, u32>,
+    pub(crate) show_extra_messages: HashSet<PlayerIndex>,
     pub team_max: usize,
 }
 
-impl HQMMatchBehaviour {
-    pub fn new(config: HQMMatchConfiguration, team_max: usize, spawn_point: HQMSpawnPoint) -> Self {
-        HQMMatchBehaviour {
-            m: HQMMatch::new(config),
+impl StandardMatchGameMode {
+    pub fn new(config: MatchConfiguration, team_max: usize, spawn_point: SpawnPoint) -> Self {
+        StandardMatchGameMode {
+            m: Match::new(config),
             spawn_point,
             team_switch_timer: Default::default(),
             show_extra_messages: Default::default(),
@@ -28,126 +30,44 @@ impl HQMMatchBehaviour {
         }
     }
 
-    fn update_players(&mut self, server: &mut HQMServer) {
-        let mut spectating_players = smallvec::SmallVec::<[_; 32]>::new();
-        let mut joining_red = smallvec::SmallVec::<[_; 32]>::new();
-        let mut joining_blue = smallvec::SmallVec::<[_; 32]>::new();
-        for (player_index, player) in server.players.iter() {
-            self.team_switch_timer
-                .get_mut(&player_index)
-                .map(|x| *x = x.saturating_sub(1));
-            if player.input.join_red() || player.input.join_blue() {
-                let has_skater = player.object.is_some();
-                if !has_skater
-                    && self
-                        .team_switch_timer
-                        .get(&player_index)
-                        .map_or(true, |x| *x == 0)
-                {
-                    if player.input.join_red() {
-                        joining_red.push((player_index, player.player_name.clone()));
-                    } else if player.input.join_blue() {
-                        joining_blue.push((player_index, player.player_name.clone()));
-                    }
-                }
-            } else if player.input.spectate() {
-                let has_skater = player.object.is_some();
-                if has_skater {
-                    self.team_switch_timer.insert(player_index, 500);
-                    spectating_players.push((player_index, player.player_name.clone()))
-                }
-            }
-        }
-        for (player_index, player_name) in spectating_players {
-            info!("{} ({}) is spectating", player_name, player_index);
-            server.move_to_spectator(player_index);
-            let s = format!("{} is spectating", player_name);
-            for i in self.show_extra_messages.iter() {
-                server
-                    .messages
-                    .add_directed_server_chat_message(s.clone(), *i);
-            }
-        }
-        if !joining_red.is_empty() || !joining_blue.is_empty() {
-            let (red_player_count, blue_player_count) = {
-                let mut red_player_count = 0usize;
-                let mut blue_player_count = 0usize;
-                for (_, player) in server.players.iter() {
-                    if let Some((_, team)) = player.object {
-                        if team == HQMTeam::Red {
-                            red_player_count += 1;
-                        } else if team == HQMTeam::Blue {
-                            blue_player_count += 1;
-                        }
-                    }
-                }
-                (red_player_count, blue_player_count)
-            };
-            let mut new_red_player_count = red_player_count;
-            let mut new_blue_player_count = blue_player_count;
+    fn update_players(&mut self, mut server: ServerMut) {
+        let spawn_point = self.spawn_point;
+        let ServerMutParts { state, rink, .. } = server.as_mut_parts();
+        let rink = &*rink;
 
-            for (player_index, player_name) in joining_red {
-                if add_player(
-                    &mut self.m,
-                    player_index,
-                    &player_name,
-                    server,
-                    HQMTeam::Red,
-                    self.spawn_point,
-                    &mut new_red_player_count,
-                    self.team_max,
-                ) {
-                    let s = format!("{} is playing for Red", player_name);
-                    for i in self.show_extra_messages.iter() {
-                        server
-                            .messages
-                            .add_directed_server_chat_message(s.clone(), *i);
-                    }
-                }
-            }
-            for (player_index, player_name) in joining_blue {
-                if add_player(
-                    &mut self.m,
-                    player_index,
-                    &player_name,
-                    server,
-                    HQMTeam::Blue,
-                    self.spawn_point,
-                    &mut new_blue_player_count,
-                    self.team_max,
-                ) {
-                    let s = format!("{} is playing for Blue", player_name);
-                    for i in self.show_extra_messages.iter() {
-                        server
-                            .messages
-                            .add_directed_server_chat_message(s.clone(), *i);
-                    }
-                }
-            }
+        let (red_player_count, blue_player_count) = add_players(
+            state,
+            self.team_max,
+            &mut self.team_switch_timer,
+            Some(&self.show_extra_messages),
+            |team, _| get_spawnpoint(rink, team, spawn_point),
+            |_| {},
+            |player_index, _| {
+                self.m.clear_started_goalie(player_index);
+            },
+        );
 
-            if server.values.period == 0
-                && server.values.time > 2000
-                && new_red_player_count > 0
-                && new_blue_player_count > 0
-            {
-                server.values.time = 2000;
-            }
+        let values = server.scoreboard_mut();
+
+        if values.period == 0 && values.time > 2000 && red_player_count > 0 && blue_player_count > 0
+        {
+            values.time = 2000;
         }
     }
 
     pub(crate) fn force_player_off_ice(
         &mut self,
-        server: &mut HQMServer,
-        admin_player_index: HQMServerPlayerIndex,
-        force_player_index: HQMServerPlayerIndex,
+        mut server: ServerMut,
+        admin_player_index: PlayerIndex,
+        force_player_index: PlayerIndex,
     ) {
-        if let Some(player) = server.players.get(admin_player_index) {
-            if player.is_admin {
-                let admin_player_name = player.player_name.clone();
+        if let Some(player) = server.state().players().get(admin_player_index) {
+            if player.is_admin() {
+                let admin_player_name = player.name();
 
-                if let Some(force_player) = server.players.get(force_player_index) {
-                    let force_player_name = force_player.player_name.clone();
-                    if server.move_to_spectator(force_player_index) {
+                if let Some(force_player) = server.state().players().get(force_player_index) {
+                    let force_player_name = force_player.name();
+                    if server.state_mut().move_to_spectator(force_player_index) {
                         let msg = format!(
                             "{} forced off ice by {}",
                             force_player_name, admin_player_name
@@ -159,12 +79,12 @@ impl HQMMatchBehaviour {
                             force_player_name,
                             force_player_index
                         );
-                        server.messages.add_server_chat_message(msg);
+                        server.state_mut().add_server_chat_message(msg);
                         self.team_switch_timer.insert(force_player_index, 500);
                     }
                 }
             } else {
-                server.admin_deny_message(admin_player_index);
+                server.state_mut().admin_deny_message(admin_player_index);
                 return;
             }
         }
@@ -172,51 +92,49 @@ impl HQMMatchBehaviour {
 
     pub(crate) fn set_team_size(
         &mut self,
-        server: &mut HQMServer,
-        player_index: HQMServerPlayerIndex,
+        mut server: ServerMut,
+        player_index: PlayerIndex,
         size: &str,
     ) {
-        if let Some(player) = server.players.get(player_index) {
-            if player.is_admin {
+        if let Some(player) = server.state().players().get(player_index) {
+            if player.is_admin() {
                 if let Ok(new_num) = size.parse::<usize>() {
                     if new_num > 0 && new_num <= 15 {
                         self.team_max = new_num;
+                        let name = player.name();
 
-                        info!(
-                            "{} ({}) set team size to {}",
-                            player.player_name, player_index, new_num
-                        );
-                        let msg = format!("Team size set to {} by {}", new_num, player.player_name);
+                        info!("{} ({}) set team size to {}", name, player_index, new_num);
+                        let msg = format!("Team size set to {} by {}", new_num, name);
 
-                        server.messages.add_server_chat_message(msg);
+                        server.state_mut().add_server_chat_message(msg);
                     }
                 }
             } else {
-                server.admin_deny_message(player_index);
+                server.state_mut().admin_deny_message(player_index);
             }
         }
     }
 }
 
-impl HQMServerBehaviour for HQMMatchBehaviour {
-    fn init(&mut self, server: &mut HQMServer) {
-        server.history_length = 1000;
+impl GameMode for StandardMatchGameMode {
+    fn init(&mut self, mut server: ServerMut) {
+        server.set_history_length(1000)
     }
 
-    fn before_tick(&mut self, server: &mut HQMServer) {
+    fn before_tick(&mut self, server: ServerMut) {
         self.update_players(server);
     }
 
-    fn after_tick(&mut self, server: &mut HQMServer, events: &[HQMSimulationEvent]) {
+    fn after_tick(&mut self, server: ServerMut, events: &[PhysicsEvent]) {
         self.m.after_tick(server, events);
     }
 
     fn handle_command(
         &mut self,
-        server: &mut HQMServer,
+        mut server: ServerMut,
         command: &str,
         arg: &str,
-        player_index: HQMServerPlayerIndex,
+        player_index: PlayerIndex,
     ) {
         match command {
             "set" => {
@@ -226,13 +144,13 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                         "redscore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
                                 self.m
-                                    .set_score(server, HQMTeam::Red, input_score, player_index);
+                                    .set_score(server, Team::Red, input_score, player_index);
                             }
                         }
                         "bluescore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
                                 self.m
-                                    .set_score(server, HQMTeam::Blue, input_score, player_index);
+                                    .set_score(server, Team::Blue, input_score, player_index);
                             }
                         }
                         "period" => {
@@ -322,11 +240,6 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                                 self.set_team_size(server, player_index, arg);
                             }
                         }
-                        "replay" => {
-                            if let Some(arg) = args.get(1) {
-                                server.set_replay(player_index, arg);
-                            }
-                        }
                         "goalreplay" => {
                             if let Some(arg) = args.get(1) {
                                 self.m.set_goal_replay(server, player_index, arg);
@@ -376,7 +289,7 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
                     .set_preferred_faceoff_position(server, player_index, arg);
             }
             "fs" => {
-                if let Ok(force_player_index) = arg.parse::<HQMServerPlayerIndex>() {
+                if let Ok(force_player_index) = arg.parse::<PlayerIndex>() {
                     self.force_player_off_ice(server, player_index, force_player_index);
                 }
             }
@@ -392,14 +305,14 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
             "chatextend" => {
                 if arg.eq_ignore_ascii_case("true") || arg.eq_ignore_ascii_case("on") {
                     if self.show_extra_messages.insert(player_index) {
-                        server.messages.add_directed_server_chat_message(
+                        server.state_mut().add_directed_server_chat_message(
                             "Team change messages activated",
                             player_index,
                         );
                     }
                 } else if arg.eq_ignore_ascii_case("false") || arg.eq_ignore_ascii_case("off") {
                     if self.show_extra_messages.remove(&player_index) {
-                        server.messages.add_directed_server_chat_message(
+                        server.state_mut().add_directed_server_chat_message(
                             "Team change messages de-activated",
                             player_index,
                         );
@@ -410,58 +323,30 @@ impl HQMServerBehaviour for HQMMatchBehaviour {
         };
     }
 
-    fn get_initial_game_values(&mut self) -> HQMInitialGameValues {
+    fn get_initial_game_values(&mut self) -> InitialGameValues {
         self.m.get_initial_game_values()
     }
 
-    fn game_started(&mut self, server: &mut HQMServer) {
+    fn game_started(&mut self, server: ServerMut) {
         self.m.game_started(server);
     }
 
-    fn before_player_exit(&mut self, _server: &mut HQMServer, player_index: HQMServerPlayerIndex) {
+    fn before_player_exit(
+        &mut self,
+        _server: ServerMut,
+        player_index: PlayerIndex,
+        _reason: ExitReason,
+    ) {
         self.m.cleanup_player(player_index);
         self.team_switch_timer.remove(&player_index);
         self.show_extra_messages.remove(&player_index);
     }
 
-    fn get_number_of_players(&self) -> u32 {
+    fn server_list_team_size(&self) -> u32 {
         self.team_max as u32
     }
 
-    fn save_replay_data(&self, server: &HQMServer) -> bool {
-        server.values.period > 0
-    }
-}
-
-fn add_player(
-    m: &mut HQMMatch,
-    player_index: HQMServerPlayerIndex,
-    player_name: &str,
-    server: &mut HQMServer,
-    team: HQMTeam,
-    spawn_point: HQMSpawnPoint,
-    player_count: &mut usize,
-    team_max: usize,
-) -> bool {
-    if *player_count >= team_max {
-        return false;
-    }
-
-    let (pos, rot) = get_spawnpoint(&server.world.rink, team, spawn_point);
-
-    if server
-        .spawn_skater(player_index, team, pos, rot, false)
-        .is_some()
-    {
-        info!(
-            "{} ({}) has joined team {:?}",
-            player_name, player_index, team
-        );
-        *player_count += 1;
-
-        m.clear_started_goalie(player_index);
-        true
-    } else {
-        false
+    fn save_replay_data(&self, server: ServerMut) -> bool {
+        server.scoreboard().period > 0
     }
 }

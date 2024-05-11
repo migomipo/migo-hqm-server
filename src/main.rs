@@ -1,29 +1,21 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // INI Crate For configuration
 extern crate ini;
 use ini::Ini;
 use std::env;
 
-mod hqm_match;
-
-mod hqm_russian;
-mod hqm_shootout;
-mod hqm_warmup;
-
-use crate::hqm_match::HQMMatchBehaviour;
-
-use crate::hqm_russian::HQMRussianBehaviour;
-use crate::hqm_shootout::HQMShootoutBehaviour;
-use crate::hqm_warmup::HQMPermanentWarmup;
 use ini::Properties;
-use migo_hqm_server::hqm_game::HQMPhysicsConfiguration;
-use migo_hqm_server::hqm_match_util::{
-    HQMIcingConfiguration, HQMMatchConfiguration, HQMOffsideConfiguration,
-    HQMOffsideLineConfiguration, HQMSpawnPoint, HQMTwoLinePassConfiguration,
+use migo_hqm_server::game::PhysicsConfiguration;
+use migo_hqm_server::gamemode::russian::RussianGameMode;
+use migo_hqm_server::gamemode::shootout::ShootoutGameMode;
+use migo_hqm_server::gamemode::standard_match::{
+    IcingConfiguration, MatchConfiguration, OffsideConfiguration, OffsideLineConfiguration,
+    StandardMatchGameMode, TwoLinePassConfiguration,
 };
-use migo_hqm_server::hqm_server;
-use migo_hqm_server::hqm_server::{HQMServerConfiguration, ReplayEnabled, ReplaySaving};
+use migo_hqm_server::gamemode::util::SpawnPoint;
+use migo_hqm_server::gamemode::warmup::PermanentWarmup;
+use migo_hqm_server::{BanCheck, ReplayEnabled, ReplaySaving, ServerConfiguration};
 use tracing_appender;
 use tracing_subscriber;
 
@@ -140,7 +132,7 @@ async fn main() -> std::io::Result<()> {
 
         let limit_jump_speed = get_optional(game_section, "limit_jump_speed", false, is_true);
 
-        let config = HQMServerConfiguration {
+        let config = ServerConfiguration {
             welcome: welcome_str,
             password: server_password,
             player_max: server_player_max,
@@ -148,7 +140,6 @@ async fn main() -> std::io::Result<()> {
             replay_saving,
             server_name,
             server_service,
-            ban_file,
         };
 
         // Physics
@@ -192,7 +183,7 @@ async fn main() -> std::io::Result<()> {
             |x| x.parse::<f32>().unwrap() / 10000.0,
         );
 
-        let physics_config = HQMPhysicsConfiguration {
+        let physics_config = PhysicsConfiguration {
             gravity,
             limit_jump_speed,
             player_acceleration,
@@ -213,6 +204,17 @@ async fn main() -> std::io::Result<()> {
             .with_target(false)
             .with_writer(non_blocking)
             .init();
+
+        let ban = if let Some(ban_file) = ban_file.as_deref() {
+            let path = PathBuf::from(ban_file.to_string());
+            BanCheck::new_file(path).await
+        } else {
+            BanCheck::InMemory {
+                file: None,
+                ban_list: Default::default(),
+                watcher: None,
+            }
+        };
 
         return match mode {
             HQMServerMode::Match => {
@@ -240,57 +242,56 @@ async fn main() -> std::io::Result<()> {
                 let first_to =
                     get_optional(game_section, "first", 0, |x| x.parse::<u32>().unwrap());
 
-                let icing =
-                    get_optional(
-                        game_section,
-                        "icing",
-                        HQMIcingConfiguration::Off,
-                        |x| match x {
-                            "on" | "touch" => HQMIcingConfiguration::Touch,
-                            "notouch" => HQMIcingConfiguration::NoTouch,
-                            _ => HQMIcingConfiguration::Off,
-                        },
-                    );
+                let icing = get_optional(
+                    game_section,
+                    "icing",
+                    IcingConfiguration::Off,
+                    |x| match x {
+                        "on" | "touch" => IcingConfiguration::Touch,
+                        "notouch" => IcingConfiguration::NoTouch,
+                        _ => IcingConfiguration::Off,
+                    },
+                );
 
                 let offside = get_optional(
                     game_section,
                     "offside",
-                    HQMOffsideConfiguration::Off,
+                    OffsideConfiguration::Off,
                     |x| match x {
-                        "on" | "delayed" => HQMOffsideConfiguration::Delayed,
-                        "immediate" | "imm" => HQMOffsideConfiguration::Immediate,
-                        _ => HQMOffsideConfiguration::Off,
+                        "on" | "delayed" => OffsideConfiguration::Delayed,
+                        "immediate" | "imm" => OffsideConfiguration::Immediate,
+                        _ => OffsideConfiguration::Off,
                     },
                 );
 
                 let offside_line = get_optional(
                     game_section,
                     "offsideline",
-                    HQMOffsideLineConfiguration::OffensiveBlue,
+                    OffsideLineConfiguration::OffensiveBlue,
                     |x| match x {
-                        "blue" => HQMOffsideLineConfiguration::OffensiveBlue,
-                        "center" => HQMOffsideLineConfiguration::Center,
-                        _ => HQMOffsideLineConfiguration::OffensiveBlue,
+                        "blue" => OffsideLineConfiguration::OffensiveBlue,
+                        "center" => OffsideLineConfiguration::Center,
+                        _ => OffsideLineConfiguration::OffensiveBlue,
                     },
                 );
 
                 let twoline_pass = get_optional(
                     game_section,
                     "twolinepass",
-                    HQMTwoLinePassConfiguration::Off,
+                    TwoLinePassConfiguration::Off,
                     |x| match x {
-                        "on" => HQMTwoLinePassConfiguration::On,
-                        "forward" => HQMTwoLinePassConfiguration::Forward,
-                        "double" | "both" => HQMTwoLinePassConfiguration::Double,
-                        "blue" | "three" | "threeline" => HQMTwoLinePassConfiguration::ThreeLine,
-                        _ => HQMTwoLinePassConfiguration::Off,
+                        "on" => TwoLinePassConfiguration::On,
+                        "forward" => TwoLinePassConfiguration::Forward,
+                        "double" | "both" => TwoLinePassConfiguration::Double,
+                        "blue" | "three" | "threeline" => TwoLinePassConfiguration::ThreeLine,
+                        _ => TwoLinePassConfiguration::Off,
                     },
                 );
 
                 let spawn_point =
-                    get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
-                        "bench" => HQMSpawnPoint::Bench,
-                        _ => HQMSpawnPoint::Center,
+                    get_optional(game_section, "spawn", SpawnPoint::Center, |x| match x {
+                        "bench" => SpawnPoint::Bench,
+                        _ => SpawnPoint::Center,
                     });
 
                 let spawn_point_offset = get_optional(game_section, "spawn_offset", 2.75f32, |x| {
@@ -314,7 +315,7 @@ async fn main() -> std::io::Result<()> {
 
                 let goal_replay = get_optional(game_section, "goal_replay", false, is_true);
 
-                let match_config = HQMMatchConfiguration {
+                let match_config = MatchConfiguration {
                     time_period: rules_time_period,
                     time_warmup: rules_time_warmup,
                     time_break: rule_time_break,
@@ -328,7 +329,6 @@ async fn main() -> std::io::Result<()> {
                     warmup_pucks,
                     use_mph,
                     goal_replay,
-                    physics_config,
                     periods,
                     spawn_point_offset,
                     spawn_player_altitude,
@@ -336,11 +336,13 @@ async fn main() -> std::io::Result<()> {
                     spawn_keep_stick_position,
                 };
 
-                hqm_server::run_server(
+                migo_hqm_server::run_server(
                     server_port,
                     public_address,
                     config,
-                    HQMMatchBehaviour::new(match_config, server_team_max, spawn_point),
+                    physics_config,
+                    ban,
+                    StandardMatchGameMode::new(match_config, server_team_max, spawn_point),
                 )
                 .await
             }
@@ -350,16 +352,18 @@ async fn main() -> std::io::Result<()> {
                 });
 
                 let spawn_point =
-                    get_optional(game_section, "spawn", HQMSpawnPoint::Center, |x| match x {
-                        "bench" => HQMSpawnPoint::Bench,
-                        _ => HQMSpawnPoint::Center,
+                    get_optional(game_section, "spawn", SpawnPoint::Center, |x| match x {
+                        "bench" => SpawnPoint::Bench,
+                        _ => SpawnPoint::Center,
                     });
 
-                hqm_server::run_server(
+                migo_hqm_server::run_server(
                     server_port,
                     public_address,
                     config,
-                    HQMPermanentWarmup::new(physics_config, warmup_pucks, spawn_point),
+                    physics_config,
+                    ban,
+                    PermanentWarmup::new(warmup_pucks, spawn_point),
                 )
                 .await
             }
@@ -367,11 +371,13 @@ async fn main() -> std::io::Result<()> {
                 let attempts =
                     get_optional(game_section, "attempts", 10, |x| x.parse::<u32>().unwrap());
 
-                hqm_server::run_server(
+                migo_hqm_server::run_server(
                     server_port,
                     public_address,
                     config,
-                    HQMRussianBehaviour::new(attempts, server_team_max, physics_config),
+                    physics_config,
+                    ban,
+                    RussianGameMode::new(attempts, server_team_max),
                 )
                 .await
             }
@@ -379,11 +385,13 @@ async fn main() -> std::io::Result<()> {
                 let attempts =
                     get_optional(game_section, "attempts", 5, |x| x.parse::<u32>().unwrap());
 
-                hqm_server::run_server(
+                migo_hqm_server::run_server(
                     server_port,
                     public_address,
                     config,
-                    HQMShootoutBehaviour::new(attempts, physics_config),
+                    physics_config,
+                    ban,
+                    ShootoutGameMode::new(attempts),
                 )
                 .await
             }
