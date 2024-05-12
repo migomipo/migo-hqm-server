@@ -4,9 +4,12 @@ This is my own HQM server implementation. It attempts to recreate the physics as
 
 ## How to start
 
-You will need a configuration file to start, a default config.ini is provided. 
+You will need a configuration file to start, a default config.ini is provided in `config` folder. 
 
 Run `migo-hqm-server` to start the server with config.ini in the current working directory, or `migo-hqm-server <path-to-config>` to run with any compatible configuration file in your system.
+
+### Running with Docker
+Run the command `docker compose up --build -d`
 
 ## How to configure
 
