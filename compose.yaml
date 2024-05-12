@@ -1,0 +1,9 @@
+services:
+  server:
+    build:
+      context: .
+      target: final
+    volumes:
+      - ./config:/app/config
+    ports:
+      - 27585:27585/udp
