@@ -472,7 +472,7 @@ impl<'a> ServerPlayerMut<'a> {
         self.player.is_admin
     }
 
-    pub fn name(&self) -> Rc<String> {
+    pub fn name(&self) -> Rc<str> {
         self.player.player_name.clone()
     }
 
@@ -531,7 +531,7 @@ impl<'a> ServerPlayer<'a> {
         self.player.is_admin
     }
 
-    pub fn name(&self) -> Rc<String> {
+    pub fn name(&self) -> Rc<str> {
         self.player.player_name.clone()
     }
 

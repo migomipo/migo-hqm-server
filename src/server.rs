@@ -60,7 +60,7 @@ impl HQMClientVersion {
 #[derive(Debug, Clone)]
 pub(crate) enum HQMMessage {
     PlayerUpdate {
-        player_name: Rc<String>,
+        player_name: Rc<str>,
         object: Option<(usize, Team)>,
         player_index: PlayerIndex,
         in_server: bool,
@@ -293,8 +293,13 @@ impl HQMServerState {
                     .as_ref()
                     .map(|(object_index, _, team)| (*object_index, *team));
 
+                let team_tag_name = match team {
+                    Team::Red => player.player_name_red.clone(),
+                    Team::Blue => player.player_name_blue.clone(),
+                };
+
                 let change1 = Rc::new(HQMMessage::PlayerUpdate {
-                    player_name: Rc::new(format!("[{}] {}", team, player.player_name)),
+                    player_name: team_tag_name,
                     object,
                     player_index: sender_index,
                     in_server: true,
@@ -310,16 +315,8 @@ impl HQMServerState {
                     message: Cow::Owned(message.to_owned()),
                 });
 
-                let mut matching_indices = smallvec::SmallVec::<[_; 32]>::new();
-                for (player_index, player) in self.players.iter_players() {
-                    if let Some(player_team) = player.team() {
-                        if player_team == team {
-                            matching_indices.push(player_index);
-                        }
-                    }
-                }
-                for player_index in matching_indices {
-                    if let Some(player) = self.players.get_player_mut(player_index) {
+                for (_, player) in self.players.iter_players_mut() {
+                    if player.team().is_some_and(|t| t == team) {
                         player.add_message(change1.clone());
                         player.add_message(chat.clone());
                         player.add_message(change2.clone());
@@ -413,7 +410,7 @@ impl HQMServerState {
         None
     }
 
-    fn add_player(&mut self, player_name: String, addr: SocketAddr) -> Option<PlayerIndex> {
+    fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerIndex> {
         fn find_empty_player_slot(players: &[Option<HQMServerPlayer>]) -> Option<PlayerIndex> {
             return players.iter().position(|x| x.is_none()).map(PlayerIndex);
         }
@@ -710,7 +707,7 @@ impl HQMServer {
             return;
         }
 
-        if let Some(player_index) = self.add_player(name.clone(), addr) {
+        if let Some(player_index) = self.add_player(&name, addr) {
             behaviour.after_player_join(self.into(), player_index);
             info!(
                 "{} ({}) joined server from address {:?}",
@@ -984,10 +981,10 @@ impl HQMServer {
         }
     }
 
-    pub fn player_exact_unique_match(&self, name: &str) -> Option<(PlayerIndex, Rc<String>)> {
+    pub fn player_exact_unique_match(&self, name: &str) -> Option<(PlayerIndex, Rc<str>)> {
         let mut found = None;
         for (player_index, player) in self.state.players.iter_players() {
-            if player.player_name.as_str() == name {
+            if player.player_name.as_ref() == name {
                 if found.is_none() {
                     found = Some((player_index, player.player_name.clone()));
                 } else {
@@ -998,7 +995,7 @@ impl HQMServer {
         found
     }
 
-    pub fn player_search(&self, name: &str) -> smallvec::SmallVec<[(PlayerIndex, Rc<String>); 64]> {
+    pub fn player_search(&self, name: &str) -> smallvec::SmallVec<[(PlayerIndex, Rc<str>); 64]> {
         let name = name.to_lowercase();
         let mut found = smallvec::SmallVec::<[_; 64]>::new();
         for (player_index, player) in self.state.players.iter_players() {
@@ -1063,7 +1060,7 @@ impl HQMServer {
         }
     }
 
-    fn add_player(&mut self, player_name: String, addr: SocketAddr) -> Option<PlayerIndex> {
+    fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerIndex> {
         let res = self.state.add_player(player_name, addr);
         if let Some(player_index) = res {
             let welcome = self.config.welcome.clone();
@@ -1508,7 +1505,9 @@ pub(crate) enum ServerPlayerData {
 }
 
 pub(crate) struct HQMServerPlayer {
-    pub player_name: Rc<String>,
+    pub player_name: Rc<str>,
+    player_name_red: Rc<str>,
+    player_name_blue: Rc<str>,
     pub(crate) object: Option<(usize, SkaterObject, Team)>,
     pub id: Uuid,
     pub data: ServerPlayerData,
@@ -1521,12 +1520,14 @@ pub(crate) struct HQMServerPlayer {
 impl HQMServerPlayer {
     pub fn new_network_player(
         player_index: PlayerIndex,
-        player_name: String,
+        player_name: &str,
         addr: SocketAddr,
         global_messages: &[Rc<HQMMessage>],
     ) -> Self {
         HQMServerPlayer {
-            player_name: Rc::new(player_name),
+            player_name: player_name.into(),
+            player_name_red: format!("[Red] {}", player_name).into(),
+            player_name_blue: format!("[Blue] {}", player_name).into(),
             object: None,
             id: Uuid::new_v4(),
             data: ServerPlayerData::NetworkPlayer {

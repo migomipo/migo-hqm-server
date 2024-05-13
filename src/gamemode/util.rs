@@ -3,7 +3,6 @@ use crate::gamemode::ServerStateMut;
 use nalgebra::{Point3, Rotation3};
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::{FRAC_PI_2, PI};
-use std::rc::Rc;
 use tracing::info;
 
 pub fn add_players<
@@ -68,7 +67,7 @@ pub fn add_players<
 
     let mut add_player = |i: usize,
                           player_index: PlayerIndex,
-                          player_name: Rc<String>,
+                          player_name: &str,
                           team: Team,
                           player_count: &mut usize|
      -> bool {
@@ -100,7 +99,7 @@ pub fn add_players<
         if !add_player(
             i,
             player_index,
-            player_name,
+            &player_name,
             Team::Red,
             &mut red_player_count,
         ) {
@@ -111,7 +110,7 @@ pub fn add_players<
         if !add_player(
             i,
             player_index,
-            player_name,
+            &player_name,
             Team::Blue,
             &mut blue_player_count,
         ) {
