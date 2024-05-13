@@ -1,8 +1,10 @@
 use crate::game::{PlayerIndex, Rink, Team};
 use crate::gamemode::ServerStateMut;
 use nalgebra::{Point3, Rotation3};
+use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::{FRAC_PI_2, PI};
+use std::rc::Rc;
 use tracing::info;
 
 pub fn add_players<
@@ -20,9 +22,9 @@ pub fn add_players<
 ) -> (usize, usize) {
     let mut red_player_count = 0;
     let mut blue_player_count = 0;
-    let mut spectating_players = vec![];
-    let mut joining_red = vec![];
-    let mut joining_blue = vec![];
+    let mut spectating_players = SmallVec::<[_; 32]>::new();
+    let mut joining_red = SmallVec::<[_; 32]>::new();
+    let mut joining_blue = SmallVec::<[_; 32]>::new();
     for player in server.players().iter() {
         let player_index = player.index;
         let input = player.input();
@@ -65,58 +67,38 @@ pub fn add_players<
         }
     }
 
-    let mut add_player = |i: usize,
-                          player_index: PlayerIndex,
-                          player_name: &str,
-                          team: Team,
-                          player_count: &mut usize|
-     -> bool {
-        if *player_count >= team_max {
-            return false;
-        }
-        let (pos, rot) = coords(team, i);
+    let mut add_players =
+        |players: SmallVec<[(PlayerIndex, Rc<str>); 32]>, team: Team, player_count: &mut usize| {
+            for (i, (player_index, player_name)) in players.into_iter().enumerate() {
+                if *player_count >= team_max {
+                    break;
+                }
 
-        let res = server.spawn_skater(player_index, team, pos, rot, false);
+                let (pos, rot) = coords(team, i);
 
-        if res {
-            info!(
-                "{} ({}) has joined team {:?}",
-                player_name, player_index, team
-            );
-            *player_count += 1;
-            on_join(player_index, team);
-            if let Some(show_extra_messages) = show_extra_messages {
-                let s = format!("{} is playing for Red", player_name);
-                for i in show_extra_messages.iter() {
-                    server.add_directed_server_chat_message(s.clone(), *i);
+                let res = server.spawn_skater(player_index, team, pos, rot, false);
+
+                if res {
+                    info!(
+                        "{} ({}) has joined team {:?}",
+                        player_name, player_index, team
+                    );
+                    *player_count += 1;
+                    on_join(player_index, team);
+                    if let Some(show_extra_messages) = show_extra_messages {
+                        let s = format!("{} is playing for Red", player_name);
+                        for i in show_extra_messages.iter() {
+                            server.add_directed_server_chat_message(s.clone(), *i);
+                        }
+                    }
+                } else {
+                    break;
                 }
             }
-        }
-        res
-    };
+        };
 
-    for (i, (player_index, player_name)) in joining_red.into_iter().enumerate() {
-        if !add_player(
-            i,
-            player_index,
-            &player_name,
-            Team::Red,
-            &mut red_player_count,
-        ) {
-            break;
-        }
-    }
-    for (i, (player_index, player_name)) in joining_blue.into_iter().enumerate() {
-        if !add_player(
-            i,
-            player_index,
-            &player_name,
-            Team::Blue,
-            &mut blue_player_count,
-        ) {
-            break;
-        }
-    }
+    add_players(joining_red, Team::Red, &mut red_player_count);
+    add_players(joining_blue, Team::Blue, &mut blue_player_count);
 
     (red_player_count, blue_player_count)
 }
