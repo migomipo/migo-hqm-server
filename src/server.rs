@@ -468,7 +468,8 @@ pub(crate) struct HQMServer {
     pub rink: Rink,
 
     replay_queue: VecDeque<ReplayElement>,
-    requested_replays: VecDeque<(u32, u32, Option<PlayerIndex>)>,
+    saved_history: VecDeque<ReplayTick>,
+
     game_id: u32,
     pub game_step: u32,
     pub is_muted: bool,
@@ -484,7 +485,6 @@ pub(crate) struct HQMServer {
 
     saved_packets: VecDeque<[ObjectPacket; 32]>,
     saved_pings: VecDeque<Instant>,
-    saved_history: VecDeque<ReplayTick>,
 
     pub(crate) ban: BanCheck,
 
@@ -510,7 +510,6 @@ impl HQMServer {
             config,
             game_id: 1,
             replay_queue: VecDeque::new(),
-            requested_replays: VecDeque::new(),
             reqwest_client: reqwest_client.clone(),
             replay_data: BytesMut::with_capacity(64 * 1024 * 1024),
             replay_msg_pos: 0,
@@ -1087,8 +1086,6 @@ impl HQMServer {
     fn game_step<B: GameMode>(&mut self, behaviour: &mut B) {
         self.game_step = self.game_step.wrapping_add(1);
 
-        behaviour.before_tick(ServerMut { server: self });
-
         let events = self.simulate_step();
 
         let packets = self.get_packets();
@@ -1221,24 +1218,6 @@ impl HQMServer {
                 write_buf,
             )
             .await;
-
-            let game_step = self.game_step;
-            while let Some((start_step, end_step, force_view)) = self.requested_replays.pop_front()
-            {
-                let i_end = game_step.saturating_sub(end_step) as usize;
-                let i_start = game_step.saturating_sub(start_step) as usize;
-                if i_start <= i_end {
-                    continue;
-                }
-                let data = self
-                    .saved_history
-                    .range(i_end..=i_start)
-                    .rev()
-                    .cloned()
-                    .collect();
-                self.replay_queue
-                    .push_back(ReplayElement { data, force_view })
-            }
         } else if self.has_current_game_been_active {
             info!("Game {} abandoned", self.game_id);
             self.new_game(behaviour.get_initial_game_values());
@@ -1327,8 +1306,20 @@ impl HQMServer {
             warn!("start_step must be less than or equal to end_step");
             return;
         }
-        self.requested_replays
-            .push_back((start_step, end_step, force_view));
+
+        let game_step = self.game_step;
+
+        let i_end = game_step.saturating_sub(end_step) as usize;
+        let i_start = game_step.saturating_sub(start_step) as usize;
+
+        let data = self
+            .saved_history
+            .range(i_end..=i_start)
+            .rev()
+            .cloned()
+            .collect();
+        self.replay_queue
+            .push_back(ReplayElement { data, force_view });
     }
 
     fn write_replay(&mut self) {
