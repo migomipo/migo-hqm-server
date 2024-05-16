@@ -19,7 +19,7 @@ use tokio::net::UdpSocket;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::gamemode::{ExitReason, InitialGameValues, ServerMut};
+use crate::gamemode::{ExitReason, InitialGameValues};
 
 use crate::game::{
     PhysicsConfiguration, PlayerIndex, PlayerInput, PuckObject, Rink, RulesState, ScoreboardValues,
@@ -85,22 +85,33 @@ pub(crate) trait PlayerListExt {
     fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerIndex, &mut HQMServerPlayer)>;
 }
 
-impl PlayerListExt for [Option<HQMServerPlayer>] {
+impl PlayerListExt for [Option<HQMServerPlayerEnum>] {
     fn get_player(&self, player_index: PlayerIndex) -> Option<&HQMServerPlayer> {
-        self.get(player_index.0).map(|x| x.as_ref()).flatten()
+        self.get(player_index.0)
+            .and_then(|x| x.as_ref())
+            .and_then(|x| match x {
+                HQMServerPlayerEnum::Player(p) => Some(p),
+                HQMServerPlayerEnum::ReplayPlaceholder(_) => None,
+            })
     }
 
     fn get_player_mut(&mut self, player_index: PlayerIndex) -> Option<&mut HQMServerPlayer> {
-        self.get_mut(player_index.0).map(|x| x.as_mut()).flatten()
+        self.get_mut(player_index.0)
+            .and_then(|x| x.as_mut())
+            .and_then(|x| match x {
+                HQMServerPlayerEnum::Player(p) => Some(p),
+                HQMServerPlayerEnum::ReplayPlaceholder(_) => None,
+            })
     }
 
     fn iter_players(&self) -> impl Iterator<Item = (PlayerIndex, &HQMServerPlayer)> {
         self.iter()
             .enumerate()
             .filter_map(|(player_index, player)| {
-                player
-                    .as_ref()
-                    .map(|player| (PlayerIndex(player_index), player))
+                player.as_ref().and_then(|x| match x {
+                    HQMServerPlayerEnum::Player(p) => Some((PlayerIndex(player_index), p)),
+                    HQMServerPlayerEnum::ReplayPlaceholder(_) => None,
+                })
             })
     }
 
@@ -108,18 +119,22 @@ impl PlayerListExt for [Option<HQMServerPlayer>] {
         self.iter_mut()
             .enumerate()
             .filter_map(|(player_index, player)| {
-                player
-                    .as_mut()
-                    .map(|player| (PlayerIndex(player_index), player))
+                player.as_mut().and_then(|x| match x {
+                    HQMServerPlayerEnum::Player(p) => Some((PlayerIndex(player_index), p)),
+                    HQMServerPlayerEnum::ReplayPlaceholder(_) => None,
+                })
             })
     }
 }
 
 pub(crate) struct HQMServerState {
-    pub(crate) players: Vec<Option<HQMServerPlayer>>,
+    pub(crate) players: Vec<Option<HQMServerPlayerEnum>>,
     pub(crate) pucks: Vec<Option<PuckObject>>,
     persistent_messages: Vec<Rc<HQMMessage>>,
     replay_messages: Vec<Rc<HQMMessage>>,
+
+    replay_queue: VecDeque<ReplayElement>,
+    saved_history: VecDeque<ReplayTick>,
 }
 
 impl HQMServerState {
@@ -134,29 +149,37 @@ impl HQMServerState {
             pucks,
             persistent_messages: vec![],
             replay_messages: vec![],
+            replay_queue: Default::default(),
+            saved_history: Default::default(),
         }
     }
 
     fn new_game(&mut self, puck_slots: usize) {
         self.replay_messages.clear();
         self.persistent_messages.clear();
+        self.replay_queue.clear();
+        self.saved_history.clear();
 
         let mut messages = smallvec::SmallVec::<[(HQMMessage, bool, bool); 32]>::new();
         for (player_index, p) in self.players.iter_mut().enumerate() {
             let player_index = PlayerIndex(player_index);
             if let Some(player) = p {
-                if player.reset(player_index) {
-                    let update = player.get_update_message(player_index);
-                    messages.push((update, true, true));
-                } else {
-                    let update = HQMMessage::PlayerUpdate {
-                        player_name: player.player_name.clone(),
-                        object: None,
-                        player_index,
-                        in_server: false,
-                    };
-                    messages.push((update, false, false));
-                    *p = None;
+                match player {
+                    HQMServerPlayerEnum::Player(player) => {
+                        player.reset(player_index);
+                        let update = player.get_update_message(player_index);
+                        messages.push((update, true, true));
+                    }
+                    HQMServerPlayerEnum::ReplayPlaceholder(player) => {
+                        let update = HQMMessage::PlayerUpdate {
+                            player_name: player.player_name.clone(),
+                            object: None,
+                            player_index,
+                            in_server: false,
+                        };
+                        messages.push((update, false, false));
+                        *p = None;
+                    }
                 }
             }
         }
@@ -411,7 +434,7 @@ impl HQMServerState {
     }
 
     fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerIndex> {
-        fn find_empty_player_slot(players: &[Option<HQMServerPlayer>]) -> Option<PlayerIndex> {
+        fn find_empty_player_slot(players: &[Option<HQMServerPlayerEnum>]) -> Option<PlayerIndex> {
             return players.iter().position(|x| x.is_none()).map(PlayerIndex);
         }
         let player_index = find_empty_player_slot(&self.players);
@@ -425,7 +448,7 @@ impl HQMServerState {
                 );
                 let update = new_player.get_update_message(player_index);
 
-                self.players[player_index.0] = Some(new_player);
+                self.players[player_index.0] = Some(HQMServerPlayerEnum::Player(new_player));
 
                 self.add_global_message(update, true, true);
 
@@ -455,6 +478,19 @@ impl HQMServerState {
             false
         }
     }
+
+    fn check_replay(&mut self) -> Option<(Option<PlayerIndex>, ReplayTick)> {
+        if let Some(replay_element) = self.replay_queue.front_mut() {
+            if let Some(tick) = replay_element.data.pop_front() {
+                Some((replay_element.force_view, tick))
+            } else {
+                self.replay_queue.pop_front();
+                None
+            }
+        } else {
+            None
+        }
+    }
 }
 
 pub(crate) struct HQMServer {
@@ -466,9 +502,6 @@ pub(crate) struct HQMServer {
 
     pub physics_config: PhysicsConfiguration,
     pub rink: Rink,
-
-    replay_queue: VecDeque<ReplayElement>,
-    saved_history: VecDeque<ReplayTick>,
 
     game_id: u32,
     pub game_step: u32,
@@ -509,7 +542,6 @@ impl HQMServer {
             is_muted: false,
             config,
             game_id: 1,
-            replay_queue: VecDeque::new(),
             reqwest_client: reqwest_client.clone(),
             replay_data: BytesMut::with_capacity(64 * 1024 * 1024),
             replay_msg_pos: 0,
@@ -518,7 +550,7 @@ impl HQMServer {
 
             saved_packets: VecDeque::with_capacity(192),
             saved_pings: VecDeque::with_capacity(100),
-            saved_history: VecDeque::new(),
+
             has_current_game_been_active: false,
 
             ban,
@@ -1098,10 +1130,10 @@ impl HQMServer {
                 packets: packets.clone(),
             };
 
-            self.saved_history.truncate(self.history_length - 1);
-            self.saved_history.push_front(new_replay_tick);
+            self.state.saved_history.truncate(self.history_length - 1);
+            self.state.saved_history.push_front(new_replay_tick);
         } else {
-            self.saved_history.clear();
+            self.state.saved_history.clear();
         }
 
         self.saved_packets.truncate(192 - 1);
@@ -1179,16 +1211,7 @@ impl HQMServer {
 
                 behaviour.before_tick(self.into());
 
-                let has_replay_data = if let Some(replay_element) = self.replay_queue.front_mut() {
-                    if let Some(tick) = replay_element.data.pop_front() {
-                        Some((replay_element.force_view, tick))
-                    } else {
-                        self.replay_queue.pop_front();
-                        None
-                    }
-                } else {
-                    None
-                };
+                let has_replay_data = self.state.check_replay();
 
                 if let Some((forced_view, tick)) = has_replay_data {
                     let game_step = tick.game_step;
@@ -1283,8 +1306,7 @@ impl HQMServer {
 
         self.saved_packets.clear();
         self.saved_pings.clear();
-        self.saved_history.clear();
-        self.replay_queue.clear();
+
         self.has_current_game_been_active = false;
 
         let old_replay_data = std::mem::replace(&mut self.replay_data, BytesMut::new());
@@ -1313,12 +1335,14 @@ impl HQMServer {
         let i_start = game_step.saturating_sub(start_step) as usize;
 
         let data = self
+            .state
             .saved_history
             .range(i_end..=i_start)
             .rev()
             .cloned()
             .collect();
-        self.replay_queue
+        self.state
+            .replay_queue
             .push_back(ReplayElement { data, force_view });
     }
 
@@ -1382,91 +1406,89 @@ async fn send_updates(
     game_step: u32,
     value: &ScoreboardValues,
     current_packet: u32,
-    players: &[Option<HQMServerPlayer>],
+    players: &[Option<HQMServerPlayerEnum>],
     socket: &UdpSocket,
     force_view: Option<PlayerIndex>,
     write_buf: &mut BytesMut,
 ) {
-    for player in players.iter() {
-        if let Some(player) = player {
-            if let ServerPlayerData::NetworkPlayer { data } = &player.data {
-                write_buf.clear();
-                let mut writer = HQMMessageWriter::new(write_buf);
+    for (_, player) in players.iter_players() {
+        if let ServerPlayerData::NetworkPlayer { data } = &player.data {
+            write_buf.clear();
+            let mut writer = HQMMessageWriter::new(write_buf);
 
-                if data.game_id != game_id {
-                    writer.write_bytes_aligned(GAME_HEADER);
-                    writer.write_byte_aligned(6);
-                    writer.write_u32_aligned(game_id);
-                } else {
-                    writer.write_bytes_aligned(GAME_HEADER);
-                    writer.write_byte_aligned(5);
-                    writer.write_u32_aligned(game_id);
-                    writer.write_u32_aligned(game_step);
-                    writer.write_bits(
-                        1,
-                        match value.game_over {
-                            true => 1,
-                            false => 0,
-                        },
-                    );
-                    writer.write_bits(8, value.red_score);
-                    writer.write_bits(8, value.blue_score);
-                    writer.write_bits(16, value.time);
+            if data.game_id != game_id {
+                writer.write_bytes_aligned(GAME_HEADER);
+                writer.write_byte_aligned(6);
+                writer.write_u32_aligned(game_id);
+            } else {
+                writer.write_bytes_aligned(GAME_HEADER);
+                writer.write_byte_aligned(5);
+                writer.write_u32_aligned(game_id);
+                writer.write_u32_aligned(game_step);
+                writer.write_bits(
+                    1,
+                    match value.game_over {
+                        true => 1,
+                        false => 0,
+                    },
+                );
+                writer.write_bits(8, value.red_score);
+                writer.write_bits(8, value.blue_score);
+                writer.write_bits(16, value.time);
 
-                    writer.write_bits(16, value.goal_message_timer);
-                    writer.write_bits(8, value.period);
-                    let view = force_view.unwrap_or(data.view_player_index).0 as u32;
-                    writer.write_bits(8, view);
+                writer.write_bits(16, value.goal_message_timer);
+                writer.write_bits(8, value.period);
+                let view = force_view.unwrap_or(data.view_player_index).0 as u32;
+                writer.write_bits(8, view);
 
-                    // if using a non-cryptic version, send ping
-                    if data.client_version.has_ping() {
-                        writer.write_u32_aligned(data.deltatime);
-                    }
-
-                    // if baba's second version or above, send rules
-                    if data.client_version.has_rules() {
-                        let num = match value.rules_state {
-                            RulesState::Regular {
-                                offside_warning,
-                                icing_warning,
-                            } => {
-                                let mut res = 0;
-                                if offside_warning {
-                                    res |= 1;
-                                }
-                                if icing_warning {
-                                    res |= 2;
-                                }
-                                res
-                            }
-                            RulesState::Offside => 4,
-                            RulesState::Icing => 8,
-                        };
-                        writer.write_u32_aligned(num);
-                    }
-
-                    write_objects(&mut writer, packets, current_packet, data.known_packet);
-
-                    let (start, remaining_messages) = if data.known_msgpos > data.messages.len() {
-                        (data.messages.len(), 0)
-                    } else {
-                        (
-                            data.known_msgpos,
-                            min(data.messages.len() - data.known_msgpos, 15),
-                        )
-                    };
-
-                    writer.write_bits(4, remaining_messages as u32);
-                    writer.write_bits(16, start as u32);
-
-                    for message in &data.messages[start..start + remaining_messages] {
-                        write_message(&mut writer, Rc::as_ref(message));
-                    }
+                // if using a non-cryptic version, send ping
+                if data.client_version.has_ping() {
+                    writer.write_u32_aligned(data.deltatime);
                 }
 
-                let slice: &[u8] = &write_buf;
-                let _ = socket.send_to(slice, data.addr).await;
+                // if baba's second version or above, send rules
+                if data.client_version.has_rules() {
+                    let num = match value.rules_state {
+                        RulesState::Regular {
+                            offside_warning,
+                            icing_warning,
+                        } => {
+                            let mut res = 0;
+                            if offside_warning {
+                                res |= 1;
+                            }
+                            if icing_warning {
+                                res |= 2;
+                            }
+                            res
+                        }
+                        RulesState::Offside => 4,
+                        RulesState::Icing => 8,
+                    };
+                    writer.write_u32_aligned(num);
+                }
+
+                write_objects(&mut writer, packets, current_packet, data.known_packet);
+
+                let (start, remaining_messages) = if data.known_msgpos > data.messages.len() {
+                    (data.messages.len(), 0)
+                } else {
+                    (
+                        data.known_msgpos,
+                        min(data.messages.len() - data.known_msgpos, 15),
+                    )
+                };
+
+                writer.write_bits(4, remaining_messages as u32);
+                writer.write_bits(16, start as u32);
+
+                for message in &data.messages[start..start + remaining_messages] {
+                    write_message(&mut writer, Rc::as_ref(message));
+                }
             }
+
+            let slice: &[u8] = &write_buf;
+            let _ = socket.send_to(slice, data.addr).await;
         }
     }
 }
@@ -1495,6 +1517,11 @@ pub(crate) enum ServerPlayerData {
     NetworkPlayer { data: NetworkPlayerData },
 }
 
+pub enum HQMServerPlayerEnum {
+    Player(HQMServerPlayer),
+    ReplayPlaceholder(HQMServerReplayPlaceholderPlayer),
+}
+
 pub(crate) struct HQMServerPlayer {
     pub player_name: Rc<str>,
     player_name_red: Rc<str>,
@@ -1506,6 +1533,11 @@ pub(crate) struct HQMServerPlayer {
     pub is_muted: MuteStatus,
     pub preferred_hand: SkaterHand,
     pub input: PlayerInput,
+}
+
+pub(crate) struct HQMServerReplayPlaceholderPlayer {
+    pub player_name: Rc<str>,
+    pub id: Uuid,
 }
 
 impl HQMServerPlayer {
@@ -1544,7 +1576,7 @@ impl HQMServerPlayer {
         }
     }
 
-    fn reset(&mut self, player_index: PlayerIndex) -> bool {
+    fn reset(&mut self, player_index: PlayerIndex) {
         self.object = None;
         if let ServerPlayerData::NetworkPlayer { data } = &mut self.data {
             data.known_msgpos = 0;
@@ -1552,7 +1584,6 @@ impl HQMServerPlayer {
             data.messages.clear();
             data.view_player_index = player_index;
         }
-        return true;
     }
 
     fn get_update_message(&self, player_index: PlayerIndex) -> HQMMessage {

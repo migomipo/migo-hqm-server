@@ -1,7 +1,9 @@
 use crate::game::{
     PhysicsEvent, PlayerIndex, PlayerInput, PuckObject, Rink, ScoreboardValues, SkaterObject, Team,
 };
-use crate::server::{HQMServer, HQMServerPlayer, HQMServerState, PlayerListExt};
+use crate::server::{
+    HQMServer, HQMServerPlayer, HQMServerPlayerEnum, HQMServerState, PlayerListExt,
+};
 use crate::ServerConfiguration;
 use nalgebra::{Point3, Rotation3};
 use reborrow::{ReborrowCopyTraits, ReborrowTraits};
@@ -356,7 +358,7 @@ impl<'a> ServerState<'a> {
 #[derive(ReborrowTraits)]
 #[Const(ServerPlayerList)]
 pub struct ServerPlayerListMut<'a> {
-    players: &'a mut [Option<HQMServerPlayer>],
+    players: &'a mut [Option<HQMServerPlayerEnum>],
 }
 
 impl<'a> ServerPlayerListMut<'a> {
@@ -408,7 +410,7 @@ impl<'a> ServerPlayerListMut<'a> {
 /// Immutable list of players in the server.
 #[derive(ReborrowCopyTraits)]
 pub struct ServerPlayerList<'a> {
-    players: &'a [Option<HQMServerPlayer>],
+    players: &'a [Option<HQMServerPlayerEnum>],
 }
 
 impl<'a> ServerPlayerList<'a> {
