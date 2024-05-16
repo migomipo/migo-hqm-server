@@ -57,6 +57,23 @@ pub struct PhysicsConfiguration {
     pub player_shift_turning: f32,
 }
 
+impl Default for PhysicsConfiguration {
+    fn default() -> Self {
+        Self {
+            gravity: 0.000680555,
+            limit_jump_speed: false,
+            player_acceleration: 0.000208333,
+            player_deceleration: 0.000555555,
+            max_player_speed: 0.05,
+            puck_rink_friction: 0.05,
+            player_turning: 0.00041666666,
+            player_shift_acceleration: 0.00027777,
+            max_player_shift_speed: 0.0333333,
+            player_shift_turning: 0.00038888888,
+        }
+    }
+}
+
 /// Represents a line in the HQM rink.
 #[derive(Debug, Clone)]
 pub struct RinkLine {
