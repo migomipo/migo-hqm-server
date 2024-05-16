@@ -917,6 +917,22 @@ impl HQMServer {
             "t" => {
                 self.state.add_user_team_message(arg, player_index);
             }
+            "version" => {
+                let version = env!("CARGO_PKG_VERSION");
+                let s = format!("Migo HQM Server, version {}", version);
+
+                self.state.add_directed_server_chat_message(s, player_index);
+            }
+            "git" => {
+                let git_sha = option_env!("VERGEN_GIT_SHA");
+                let s: Cow<'static, str> = if let Some(git_sha) = git_sha {
+                    format!("Git commit: {}", git_sha).into()
+                } else {
+                    "No git commit ID found".into()
+                };
+                self.state.add_directed_server_chat_message(s, player_index);
+            }
+
             _ => behaviour.handle_command(self.into(), command, arg, player_index),
         }
     }

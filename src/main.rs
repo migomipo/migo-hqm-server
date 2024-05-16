@@ -31,7 +31,7 @@ fn is_true(s: &str) -> bool {
 }
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
 
     let config_path = if args.len() > 1 {
@@ -216,7 +216,7 @@ async fn main() -> std::io::Result<()> {
             }
         };
 
-        return match mode {
+        match mode {
             HQMServerMode::Match => {
                 let periods =
                     get_optional(game_section, "periods", 3, |x| x.parse::<u32>().unwrap());
@@ -344,7 +344,7 @@ async fn main() -> std::io::Result<()> {
                     ban,
                     StandardMatchGameMode::new(match_config, server_team_max, spawn_point),
                 )
-                .await
+                .await?
             }
             HQMServerMode::PermanentWarmup => {
                 let warmup_pucks = get_optional(game_section, "warmup_pucks", 1, |x| {
@@ -365,7 +365,7 @@ async fn main() -> std::io::Result<()> {
                     ban,
                     PermanentWarmup::new(warmup_pucks, spawn_point),
                 )
-                .await
+                .await?
             }
             HQMServerMode::Russian => {
                 let attempts =
@@ -379,7 +379,7 @@ async fn main() -> std::io::Result<()> {
                     ban,
                     RussianGameMode::new(attempts, server_team_max),
                 )
-                .await
+                .await?
             }
             HQMServerMode::Shootout => {
                 let attempts =
@@ -393,11 +393,11 @@ async fn main() -> std::io::Result<()> {
                     ban,
                     ShootoutGameMode::new(attempts),
                 )
-                .await
+                .await?;
             }
         };
     } else {
         println!("Could not open configuration file {}!", config_path);
-        return Ok(());
     };
+    Ok(())
 }
