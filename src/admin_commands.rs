@@ -165,7 +165,12 @@ impl HQMServer {
         if let Some(player) = self.state.players.get_player_mut(player_index) {
             let msg = if player.is_admin {
                 "You are already logged in as administrator"
-            } else if self.config.password == password {
+            } else if self
+                .config
+                .password
+                .as_deref()
+                .is_some_and(|x| x == password)
+            {
                 player.is_admin = true;
                 info!("{} ({}) is now admin", player.player_name, player_index);
                 "Successfully logged in as administrator"

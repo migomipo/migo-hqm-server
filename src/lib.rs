@@ -158,7 +158,7 @@ pub enum ReplayEnabled {
 #[derive(Debug, Clone)]
 pub struct ServerConfiguration {
     pub welcome: Vec<String>,
-    pub password: String,
+    pub password: Option<String>,
     pub player_max: usize,
 
     pub replays_enabled: ReplayEnabled,

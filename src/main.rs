@@ -74,11 +74,7 @@ async fn main() -> anyhow::Result<()> {
             .parse::<usize>()
             .unwrap();
 
-        let server_password = server_section
-            .get("password")
-            .unwrap()
-            .parse::<String>()
-            .unwrap();
+        let server_password = server_section.get("password").map(|x| x.to_string());
         let mode = server_section
             .get("mode")
             .map_or(HQMServerMode::Match, |x| match x {
