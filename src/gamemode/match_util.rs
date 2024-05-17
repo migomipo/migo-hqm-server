@@ -56,6 +56,31 @@ pub struct MatchConfiguration {
     pub spawn_keep_stick_position: bool,
 }
 
+impl Default for MatchConfiguration {
+    fn default() -> Self {
+        Self {
+            time_period: 300,
+            time_warmup: 300,
+            time_break: 10,
+            time_intermission: 20,
+            mercy: 0,
+            first_to: 0,
+            periods: 3,
+            offside: OffsideConfiguration::Off,
+            icing: IcingConfiguration::Off,
+            offside_line: OffsideLineConfiguration::OffensiveBlue,
+            twoline_pass: TwoLinePassConfiguration::Off,
+            warmup_pucks: 1,
+            use_mph: false,
+            goal_replay: false,
+            spawn_point_offset: 2.75,
+            spawn_player_altitude: 2.75,
+            spawn_puck_altitude: 1.5,
+            spawn_keep_stick_position: false,
+        }
+    }
+}
+
 pub enum MatchEvent {
     Goal {
         team: Team,
