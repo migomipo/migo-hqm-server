@@ -133,7 +133,7 @@ pub(crate) struct HQMServerState {
     persistent_messages: Vec<Rc<HQMMessage>>,
     replay_messages: Vec<Rc<HQMMessage>>,
 
-    replay_queue: VecDeque<ReplayElement>,
+    replay_queue: VecDeque<(Option<PlayerIndex>, ReplayTick)>,
     saved_history: VecDeque<ReplayTick>,
 }
 
@@ -480,16 +480,8 @@ impl HQMServerState {
     }
 
     fn check_replay(&mut self) -> Option<(Option<PlayerIndex>, ReplayTick)> {
-        if let Some(replay_element) = self.replay_queue.front_mut() {
-            if let Some(tick) = replay_element.data.pop_front() {
-                Some((replay_element.force_view, tick))
-            } else {
-                self.replay_queue.pop_front();
-                None
-            }
-        } else {
-            None
-        }
+        let res = self.replay_queue.pop_front();
+        res
     }
 }
 
@@ -1356,11 +1348,8 @@ impl HQMServer {
             .saved_history
             .range(i_end..=i_start)
             .rev()
-            .cloned()
-            .collect();
-        self.state
-            .replay_queue
-            .push_back(ReplayElement { data, force_view });
+            .map(|x| (force_view, x.clone()));
+        self.state.replay_queue.extend(data);
     }
 
     fn write_replay(&mut self) {
@@ -1410,11 +1399,6 @@ impl HQMServer {
 struct ReplayTick {
     game_step: u32,
     packets: [ObjectPacket; 32],
-}
-
-struct ReplayElement {
-    data: VecDeque<ReplayTick>,
-    force_view: Option<PlayerIndex>,
 }
 
 async fn send_updates(
