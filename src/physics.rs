@@ -34,7 +34,7 @@ impl HQMServer {
         let mut pucks: SmallVec<[(usize, &mut PuckObject); 32]> = SmallVec::new();
         for (i, p) in self.state.players.iter_players_mut() {
             if let Some((_, skater, _)) = &mut p.object {
-                players.push((i, skater, &mut p.input));
+                players.push((i.index, skater, &mut p.input));
             }
         }
         for (i, p) in self.state.pucks.iter_mut().enumerate() {

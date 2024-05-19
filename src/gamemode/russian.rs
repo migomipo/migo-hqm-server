@@ -135,7 +135,7 @@ impl RussianGameMode {
         self.place_puck_for_team(server.rb_mut(), Team::Red);
 
         for player in server.state().players().iter() {
-            let player_index = player.index;
+            let player_index = player.id.index;
             if let Some(team) = player.team() {
                 if team == Team::Red {
                     red_players.push(player_index);

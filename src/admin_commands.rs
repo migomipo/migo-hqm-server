@@ -8,7 +8,7 @@ use tracing::info;
 
 impl HQMServer {
     pub(crate) fn set_allow_join(&mut self, player_index: PlayerIndex, allowed: bool) {
-        if let Some(player) = self.state.players.get_player(player_index) {
+        if let Some((_, player)) = self.state.players.get_player(player_index) {
             if player.is_admin {
                 self.allow_join = allowed;
 
@@ -32,11 +32,12 @@ impl HQMServer {
         admin_player_index: PlayerIndex,
         mute_player_index: PlayerIndex,
     ) {
-        if let Some(admin_player) = self.state.players.get_player(admin_player_index) {
+        if let Some((_, admin_player)) = self.state.players.get_player(admin_player_index) {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
-                if let Some(mute_player) = self.state.players.get_player_mut(mute_player_index) {
+                if let Some((_, mute_player)) = self.state.players.get_player_mut(mute_player_index)
+                {
                     mute_player.is_muted = MuteStatus::Muted;
                     info!(
                         "{} ({}) muted {} ({})",
@@ -59,11 +60,12 @@ impl HQMServer {
         admin_player_index: PlayerIndex,
         mute_player_index: PlayerIndex,
     ) {
-        if let Some(admin_player) = self.state.players.get_player(admin_player_index) {
+        if let Some((_, admin_player)) = self.state.players.get_player(admin_player_index) {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
-                if let Some(mute_player) = self.state.players.get_player_mut(mute_player_index) {
+                if let Some((_, mute_player)) = self.state.players.get_player_mut(mute_player_index)
+                {
                     let old_status = mute_player.is_muted;
                     mute_player.is_muted = MuteStatus::NotMuted;
                     info!(
@@ -96,11 +98,12 @@ impl HQMServer {
         admin_player_index: PlayerIndex,
         mute_player_index: PlayerIndex,
     ) {
-        if let Some(admin_player) = self.state.players.get_player(admin_player_index) {
+        if let Some((_, admin_player)) = self.state.players.get_player(admin_player_index) {
             if admin_player.is_admin {
                 let admin_player_name = admin_player.player_name.clone();
 
-                if let Some(mute_player) = self.state.players.get_player_mut(mute_player_index) {
+                if let Some((_, mute_player)) = self.state.players.get_player_mut(mute_player_index)
+                {
                     let old_status = mute_player.is_muted;
                     mute_player.is_muted = MuteStatus::ShadowMuted;
                     info!(
@@ -133,7 +136,7 @@ impl HQMServer {
     }
 
     pub(crate) fn mute_chat(&mut self, player_index: PlayerIndex) {
-        if let Some(player) = self.state.players.get_player(player_index) {
+        if let Some((_, player)) = self.state.players.get_player(player_index) {
             if player.is_admin {
                 self.is_muted = true;
 
@@ -147,7 +150,7 @@ impl HQMServer {
     }
 
     pub(crate) fn unmute_chat(&mut self, player_index: PlayerIndex) {
-        if let Some(player) = self.state.players.get_player(player_index) {
+        if let Some((_, player)) = self.state.players.get_player(player_index) {
             if player.is_admin {
                 self.is_muted = false;
 
@@ -162,7 +165,7 @@ impl HQMServer {
     }
 
     pub(crate) fn admin_login(&mut self, player_index: PlayerIndex, password: &str) {
-        if let Some(player) = self.state.players.get_player_mut(player_index) {
+        if let Some((_, player)) = self.state.players.get_player_mut(player_index) {
             let msg = if player.is_admin {
                 "You are already logged in as administrator"
             } else if self
@@ -187,7 +190,7 @@ impl HQMServer {
     }
 
     pub(crate) fn restart_server(&mut self, player_index: PlayerIndex) {
-        if let Some(player) = self.state.players.get_player(player_index) {
+        if let Some((_, player)) = self.state.players.get_player(player_index) {
             if let Some(server_service) = self.config.server_service.as_deref() {
                 if player.is_admin {
                     let msg = format!("{} started server restart", player.player_name);
@@ -210,7 +213,7 @@ impl HQMServer {
         ban_player: bool,
         behaviour: &mut B,
     ) {
-        if let Some(player) = self.state.players.get_player(admin_player_index) {
+        if let Some((_, player)) = self.state.players.get_player(admin_player_index) {
             if player.is_admin {
                 let admin_player_name = player.player_name.clone();
 
@@ -252,7 +255,11 @@ impl HQMServer {
                     .filter_map(|(player_index, player)| {
                         if let ServerPlayerData::NetworkPlayer { data } = &player.data {
                             if matching.is_matching(&player.player_name) {
-                                return Some((player_index, player.player_name.clone(), data.addr));
+                                return Some((
+                                    player_index.index,
+                                    player.player_name.clone(),
+                                    data.addr,
+                                ));
                             }
                         }
                         None
@@ -350,12 +357,13 @@ impl HQMServer {
         ban_player: bool,
         behaviour: &mut B,
     ) {
-        if let Some(player) = self.state.players.get_player(admin_player_index) {
+        if let Some((_, player)) = self.state.players.get_player(admin_player_index) {
             if player.is_admin {
                 let admin_player_name = player.player_name.clone();
 
                 if kick_player_index != admin_player_index {
-                    if let Some(kick_player) = self.state.players.get_player(kick_player_index) {
+                    if let Some((_, kick_player)) = self.state.players.get_player(kick_player_index)
+                    {
                         if let ServerPlayerData::NetworkPlayer { data } = &kick_player.data {
                             let kick_player_name = kick_player.player_name.clone();
                             let kick_ip = data.addr.ip().clone();
@@ -414,7 +422,7 @@ impl HQMServer {
     }
 
     pub(crate) fn clear_bans(&mut self, player_index: PlayerIndex) {
-        if let Some(player) = self.state.players.get_player(player_index) {
+        if let Some((_, player)) = self.state.players.get_player(player_index) {
             if player.is_admin {
                 self.ban.clear();
                 info!("{} ({}) cleared bans", player.player_name, player_index);
@@ -428,7 +436,7 @@ impl HQMServer {
     }
 
     pub fn set_replay(&mut self, player_index: PlayerIndex, rule: &str) {
-        if let Some(player) = self.state.players.get_player(player_index) {
+        if let Some((_, player)) = self.state.players.get_player(player_index) {
             if player.is_admin {
                 match rule {
                     "on" => {

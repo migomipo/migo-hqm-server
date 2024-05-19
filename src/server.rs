@@ -17,13 +17,12 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 use crate::gamemode::{ExitReason, InitialGameValues};
 
 use crate::game::{
-    PhysicsConfiguration, PlayerIndex, PlayerInput, PuckObject, Rink, RulesState, ScoreboardValues,
-    SkaterHand, SkaterObject, Team,
+    PhysicsConfiguration, PlayerId, PlayerIndex, PlayerInput, PuckObject, Rink, RulesState,
+    ScoreboardValues, SkaterHand, SkaterObject, Team,
 };
 use crate::protocol::{
     write_message, write_objects, HQMClientToServerMessage, HQMMessageWriter, ObjectPacket,
@@ -77,50 +76,104 @@ pub(crate) enum HQMMessage {
 }
 
 pub(crate) trait PlayerListExt {
-    fn get_player(&self, player_index: PlayerIndex) -> Option<&HQMServerPlayer>;
+    fn get_player(&self, player_index: PlayerIndex) -> Option<(PlayerId, &HQMServerPlayer)>;
 
-    fn get_player_mut(&mut self, player_index: PlayerIndex) -> Option<&mut HQMServerPlayer>;
-    fn iter_players(&self) -> impl Iterator<Item = (PlayerIndex, &HQMServerPlayer)>;
+    fn get_player_by_id(&self, player_id: PlayerId) -> Option<&HQMServerPlayer>;
 
-    fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerIndex, &mut HQMServerPlayer)>;
+    fn get_player_mut(
+        &mut self,
+        player_index: PlayerIndex,
+    ) -> Option<(PlayerId, &mut HQMServerPlayer)>;
+
+    fn get_player_mut_by_id(&mut self, player_id: PlayerId) -> Option<&mut HQMServerPlayer>;
+    fn iter_players(&self) -> impl Iterator<Item = (PlayerId, &HQMServerPlayer)>;
+
+    fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerId, &mut HQMServerPlayer)>;
 }
 
-impl PlayerListExt for [Option<HQMServerPlayerEnum>] {
-    fn get_player(&self, player_index: PlayerIndex) -> Option<&HQMServerPlayer> {
+pub(crate) type ServerStatePlayerItem = (u32, Option<HQMServerPlayerEnum>);
+
+impl PlayerListExt for [ServerStatePlayerItem] {
+    fn get_player(&self, player_index: PlayerIndex) -> Option<(PlayerId, &HQMServerPlayer)> {
         self.get(player_index.0)
-            .and_then(|x| x.as_ref())
-            .and_then(|x| match x {
-                HQMServerPlayerEnum::Player(p) => Some(p),
-                HQMServerPlayerEnum::ReplayPlaceholder(_) => None,
+            .and_then(|(gen, x)| x.as_ref().map(|x| (*gen, x)))
+            .and_then(|(gen, x)| match x {
+                HQMServerPlayerEnum::Player(p) => Some((
+                    PlayerId {
+                        index: player_index,
+                        gen,
+                    },
+                    p,
+                )),
+                _ => None,
             })
     }
 
-    fn get_player_mut(&mut self, player_index: PlayerIndex) -> Option<&mut HQMServerPlayer> {
+    fn get_player_by_id(&self, player_id: PlayerId) -> Option<&HQMServerPlayer> {
+        self.get(player_id.index.0)
+            .and_then(|(gen, x)| x.as_ref().map(|x| (*gen, x)))
+            .and_then(|(gen, x)| match x {
+                HQMServerPlayerEnum::Player(p) if gen == player_id.gen => Some(p),
+                _ => None,
+            })
+    }
+
+    fn get_player_mut(
+        &mut self,
+        player_index: PlayerIndex,
+    ) -> Option<(PlayerId, &mut HQMServerPlayer)> {
         self.get_mut(player_index.0)
-            .and_then(|x| x.as_mut())
-            .and_then(|x| match x {
-                HQMServerPlayerEnum::Player(p) => Some(p),
-                HQMServerPlayerEnum::ReplayPlaceholder(_) => None,
+            .and_then(|(gen, x)| x.as_mut().map(|x| (*gen, x)))
+            .and_then(|(gen, x)| match x {
+                HQMServerPlayerEnum::Player(p) => Some((
+                    PlayerId {
+                        index: player_index,
+                        gen,
+                    },
+                    p,
+                )),
+                _ => None,
             })
     }
 
-    fn iter_players(&self) -> impl Iterator<Item = (PlayerIndex, &HQMServerPlayer)> {
+    fn get_player_mut_by_id(&mut self, player_id: PlayerId) -> Option<&mut HQMServerPlayer> {
+        self.get_mut(player_id.index.0)
+            .and_then(|(gen, x)| x.as_mut().map(|x| (*gen, x)))
+            .and_then(|(gen, x)| match x {
+                HQMServerPlayerEnum::Player(p) if gen == player_id.gen => Some(p),
+                _ => None,
+            })
+    }
+
+    fn iter_players(&self) -> impl Iterator<Item = (PlayerId, &HQMServerPlayer)> {
         self.iter()
             .enumerate()
-            .filter_map(|(player_index, player)| {
+            .filter_map(|(player_index, (gen, player))| {
                 player.as_ref().and_then(|x| match x {
-                    HQMServerPlayerEnum::Player(p) => Some((PlayerIndex(player_index), p)),
+                    HQMServerPlayerEnum::Player(p) => Some((
+                        PlayerId {
+                            index: PlayerIndex(player_index),
+                            gen: *gen,
+                        },
+                        p,
+                    )),
                     HQMServerPlayerEnum::ReplayPlaceholder(_) => None,
                 })
             })
     }
 
-    fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerIndex, &mut HQMServerPlayer)> {
+    fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerId, &mut HQMServerPlayer)> {
         self.iter_mut()
             .enumerate()
-            .filter_map(|(player_index, player)| {
+            .filter_map(|(player_index, (gen, player))| {
                 player.as_mut().and_then(|x| match x {
-                    HQMServerPlayerEnum::Player(p) => Some((PlayerIndex(player_index), p)),
+                    HQMServerPlayerEnum::Player(p) => Some((
+                        PlayerId {
+                            index: PlayerIndex(player_index),
+                            gen: *gen,
+                        },
+                        p,
+                    )),
                     HQMServerPlayerEnum::ReplayPlaceholder(_) => None,
                 })
             })
@@ -128,7 +181,7 @@ impl PlayerListExt for [Option<HQMServerPlayerEnum>] {
 }
 
 pub(crate) struct HQMServerState {
-    pub(crate) players: Vec<Option<HQMServerPlayerEnum>>,
+    pub(crate) players: Vec<ServerStatePlayerItem>,
     pub(crate) pucks: Vec<Option<PuckObject>>,
     persistent_messages: Vec<Rc<HQMMessage>>,
     replay_messages: Vec<Rc<HQMMessage>>,
@@ -141,7 +194,7 @@ impl HQMServerState {
     pub(crate) fn new(puck_slots: usize) -> Self {
         let mut players = Vec::with_capacity(64);
         for _ in 0..64 {
-            players.push(None);
+            players.push((0, None));
         }
         let pucks = vec![None; puck_slots];
         Self {
@@ -161,7 +214,7 @@ impl HQMServerState {
         self.saved_history.clear();
 
         let mut messages = smallvec::SmallVec::<[(HQMMessage, bool, bool); 32]>::new();
-        for (player_index, p) in self.players.iter_mut().enumerate() {
+        for (player_index, (gen, p)) in self.players.iter_mut().enumerate() {
             let player_index = PlayerIndex(player_index);
             if let Some(player) = p {
                 match player {
@@ -179,6 +232,7 @@ impl HQMServerState {
                         };
                         messages.push((update, false, false));
                         *p = None;
+                        *gen += 1;
                     }
                 }
             }
@@ -194,7 +248,7 @@ impl HQMServerState {
     pub(crate) fn find_player_by_addr(
         &self,
         addr: SocketAddr,
-    ) -> Option<(PlayerIndex, &HQMServerPlayer)> {
+    ) -> Option<(PlayerId, &HQMServerPlayer)> {
         self.players.iter_players().find(|(_, x)| {
             if let ServerPlayerData::NetworkPlayer { data } = &x.data {
                 data.addr == addr
@@ -207,7 +261,7 @@ impl HQMServerState {
     pub(crate) fn find_player_by_addr_mut(
         &mut self,
         addr: SocketAddr,
-    ) -> Option<(PlayerIndex, &mut HQMServerPlayer)> {
+    ) -> Option<(PlayerId, &mut HQMServerPlayer)> {
         self.players.iter_players_mut().find(|(_, x)| {
             if let ServerPlayerData::NetworkPlayer { data } = &x.data {
                 data.addr == addr
@@ -243,7 +297,7 @@ impl HQMServerState {
         receiver_index: PlayerIndex,
         sender_index: Option<PlayerIndex>,
     ) {
-        if let Some(player) = self.players.get_player_mut(receiver_index) {
+        if let Some((_, player)) = self.players.get_player_mut(receiver_index) {
             player.add_directed_chat_message(message, sender_index)
         }
     }
@@ -300,7 +354,7 @@ impl HQMServerState {
     }
 
     fn add_user_team_message(&mut self, message: &str, sender_index: PlayerIndex) {
-        if let Some(player) = self.players.get_player(sender_index) {
+        if let Some((_, player)) = self.players.get_player(sender_index) {
             let team = if let Some((_, _, team)) = player.object {
                 Some(team)
             } else {
@@ -350,7 +404,7 @@ impl HQMServerState {
     }
 
     pub(crate) fn move_to_spectator(&mut self, player_index: PlayerIndex) -> bool {
-        if let Some(player) = self.players.get_player_mut(player_index) {
+        if let Some((_, player)) = self.players.get_player_mut(player_index) {
             if player.object.is_some() {
                 player.object = None;
                 let update = player.get_update_message(player_index);
@@ -370,7 +424,7 @@ impl HQMServerState {
         keep_stick_position: bool,
     ) -> bool {
         let empty_slot = self.find_empty_player_object_slot();
-        if let Some(player) = self.players.get_player_mut(player_index) {
+        if let Some((_, player)) = self.players.get_player_mut(player_index) {
             if let Some((_, skater, team2)) = &mut player.object {
                 let mut new_skater = SkaterObject::new(pos, rot, player.preferred_hand);
                 if keep_stick_position {
@@ -434,8 +488,11 @@ impl HQMServerState {
     }
 
     fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerIndex> {
-        fn find_empty_player_slot(players: &[Option<HQMServerPlayerEnum>]) -> Option<PlayerIndex> {
-            return players.iter().position(|x| x.is_none()).map(PlayerIndex);
+        fn find_empty_player_slot(players: &[ServerStatePlayerItem]) -> Option<PlayerIndex> {
+            return players
+                .iter()
+                .position(|(_, x)| x.is_none())
+                .map(PlayerIndex);
         }
         let player_index = find_empty_player_slot(&self.players);
         match player_index {
@@ -448,7 +505,7 @@ impl HQMServerState {
                 );
                 let update = new_player.get_update_message(player_index);
 
-                self.players[player_index.0] = Some(HQMServerPlayerEnum::Player(new_player));
+                self.players[player_index.0].1 = Some(HQMServerPlayerEnum::Player(new_player));
 
                 self.add_global_message(update, true, true);
 
@@ -459,7 +516,7 @@ impl HQMServerState {
     }
 
     pub fn remove_player(&mut self, player_index: PlayerIndex, on_replay: bool) -> bool {
-        if let Some(player) = self.players.get_player(player_index) {
+        if let Some((_, player)) = self.players.get_player(player_index) {
             let player_name = player.player_name.clone();
 
             let update = HQMMessage::PlayerUpdate {
@@ -469,7 +526,8 @@ impl HQMServerState {
                 in_server: false,
             };
 
-            self.players[player_index.0] = None;
+            self.players[player_index.0].0 += 1;
+            self.players[player_index.0].1 = None;
 
             self.add_global_message(update, true, on_replay);
 
@@ -694,7 +752,7 @@ impl HQMServer {
             if let Some((rep, message)) = chat {
                 if data.chat_rep != Some(rep) {
                     data.chat_rep = Some(rep);
-                    self.process_message(message, player_index, behaviour);
+                    self.process_message(message, player_index.index, behaviour);
                 }
             }
         }
@@ -742,7 +800,7 @@ impl HQMServer {
     }
 
     pub fn set_hand(&mut self, hand: SkaterHand, player_index: PlayerIndex) {
-        if let Some(player) = self.state.players.get_player_mut(player_index) {
+        if let Some((_, player)) = self.state.players.get_player_mut(player_index) {
             player.preferred_hand = hand;
             if let Some((_, skater, _)) = &mut player.object {
                 if self.scoreboard.period != 0 {
@@ -894,7 +952,7 @@ impl HQMServer {
                 }
             }
             "restoreview" => {
-                if let Some(player) = self.state.players.get_player_mut(player_index) {
+                if let Some((_, player)) = self.state.players.get_player_mut(player_index) {
                     if let ServerPlayerData::NetworkPlayer { data } = &mut player.data {
                         if data.view_player_index != player_index {
                             data.view_player_index = player_index;
@@ -934,7 +992,7 @@ impl HQMServer {
             .state
             .players
             .iter_players()
-            .filter(|(x, _)| x.0 >= first_index)
+            .filter(|(x, _)| x.index.0 >= first_index)
             .take(5)
             .map(|(player_index, player)| format!("{}: {}", player_index, player.player_name))
             .collect();
@@ -959,10 +1017,10 @@ impl HQMServer {
     }
 
     fn view(&mut self, view_player_index: PlayerIndex, player_index: PlayerIndex) {
-        if let Some(view_player) = self.state.players.get_player(view_player_index) {
+        if let Some((_, view_player)) = self.state.players.get_player(view_player_index) {
             let view_player_name = view_player.player_name.clone();
 
-            if let Some(player) = self.state.players.get_player_mut(player_index) {
+            if let Some((_, player)) = self.state.players.get_player_mut(player_index) {
                 if let ServerPlayerData::NetworkPlayer { data } = &mut player.data {
                     if player.object.is_some() {
                         self.state.add_directed_server_chat_message(
@@ -991,7 +1049,7 @@ impl HQMServer {
     }
 
     fn ping(&mut self, ping_player_index: PlayerIndex, player_index: PlayerIndex) {
-        if let Some(ping_player) = self.state.players.get_player(ping_player_index) {
+        if let Some((_, ping_player)) = self.state.players.get_player(ping_player_index) {
             if let Some(ping) = ping_player.ping_data() {
                 let msg1 = format!(
                     "{} ping: avg {:.0} ms",
@@ -1025,7 +1083,7 @@ impl HQMServer {
         for (player_index, player) in self.state.players.iter_players() {
             if player.player_name.as_ref() == name {
                 if found.is_none() {
-                    found = Some((player_index, player.player_name.clone()));
+                    found = Some((player_index.index, player.player_name.clone()));
                 } else {
                     return None;
                 }
@@ -1039,7 +1097,7 @@ impl HQMServer {
         let mut found = smallvec::SmallVec::<[_; 64]>::new();
         for (player_index, player) in self.state.players.iter_players() {
             if player.player_name.to_lowercase().contains(&name) {
-                found.push((player_index, player.player_name.clone()));
+                found.push((player_index.index, player.player_name.clone()));
                 if found.len() >= 5 {
                     break;
                 }
@@ -1063,7 +1121,7 @@ impl HQMServer {
             } else {
                 if !self.is_muted {
                     match self.state.players.get_player(player_index) {
-                        Some(player) => match player.is_muted {
+                        Some((_, player)) => match player.is_muted {
                             MuteStatus::NotMuted => {
                                 info!("{} ({}): {}", &player.player_name, player_index, &msg);
                                 self.state.add_user_chat_message(msg, player_index);
@@ -1091,8 +1149,8 @@ impl HQMServer {
 
         if let Some((player_index, player)) = player {
             let player_name = player.player_name.clone();
-            behaviour.before_player_exit(self.into(), player_index, ExitReason::Disconnected);
-            self.remove_player(player_index, true);
+            behaviour.before_player_exit(self.into(), player_index.index, ExitReason::Disconnected);
+            self.remove_player(player_index.index, true);
             info!("{} ({}) exited server", player_name, player_index);
             let msg = format!("{} exited", player_name);
             self.state.add_server_chat_message(msg);
@@ -1180,7 +1238,7 @@ impl HQMServer {
                 if let ServerPlayerData::NetworkPlayer { data } = &mut player.data {
                     data.inactivity += 1;
                     if data.inactivity > 500 {
-                        Some((player_index, player.player_name.clone()))
+                        Some((player_index.index, player.player_name.clone()))
                     } else {
                         None
                     }
@@ -1407,7 +1465,7 @@ async fn send_updates(
     game_step: u32,
     value: &ScoreboardValues,
     current_packet: u32,
-    players: &[Option<HQMServerPlayerEnum>],
+    players: &[ServerStatePlayerItem],
     socket: &UdpSocket,
     force_view: Option<PlayerIndex>,
     write_buf: &mut BytesMut,
@@ -1528,7 +1586,6 @@ pub(crate) struct HQMServerPlayer {
     player_name_red: Rc<str>,
     player_name_blue: Rc<str>,
     pub(crate) object: Option<(usize, SkaterObject, Team)>,
-    pub id: Uuid,
     pub data: ServerPlayerData,
     pub is_admin: bool,
     pub is_muted: MuteStatus,
@@ -1538,7 +1595,7 @@ pub(crate) struct HQMServerPlayer {
 
 pub(crate) struct HQMServerReplayPlaceholderPlayer {
     pub player_name: Rc<str>,
-    pub id: Uuid,
+    pub original_id: PlayerId,
 }
 
 impl HQMServerPlayer {
@@ -1553,7 +1610,6 @@ impl HQMServerPlayer {
             player_name_red: format!("[Red] {}", player_name).into(),
             player_name_blue: format!("[Blue] {}", player_name).into(),
             object: None,
-            id: Uuid::new_v4(),
             data: ServerPlayerData::NetworkPlayer {
                 data: NetworkPlayerData {
                     addr,

@@ -1,15 +1,15 @@
 use crate::game::{
-    PhysicsEvent, PlayerIndex, PlayerInput, PuckObject, Rink, ScoreboardValues, SkaterObject, Team,
+    PhysicsEvent, PlayerId, PlayerIndex, PlayerInput, PuckObject, Rink, ScoreboardValues,
+    SkaterObject, Team,
 };
 use crate::server::{
-    HQMServer, HQMServerPlayer, HQMServerPlayerEnum, HQMServerState, PlayerListExt,
+    HQMServer, HQMServerPlayer, HQMServerState, PlayerListExt, ServerStatePlayerItem,
 };
 use crate::ServerConfiguration;
 use nalgebra::{Point3, Rotation3};
 use reborrow::{ReborrowCopyTraits, ReborrowTraits};
 use std::borrow::Cow;
 use std::rc::Rc;
-use uuid::Uuid;
 
 pub mod russian;
 pub mod shootout;
@@ -358,7 +358,7 @@ impl<'a> ServerState<'a> {
 #[derive(ReborrowTraits)]
 #[Const(ServerPlayerList)]
 pub struct ServerPlayerListMut<'a> {
-    players: &'a mut [Option<HQMServerPlayerEnum>],
+    players: &'a mut [ServerStatePlayerItem],
 }
 
 impl<'a> ServerPlayerListMut<'a> {
@@ -366,28 +366,28 @@ impl<'a> ServerPlayerListMut<'a> {
     pub fn iter(&self) -> impl Iterator<Item = ServerPlayer> {
         self.players
             .iter_players()
-            .map(|(index, player)| ServerPlayer { index, player })
+            .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns a iterator over the players in the server, that also allows changing the player objects.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = ServerPlayerMut> {
         self.players
             .iter_players_mut()
-            .map(|(index, player)| ServerPlayerMut { index, player })
+            .map(|(id, player)| ServerPlayerMut { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get(&self, index: PlayerIndex) -> Option<ServerPlayer> {
         self.players
             .get_player(index)
-            .map(|player| ServerPlayer { index, player })
+            .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns a mutable handle to a player in the server.
     pub fn get_mut(&mut self, index: PlayerIndex) -> Option<ServerPlayer> {
         self.players
             .get_player_mut(index)
-            .map(|player| ServerPlayer { index, player })
+            .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Convenience method to count the number of players currently in the red or blue team.
@@ -410,7 +410,7 @@ impl<'a> ServerPlayerListMut<'a> {
 /// Immutable list of players in the server.
 #[derive(ReborrowCopyTraits)]
 pub struct ServerPlayerList<'a> {
-    players: &'a [Option<HQMServerPlayerEnum>],
+    players: &'a [ServerStatePlayerItem],
 }
 
 impl<'a> ServerPlayerList<'a> {
@@ -418,14 +418,14 @@ impl<'a> ServerPlayerList<'a> {
     pub fn iter(&self) -> impl Iterator<Item = ServerPlayer> {
         self.players
             .iter_players()
-            .map(|(index, player)| ServerPlayer { index, player })
+            .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get(&self, index: PlayerIndex) -> Option<ServerPlayer> {
         self.players
             .get_player(index)
-            .map(|player| ServerPlayer { index, player })
+            .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Convenience method to count the number of players currently in the red or blue team.
@@ -449,15 +449,12 @@ impl<'a> ServerPlayerList<'a> {
 #[derive(ReborrowTraits)]
 #[Const(ServerPlayer)]
 pub struct ServerPlayerMut<'a> {
-    pub index: PlayerIndex,
+    pub id: PlayerId,
     #[reborrow]
     pub(crate) player: &'a mut HQMServerPlayer,
 }
 
 impl<'a> ServerPlayerMut<'a> {
-    pub fn id(&self) -> Uuid {
-        self.player.id
-    }
     pub fn has_skater(&self) -> bool {
         self.player.has_skater()
     }
@@ -509,14 +506,11 @@ impl<'a> ServerPlayerMut<'a> {
 /// Immutable handle to player who is connected to the server.
 #[derive(ReborrowCopyTraits)]
 pub struct ServerPlayer<'a> {
-    pub index: PlayerIndex,
+    pub id: PlayerId,
     pub(crate) player: &'a HQMServerPlayer,
 }
 
 impl<'a> ServerPlayer<'a> {
-    pub fn id(&self) -> Uuid {
-        self.player.id
-    }
     pub fn has_skater(&self) -> bool {
         self.player.has_skater()
     }

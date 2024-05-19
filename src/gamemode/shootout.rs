@@ -87,7 +87,7 @@ impl ShootoutGameMode {
         let mut blue_players = vec![];
 
         for player in server.state().players().iter() {
-            let player_index = player.index;
+            let player_index = player.id.index;
             if let Some(team) = player.team() {
                 if team == Team::Red {
                     red_players.push(player_index);

@@ -630,6 +630,12 @@ fn get_position(bits: u32, v: f32) -> u32 {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct PlayerIndex(pub(crate) usize);
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct PlayerId {
+    pub(crate) index: PlayerIndex,
+    pub(crate) gen: u32,
+}
+
 impl std::fmt::Display for PlayerIndex {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -641,6 +647,12 @@ impl std::str::FromStr for PlayerIndex {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         s.parse().map(PlayerIndex)
+    }
+}
+
+impl std::fmt::Display for PlayerId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.index.0)
     }
 }
 

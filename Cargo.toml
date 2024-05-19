@@ -16,7 +16,6 @@ tracing = "0.1"
 tracing-subscriber = {version="0.3", features = ["parking_lot"]}
 tracing-appender = "0.2"
 chrono = "0.4"
-uuid = { version = "1.8", features = ["v4"] }
 smallvec = { version = "1.11", features = ["union", "const_generics"]}
 systemctl = "0.3.1"
 futures = "0.3"

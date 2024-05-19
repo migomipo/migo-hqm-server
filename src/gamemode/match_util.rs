@@ -611,7 +611,7 @@ impl Match {
         };
         let mut players_past_line = vec![];
         for player in server.state().players().iter() {
-            let player_index = player.index;
+            let player_index = player.id.index;
             if player_index == pass_player {
                 continue;
             }
@@ -1051,7 +1051,7 @@ fn get_faceoff_positions(
     let mut red_players = smallvec::SmallVec::<[_; 32]>::new();
     let mut blue_players = smallvec::SmallVec::<[_; 32]>::new();
     for player in players.iter() {
-        let player_index = player.index;
+        let player_index = player.id.index;
 
         let team = player.team();
 
@@ -1097,7 +1097,7 @@ fn has_players_in_offensive_zone(
     };
 
     for player in server.state().players().iter() {
-        let player_index = player.index;
+        let player_index = player.id.index;
         if Some(player_index) == ignore_player {
             continue;
         }

@@ -26,7 +26,7 @@ pub fn add_players<
     let mut joining_red = SmallVec::<[_; 32]>::new();
     let mut joining_blue = SmallVec::<[_; 32]>::new();
     for player in server.players().iter() {
-        let player_index = player.index;
+        let player_index = player.id.index;
         let input = player.input();
         let team = player.team();
         team_switch_timer
