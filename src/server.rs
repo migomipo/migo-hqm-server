@@ -1155,8 +1155,6 @@ impl HQMServer {
         self.saved_packets.truncate(192 - 1);
         self.saved_packets.push_front(packets);
         self.packet = self.packet.wrapping_add(1);
-        self.saved_pings.truncate(100 - 1);
-        self.saved_pings.push_front(Instant::now());
 
         if self.config.replays_enabled != ReplayEnabled::Off
             && behaviour.save_replay_data(self.into())
@@ -1229,20 +1227,23 @@ impl HQMServer {
 
                 let has_replay_data = self.state.check_replay();
 
-                if let Some((forced_view, tick)) = has_replay_data {
+                let res = if let Some((forced_view, tick)) = has_replay_data {
                     let game_step = tick.game_step;
                     let packets = tick.packets;
                     self.saved_packets.truncate(192 - 1);
                     self.saved_packets.push_front(packets);
-                    self.saved_pings.truncate(100 - 1);
-                    self.saved_pings.push_front(Instant::now());
 
                     self.packet = self.packet.wrapping_add(1);
                     (game_step, forced_view)
                 } else {
                     self.game_step(behaviour);
                     (self.game_step, None)
-                }
+                };
+
+                self.saved_pings.truncate(100 - 1);
+                self.saved_pings.push_front(Instant::now());
+
+                res
             });
 
             send_updates(
