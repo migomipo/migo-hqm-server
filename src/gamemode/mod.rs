@@ -271,10 +271,6 @@ impl<'a> ServerStateMut<'a> {
             .add_goal_message(team, goal_player_index, assist_player_index);
     }
 
-    pub fn admin_deny_message(&mut self, player_index: PlayerId) {
-        self.state.admin_deny_message(player_index)
-    }
-
     pub fn spawn_skater(
         &mut self,
         player_index: PlayerId,
@@ -384,6 +380,15 @@ impl<'a> ServerPlayerListMut<'a> {
         self.players
             .get_player_mut(id)
             .map(|player| ServerPlayerMut { id, player })
+    }
+
+    pub fn check_admin_or_deny(&mut self, player_id: PlayerId) -> Option<ServerPlayer> {
+        self.players
+            .check_admin_or_deny(player_id)
+            .map(|player| ServerPlayer {
+                id: player_id,
+                player,
+            })
     }
 
     /// Convenience method to count the number of players currently in the red or blue team.

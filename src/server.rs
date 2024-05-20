@@ -8,7 +8,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-pub use crate::gamemode::GameMode;
 use arr_macro::arr;
 use bytes::{BufMut, BytesMut};
 use chrono::{DateTime, Utc};
@@ -18,7 +17,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
 use tracing::{info, warn};
 
-use crate::gamemode::{ExitReason, InitialGameValues};
+use crate::gamemode::{ExitReason, GameMode, InitialGameValues};
 
 use crate::game::{
     PhysicsConfiguration, PlayerId, PlayerIndex, PlayerInput, PuckObject, Rink, RulesState,
@@ -92,6 +91,19 @@ pub(crate) trait PlayerListExt {
     fn iter_players(&self) -> impl Iterator<Item = (PlayerId, &HQMServerPlayer)>;
 
     fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerId, &mut HQMServerPlayer)>;
+
+    fn check_admin_or_deny(&mut self, player_id: PlayerId) -> Option<&HQMServerPlayer> {
+        if let Some(player) = self.get_player_mut(player_id) {
+            if player.is_admin {
+                Some(player)
+            } else {
+                player.add_directed_server_chat_message("Please log in before using that command");
+                None
+            }
+        } else {
+            None
+        }
+    }
 }
 
 pub(crate) type ServerStatePlayerItem = (u32, Option<HQMServerPlayerEnum>);
@@ -352,11 +364,6 @@ impl HQMServerState {
         };
         self.add_global_message(message, true, true);
     }
-
-    pub fn admin_deny_message(&mut self, player_id: PlayerId) {
-        self.add_directed_server_chat_message("Please log in before using that command", player_id);
-    }
-
     fn add_global_message(&mut self, message: HQMMessage, persistent: bool, replay: bool) {
         let rc = Rc::new(message);
         if replay {

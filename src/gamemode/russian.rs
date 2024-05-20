@@ -186,18 +186,18 @@ impl RussianGameMode {
     }
 
     fn reset_game(&mut self, mut server: ServerMut, player_id: PlayerId) {
-        if let Some(player) = server.state().players().get_by_id(player_id) {
-            if player.is_admin() {
-                let name = player.name();
-                info!("{} ({}) reset game", name, player_id);
-                let msg = format!("Game reset by {}", name);
+        if let Some(player) = server
+            .state_mut()
+            .players_mut()
+            .check_admin_or_deny(player_id)
+        {
+            let name = player.name();
+            info!("{} ({}) reset game", name, player_id);
+            let msg = format!("Game reset by {}", name);
 
-                server.new_game(self.get_initial_game_values());
+            server.new_game(self.get_initial_game_values());
 
-                server.state_mut().add_server_chat_message(msg);
-            } else {
-                server.state_mut().admin_deny_message(player_id);
-            }
+            server.state_mut().add_server_chat_message(msg);
         }
     }
 
@@ -207,32 +207,28 @@ impl RussianGameMode {
         admin_player_id: PlayerId,
         force_player_index: PlayerIndex,
     ) {
-        if let Some(player) = server.state().players().get_by_id(admin_player_id) {
-            if player.is_admin() {
-                let admin_player_name = player.name();
+        if let Some(player) = server
+            .state_mut()
+            .players_mut()
+            .check_admin_or_deny(admin_player_id)
+        {
+            let admin_player_name = player.name();
 
-                if let Some(force_player) = server.state().players().get(force_player_index) {
-                    let force_player_id = force_player.id;
-                    let force_player_name = force_player.name();
-                    if server.state_mut().move_to_spectator(force_player_id) {
-                        let msg = format!(
-                            "{} forced off ice by {}",
-                            force_player_name, admin_player_name
-                        );
-                        info!(
-                            "{} ({}) forced {} ({}) off ice",
-                            admin_player_name,
-                            admin_player_id,
-                            force_player_name,
-                            force_player_index
-                        );
-                        server.state_mut().add_server_chat_message(msg);
-                        self.team_switch_timer.insert(force_player_id, 500);
-                    }
+            if let Some(force_player) = server.state().players().get(force_player_index) {
+                let force_player_id = force_player.id;
+                let force_player_name = force_player.name();
+                if server.state_mut().move_to_spectator(force_player_id) {
+                    let msg = format!(
+                        "{} forced off ice by {}",
+                        force_player_name, admin_player_name
+                    );
+                    info!(
+                        "{} ({}) forced {} ({}) off ice",
+                        admin_player_name, admin_player_id, force_player_name, force_player_index
+                    );
+                    server.state_mut().add_server_chat_message(msg);
+                    self.team_switch_timer.insert(force_player_id, 500);
                 }
-            } else {
-                server.state_mut().admin_deny_message(admin_player_id);
-                return;
             }
         }
     }
