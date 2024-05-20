@@ -72,7 +72,7 @@ pub trait GameMode {
     }
 }
 
-/// A struct containing the individual parts of an HQMServerHandle.
+/// A struct containing the individual parts of a [ServerMut].
 ///
 /// This is useful if you want to mutably borrow several properties at once without getting in trouble with the borrow checker.
 #[non_exhaustive]
@@ -201,7 +201,7 @@ impl<'a> Server<'a> {
     }
 }
 
-/// A struct containing the individual parts of an HQMServerHandleState.
+/// A struct containing the individual parts of a [ServerStateMut].
 ///
 /// This is useful if you want to mutably borrow several properties at once without getting in trouble with the borrow checker.
 #[non_exhaustive]
