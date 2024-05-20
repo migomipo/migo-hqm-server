@@ -76,16 +76,19 @@ pub(crate) enum HQMMessage {
 }
 
 pub(crate) trait PlayerListExt {
-    fn get_player(&self, player_index: PlayerIndex) -> Option<(PlayerId, &HQMServerPlayer)>;
+    fn get_player_by_index(
+        &self,
+        player_index: PlayerIndex,
+    ) -> Option<(PlayerId, &HQMServerPlayer)>;
 
-    fn get_player_by_id(&self, player_id: PlayerId) -> Option<&HQMServerPlayer>;
+    fn get_player(&self, player_id: PlayerId) -> Option<&HQMServerPlayer>;
 
-    fn get_player_mut(
+    fn get_player_mut_by_index(
         &mut self,
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &mut HQMServerPlayer)>;
 
-    fn get_player_mut_by_id(&mut self, player_id: PlayerId) -> Option<&mut HQMServerPlayer>;
+    fn get_player_mut(&mut self, player_id: PlayerId) -> Option<&mut HQMServerPlayer>;
     fn iter_players(&self) -> impl Iterator<Item = (PlayerId, &HQMServerPlayer)>;
 
     fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerId, &mut HQMServerPlayer)>;
@@ -94,7 +97,10 @@ pub(crate) trait PlayerListExt {
 pub(crate) type ServerStatePlayerItem = (u32, Option<HQMServerPlayerEnum>);
 
 impl PlayerListExt for [ServerStatePlayerItem] {
-    fn get_player(&self, player_index: PlayerIndex) -> Option<(PlayerId, &HQMServerPlayer)> {
+    fn get_player_by_index(
+        &self,
+        player_index: PlayerIndex,
+    ) -> Option<(PlayerId, &HQMServerPlayer)> {
         self.get(player_index.0)
             .and_then(|(gen, x)| x.as_ref().map(|x| (*gen, x)))
             .and_then(|(gen, x)| match x {
@@ -109,7 +115,7 @@ impl PlayerListExt for [ServerStatePlayerItem] {
             })
     }
 
-    fn get_player_by_id(&self, player_id: PlayerId) -> Option<&HQMServerPlayer> {
+    fn get_player(&self, player_id: PlayerId) -> Option<&HQMServerPlayer> {
         self.get(player_id.index.0)
             .and_then(|(gen, x)| x.as_ref().map(|x| (*gen, x)))
             .and_then(|(gen, x)| match x {
@@ -118,7 +124,7 @@ impl PlayerListExt for [ServerStatePlayerItem] {
             })
     }
 
-    fn get_player_mut(
+    fn get_player_mut_by_index(
         &mut self,
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &mut HQMServerPlayer)> {
@@ -136,7 +142,7 @@ impl PlayerListExt for [ServerStatePlayerItem] {
             })
     }
 
-    fn get_player_mut_by_id(&mut self, player_id: PlayerId) -> Option<&mut HQMServerPlayer> {
+    fn get_player_mut(&mut self, player_id: PlayerId) -> Option<&mut HQMServerPlayer> {
         self.get_mut(player_id.index.0)
             .and_then(|(gen, x)| x.as_mut().map(|x| (*gen, x)))
             .and_then(|(gen, x)| match x {
@@ -186,7 +192,7 @@ pub(crate) struct HQMServerState {
     persistent_messages: Vec<Rc<HQMMessage>>,
     replay_messages: Vec<Rc<HQMMessage>>,
 
-    replay_queue: VecDeque<(Option<PlayerIndex>, ReplayTick)>,
+    replay_queue: VecDeque<(Option<PlayerId>, ReplayTick)>,
     saved_history: VecDeque<ReplayTick>,
 }
 
@@ -294,10 +300,10 @@ impl HQMServerState {
     pub fn add_directed_chat_message(
         &mut self,
         message: impl Into<Cow<'static, str>>,
-        receiver_index: PlayerIndex,
+        receiver_id: PlayerId,
         sender_index: Option<PlayerIndex>,
     ) {
-        if let Some((_, player)) = self.players.get_player_mut(receiver_index) {
+        if let Some(player) = self.players.get_player_mut(receiver_id) {
             player.add_directed_chat_message(message, sender_index)
         }
     }
@@ -305,26 +311,40 @@ impl HQMServerState {
     pub fn add_directed_user_chat_message(
         &mut self,
         message: impl Into<Cow<'static, str>>,
-        receiver_index: PlayerIndex,
+        receiver_id: PlayerId,
         sender_index: PlayerIndex,
     ) {
-        self.add_directed_chat_message(message, receiver_index, Some(sender_index));
+        self.add_directed_chat_message(message, receiver_id, Some(sender_index));
     }
 
     pub fn add_directed_server_chat_message(
         &mut self,
         message: impl Into<Cow<'static, str>>,
-        receiver_index: PlayerIndex,
+        receiver_id: PlayerId,
     ) {
-        self.add_directed_chat_message(message, receiver_index, None);
+        self.add_directed_chat_message(message, receiver_id, None);
     }
 
     pub fn add_goal_message(
         &mut self,
         team: Team,
-        goal_player_index: Option<PlayerIndex>,
-        assist_player_index: Option<PlayerIndex>,
+        goal_player_index: Option<PlayerId>,
+        assist_player_index: Option<PlayerId>,
     ) {
+        let goal_player_index = goal_player_index.and_then(|x| {
+            if self.players.get_player(x).is_some() {
+                Some(x.index)
+            } else {
+                None
+            }
+        });
+        let assist_player_index = assist_player_index.and_then(|x| {
+            if self.players.get_player(x).is_some() {
+                Some(x.index)
+            } else {
+                None
+            }
+        });
         let message = HQMMessage::Goal {
             team,
             goal_player_index,
@@ -333,11 +353,8 @@ impl HQMServerState {
         self.add_global_message(message, true, true);
     }
 
-    pub fn admin_deny_message(&mut self, player_index: PlayerIndex) {
-        self.add_directed_server_chat_message(
-            "Please log in before using that command",
-            player_index,
-        );
+    pub fn admin_deny_message(&mut self, player_id: PlayerId) {
+        self.add_directed_server_chat_message("Please log in before using that command", player_id);
     }
 
     fn add_global_message(&mut self, message: HQMMessage, persistent: bool, replay: bool) {
@@ -353,8 +370,8 @@ impl HQMServerState {
         }
     }
 
-    fn add_user_team_message(&mut self, message: &str, sender_index: PlayerIndex) {
-        if let Some((_, player)) = self.players.get_player(sender_index) {
+    fn add_user_team_message(&mut self, message: &str, sender_id: PlayerId) {
+        if let Some(player) = self.players.get_player(sender_id) {
             let team = if let Some((_, _, team)) = player.object {
                 Some(team)
             } else {
@@ -363,7 +380,7 @@ impl HQMServerState {
             if let Some(team) = team {
                 info!(
                     "{} ({}) to team {}: {}",
-                    &player.player_name, sender_index, team, message
+                    &player.player_name, sender_id, team, message
                 );
                 let object = player
                     .object
@@ -378,17 +395,17 @@ impl HQMServerState {
                 let change1 = Rc::new(HQMMessage::PlayerUpdate {
                     player_name: team_tag_name,
                     object,
-                    player_index: sender_index,
+                    player_index: sender_id.index,
                     in_server: true,
                 });
                 let change2 = Rc::new(HQMMessage::PlayerUpdate {
                     player_name: player.player_name.clone(),
                     object,
-                    player_index: sender_index,
+                    player_index: sender_id.index,
                     in_server: true,
                 });
                 let chat = Rc::new(HQMMessage::Chat {
-                    player_index: Some(sender_index),
+                    player_index: Some(sender_id.index),
                     message: Cow::Owned(message.to_owned()),
                 });
 
@@ -403,11 +420,11 @@ impl HQMServerState {
         }
     }
 
-    pub(crate) fn move_to_spectator(&mut self, player_index: PlayerIndex) -> bool {
-        if let Some((_, player)) = self.players.get_player_mut(player_index) {
+    pub(crate) fn move_to_spectator(&mut self, player_id: PlayerId) -> bool {
+        if let Some(player) = self.players.get_player_mut(player_id) {
             if player.object.is_some() {
                 player.object = None;
-                let update = player.get_update_message(player_index);
+                let update = player.get_update_message(player_id.index);
                 self.add_global_message(update, true, true);
                 return true;
             }
@@ -417,14 +434,14 @@ impl HQMServerState {
 
     pub(crate) fn spawn_skater(
         &mut self,
-        player_index: PlayerIndex,
+        player_index: PlayerId,
         team: Team,
         pos: Point3<f32>,
         rot: Rotation3<f32>,
         keep_stick_position: bool,
     ) -> bool {
         let empty_slot = self.find_empty_player_object_slot();
-        if let Some((_, player)) = self.players.get_player_mut(player_index) {
+        if let Some(player) = self.players.get_player_mut(player_index) {
             if let Some((_, skater, team2)) = &mut player.object {
                 let mut new_skater = SkaterObject::new(pos, rot, player.preferred_hand);
                 if keep_stick_position {
@@ -438,7 +455,7 @@ impl HQMServerState {
                 }
                 *skater = new_skater;
                 *team2 = team;
-                let update = player.get_update_message(player_index);
+                let update = player.get_update_message(player_index.index);
                 self.add_global_message(update, true, true);
                 return true;
             } else {
@@ -449,9 +466,9 @@ impl HQMServerState {
                     player.object = Some((object_index, skater, team));
 
                     if let ServerPlayerData::NetworkPlayer { data } = &mut player.data {
-                        data.view_player_index = player_index;
+                        data.view_player_index = player_index.index;
                     }
-                    let update = player.get_update_message(player_index);
+                    let update = player.get_update_message(player_index.index);
                     self.add_global_message(update, true, true);
                     return true;
                 }
@@ -487,7 +504,7 @@ impl HQMServerState {
         None
     }
 
-    fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerIndex> {
+    fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerId> {
         fn find_empty_player_slot(players: &[ServerStatePlayerItem]) -> Option<PlayerIndex> {
             return players
                 .iter()
@@ -506,28 +523,32 @@ impl HQMServerState {
                 let update = new_player.get_update_message(player_index);
 
                 self.players[player_index.0].1 = Some(HQMServerPlayerEnum::Player(new_player));
+                let player_id = PlayerId {
+                    index: player_index,
+                    gen: self.players[player_index.0].0,
+                };
 
                 self.add_global_message(update, true, true);
 
-                Some(player_index)
+                Some(player_id)
             }
             _ => None,
         }
     }
 
-    pub fn remove_player(&mut self, player_index: PlayerIndex, on_replay: bool) -> bool {
-        if let Some((_, player)) = self.players.get_player(player_index) {
+    pub fn remove_player(&mut self, player_id: PlayerId, on_replay: bool) -> bool {
+        if let Some(player) = self.players.get_player(player_id) {
             let player_name = player.player_name.clone();
 
             let update = HQMMessage::PlayerUpdate {
                 player_name,
                 object: None,
-                player_index,
+                player_index: player_id.index,
                 in_server: false,
             };
 
-            self.players[player_index.0].0 += 1;
-            self.players[player_index.0].1 = None;
+            self.players[player_id.index.0].0 += 1;
+            self.players[player_id.index.0].1 = None;
 
             self.add_global_message(update, true, on_replay);
 
@@ -537,7 +558,7 @@ impl HQMServerState {
         }
     }
 
-    fn check_replay(&mut self) -> Option<(Option<PlayerIndex>, ReplayTick)> {
+    fn check_replay(&mut self) -> Option<(Option<PlayerId>, ReplayTick)> {
         let res = self.replay_queue.pop_front();
         res
     }
@@ -710,7 +731,7 @@ impl HQMServer {
         client_version: HQMClientVersion,
         behaviour: &mut B,
     ) {
-        let (player_index, player) = match self.state.find_player_by_addr_mut(addr) {
+        let (player_id, player) = match self.state.find_player_by_addr_mut(addr) {
             Some(x) => x,
             None => {
                 return;
@@ -752,7 +773,7 @@ impl HQMServer {
             if let Some((rep, message)) = chat {
                 if data.chat_rep != Some(rep) {
                     data.chat_rep = Some(rep);
-                    self.process_message(message, player_index.index, behaviour);
+                    self.process_message(message, player_id, behaviour);
                 }
             }
         }
@@ -799,14 +820,14 @@ impl HQMServer {
         }
     }
 
-    pub fn set_hand(&mut self, hand: SkaterHand, player_index: PlayerIndex) {
-        if let Some((_, player)) = self.state.players.get_player_mut(player_index) {
+    pub fn set_hand(&mut self, hand: SkaterHand, player_id: PlayerId) {
+        if let Some(player) = self.state.players.get_player_mut(player_id) {
             player.preferred_hand = hand;
             if let Some((_, skater, _)) = &mut player.object {
                 if self.scoreboard.period != 0 {
                     self.state.add_directed_server_chat_message(
                         "Stick hand will change after next intermission",
-                        player_index,
+                        player_id,
                     );
                     return;
                 } else {
@@ -820,24 +841,24 @@ impl HQMServer {
         &mut self,
         command: &str,
         arg: &str,
-        player_index: PlayerIndex,
+        player_id: PlayerId,
         behaviour: &mut B,
     ) {
         match command {
             "enablejoin" => {
-                self.set_allow_join(player_index, true);
+                self.set_allow_join(player_id, true);
             }
             "disablejoin" => {
-                self.set_allow_join(player_index, false);
+                self.set_allow_join(player_id, false);
             }
             "mute" => {
                 if let Ok(mute_player_index) = arg.parse::<PlayerIndex>() {
-                    self.mute_player(player_index, mute_player_index);
+                    self.mute_player(player_id, mute_player_index);
                 }
             }
             "unmute" => {
                 if let Ok(mute_player_index) = arg.parse::<PlayerIndex>() {
-                    self.unmute_player(player_index, mute_player_index);
+                    self.unmute_player(player_id, mute_player_index);
                 }
             }
             /*"shadowmute" => {
@@ -848,130 +869,128 @@ impl HQMServer {
                 }
             },*/
             "mutechat" => {
-                self.mute_chat(player_index);
+                self.mute_chat(player_id);
             }
             "unmutechat" => {
-                self.unmute_chat(player_index);
+                self.unmute_chat(player_id);
             }
             "kick" => {
                 if let Ok(kick_player_index) = arg.parse::<PlayerIndex>() {
-                    self.kick_player(player_index, kick_player_index, false, behaviour);
+                    self.kick_player(player_id, kick_player_index, false, behaviour);
                 }
             }
             "kickall" => {
-                self.kick_all_matching(player_index, arg, false, behaviour);
+                self.kick_all_matching(player_id, arg, false, behaviour);
             }
             "ban" => {
                 if let Ok(kick_player_index) = arg.parse::<PlayerIndex>() {
-                    self.kick_player(player_index, kick_player_index, true, behaviour);
+                    self.kick_player(player_id, kick_player_index, true, behaviour);
                 }
             }
             "banall" => {
-                self.kick_all_matching(player_index, arg, true, behaviour);
+                self.kick_all_matching(player_id, arg, true, behaviour);
             }
             "clearbans" => {
-                self.clear_bans(player_index);
+                self.clear_bans(player_id);
             }
-            "replay" => self.set_replay(player_index, arg),
+            "replay" => self.set_replay(player_id, arg),
             "lefty" => {
-                self.set_hand(SkaterHand::Left, player_index);
+                self.set_hand(SkaterHand::Left, player_id);
             }
             "righty" => {
-                self.set_hand(SkaterHand::Right, player_index);
+                self.set_hand(SkaterHand::Right, player_id);
             }
             "admin" => {
-                self.admin_login(player_index, arg);
+                self.admin_login(player_id, arg);
             }
             "serverrestart" => {
-                self.restart_server(player_index);
+                self.restart_server(player_id);
             }
             "list" => {
                 if arg.is_empty() {
-                    self.list_players(player_index, 0);
+                    self.list_players(player_id, 0);
                 } else if let Ok(first_index) = arg.parse::<usize>() {
-                    self.list_players(player_index, first_index);
+                    self.list_players(player_id, first_index);
                 }
             }
             "search" => {
-                self.search_players(player_index, arg);
+                self.search_players(player_id, arg);
             }
             "ping" => {
                 if let Ok(ping_player_index) = arg.parse::<PlayerIndex>() {
-                    self.ping(ping_player_index, player_index);
+                    self.ping(ping_player_index, player_id);
                 }
             }
             "pings" => {
-                if let Some((ping_player_index, _name)) = self.player_exact_unique_match(arg) {
-                    self.ping(ping_player_index, player_index);
+                if let Some((ping_player_id, _name)) = self.player_exact_unique_match(arg) {
+                    self.ping(ping_player_id.index, player_id);
                 } else {
                     let matches = self.player_search(arg);
                     if matches.is_empty() {
                         self.state
-                            .add_directed_server_chat_message("No matches found", player_index);
+                            .add_directed_server_chat_message("No matches found", player_id);
                     } else if matches.len() > 1 {
                         self.state.add_directed_server_chat_message(
                             "Multiple matches found, use /ping X",
-                            player_index,
+                            player_id,
                         );
-                        for (found_player_index, found_player_name) in matches.into_iter().take(5) {
-                            let msg = format!("{}: {}", found_player_index, found_player_name);
-                            self.state
-                                .add_directed_server_chat_message(msg, player_index);
+                        for (found_player_id, found_player_name) in matches.into_iter().take(5) {
+                            let msg = format!("{}: {}", found_player_id.index, found_player_name);
+                            self.state.add_directed_server_chat_message(msg, player_id);
                         }
                     } else {
-                        self.ping(matches[0].0, player_index);
+                        self.ping(matches[0].0.index, player_id);
                     }
                 }
             }
             "view" => {
                 if let Ok(view_player_index) = arg.parse::<PlayerIndex>() {
-                    self.view(view_player_index, player_index);
+                    self.view(view_player_index, player_id);
                 }
             }
             "views" => {
-                if let Some((view_player_index, _name)) = self.player_exact_unique_match(arg) {
-                    self.view(view_player_index, player_index);
+                if let Some((view_player_id, _name)) = self.player_exact_unique_match(arg) {
+                    self.view(view_player_id.index, player_id);
                 } else {
                     let matches = self.player_search(arg);
                     if matches.is_empty() {
                         self.state
-                            .add_directed_server_chat_message("No matches found", player_index);
+                            .add_directed_server_chat_message("No matches found", player_id);
                     } else if matches.len() > 1 {
                         self.state.add_directed_server_chat_message(
                             "Multiple matches found, use /view X",
-                            player_index,
+                            player_id,
                         );
-                        for (found_player_index, found_player_name) in matches.into_iter().take(5) {
-                            let str = format!("{}: {}", found_player_index, found_player_name);
-                            self.state
-                                .add_directed_server_chat_message(str, player_index);
+                        for (found_player_id, found_player_name) in matches.into_iter().take(5) {
+                            let str = format!("{}: {}", found_player_id.index, found_player_name);
+                            self.state.add_directed_server_chat_message(str, player_id);
                         }
                     } else {
-                        self.view(matches[0].0, player_index);
+                        self.view(matches[0].0.index, player_id);
                     }
                 }
             }
             "restoreview" => {
-                if let Some((_, player)) = self.state.players.get_player_mut(player_index) {
+                if let Some(player) = self.state.players.get_player_mut(player_id) {
                     if let ServerPlayerData::NetworkPlayer { data } = &mut player.data {
-                        if data.view_player_index != player_index {
-                            data.view_player_index = player_index;
+                        if data.view_player_index != player_id.index {
+                            data.view_player_index = player_id.index;
                             self.state.add_directed_server_chat_message(
                                 "View has been restored",
-                                player_index,
+                                player_id,
                             );
                         }
                     }
                 }
             }
             "t" => {
-                self.state.add_user_team_message(arg, player_index);
+                self.state.add_user_team_message(arg, player_id);
             }
             "version" => {
                 let version = env!("CARGO_PKG_VERSION");
                 let s = format!("Migo HQM Server, version {}", version);
 
-                self.state.add_directed_server_chat_message(s, player_index);
+                self.state.add_directed_server_chat_message(s, player_id);
             }
             "git" => {
                 let git_sha = option_env!("VERGEN_GIT_SHA");
@@ -980,14 +999,14 @@ impl HQMServer {
                 } else {
                     "No git commit ID found".into()
                 };
-                self.state.add_directed_server_chat_message(s, player_index);
+                self.state.add_directed_server_chat_message(s, player_id);
             }
 
-            _ => behaviour.handle_command(self.into(), command, arg, player_index),
+            _ => behaviour.handle_command(self.into(), command, arg, player_id),
         }
     }
 
-    fn list_players(&mut self, receiver_index: PlayerIndex, first_index: usize) {
+    fn list_players(&mut self, receiver_id: PlayerId, first_index: usize) {
         let res: Vec<_> = self
             .state
             .players
@@ -998,45 +1017,45 @@ impl HQMServer {
             .collect();
         for msg in res {
             self.state
-                .add_directed_server_chat_message(msg, receiver_index);
+                .add_directed_server_chat_message(msg, receiver_id);
         }
     }
 
-    fn search_players(&mut self, player_index: PlayerIndex, name: &str) {
+    fn search_players(&mut self, player_id: PlayerId, name: &str) {
         let matches = self.player_search(name);
         if matches.is_empty() {
             self.state
-                .add_directed_server_chat_message("No matches found", player_index);
+                .add_directed_server_chat_message("No matches found", player_id);
             return;
         }
-        for (found_player_index, found_player_name) in matches.into_iter().take(5) {
-            let msg = format!("{}: {}", found_player_index, found_player_name);
-            self.state
-                .add_directed_server_chat_message(msg, player_index);
+        for (found_player_id, found_player_name) in matches.into_iter().take(5) {
+            let msg = format!("{}: {}", found_player_id.index, found_player_name);
+            self.state.add_directed_server_chat_message(msg, player_id);
         }
     }
 
-    fn view(&mut self, view_player_index: PlayerIndex, player_index: PlayerIndex) {
-        if let Some((_, view_player)) = self.state.players.get_player(view_player_index) {
+    fn view(&mut self, view_player_index: PlayerIndex, player_id: PlayerId) {
+        if let Some((view_player_id, view_player)) =
+            self.state.players.get_player_by_index(view_player_index)
+        {
             let view_player_name = view_player.player_name.clone();
 
-            if let Some((_, player)) = self.state.players.get_player_mut(player_index) {
+            if let Some(player) = self.state.players.get_player_mut(player_id) {
                 if let ServerPlayerData::NetworkPlayer { data } = &mut player.data {
                     if player.object.is_some() {
                         self.state.add_directed_server_chat_message(
                             "You must be a spectator to change view",
-                            player_index,
+                            player_id,
                         );
                     } else if view_player_index != data.view_player_index {
-                        data.view_player_index = view_player_index;
-                        if player_index != view_player_index {
+                        data.view_player_index = view_player_id.index;
+                        if player_id != view_player_id {
                             let msg = format!("You are now viewing {}", view_player_name);
-                            self.state
-                                .add_directed_server_chat_message(msg, player_index);
+                            self.state.add_directed_server_chat_message(msg, player_id);
                         } else {
                             self.state.add_directed_server_chat_message(
                                 "View has been restored",
-                                player_index,
+                                player_id,
                             );
                         }
                     }
@@ -1044,12 +1063,12 @@ impl HQMServer {
             }
         } else {
             self.state
-                .add_directed_server_chat_message("No player with this ID exists", player_index);
+                .add_directed_server_chat_message("No player with this ID exists", player_id);
         }
     }
 
-    fn ping(&mut self, ping_player_index: PlayerIndex, player_index: PlayerIndex) {
-        if let Some((_, ping_player)) = self.state.players.get_player(ping_player_index) {
+    fn ping(&mut self, ping_player_index: PlayerIndex, player_id: PlayerId) {
+        if let Some((_, ping_player)) = self.state.players.get_player_by_index(ping_player_index) {
             if let Some(ping) = ping_player.ping_data() {
                 let msg1 = format!(
                     "{} ping: avg {:.0} ms",
@@ -1062,28 +1081,26 @@ impl HQMServer {
                     (ping.max * 1000f32),
                     (ping.deviation * 1000f32)
                 );
-                self.state
-                    .add_directed_server_chat_message(msg1, player_index);
-                self.state
-                    .add_directed_server_chat_message(msg2, player_index);
+                self.state.add_directed_server_chat_message(msg1, player_id);
+                self.state.add_directed_server_chat_message(msg2, player_id);
             } else {
                 self.state.add_directed_server_chat_message(
                     "This player is not a connected player",
-                    player_index,
+                    player_id,
                 );
             }
         } else {
             self.state
-                .add_directed_server_chat_message("No player with this ID exists", player_index);
+                .add_directed_server_chat_message("No player with this ID exists", player_id);
         }
     }
 
-    pub fn player_exact_unique_match(&self, name: &str) -> Option<(PlayerIndex, Rc<str>)> {
+    pub fn player_exact_unique_match(&self, name: &str) -> Option<(PlayerId, Rc<str>)> {
         let mut found = None;
-        for (player_index, player) in self.state.players.iter_players() {
+        for (player_id, player) in self.state.players.iter_players() {
             if player.player_name.as_ref() == name {
                 if found.is_none() {
-                    found = Some((player_index.index, player.player_name.clone()));
+                    found = Some((player_id, player.player_name.clone()));
                 } else {
                     return None;
                 }
@@ -1092,12 +1109,12 @@ impl HQMServer {
         found
     }
 
-    pub fn player_search(&self, name: &str) -> smallvec::SmallVec<[(PlayerIndex, Rc<str>); 64]> {
+    pub fn player_search(&self, name: &str) -> smallvec::SmallVec<[(PlayerId, Rc<str>); 64]> {
         let name = name.to_lowercase();
         let mut found = smallvec::SmallVec::<[_; 64]>::new();
         for (player_index, player) in self.state.players.iter_players() {
             if player.player_name.to_lowercase().contains(&name) {
-                found.push((player_index.index, player.player_name.clone()));
+                found.push((player_index, player.player_name.clone()));
                 if found.len() >= 5 {
                     break;
                 }
@@ -1109,35 +1126,30 @@ impl HQMServer {
     fn process_message<B: GameMode>(
         &mut self,
         msg: String,
-        player_index: PlayerIndex,
+        player_id: PlayerId,
         behaviour: &mut B,
     ) {
-        if self.state.players.get_player(player_index).is_some() {
+        if let Some(player) = self.state.players.get_player(player_id) {
             if msg.starts_with("/") {
                 let split: Vec<&str> = msg.splitn(2, " ").collect();
                 let command = &split[0][1..];
                 let arg = if split.len() < 2 { "" } else { &split[1] };
-                self.process_command(command, arg, player_index, behaviour);
+                self.process_command(command, arg, player_id, behaviour);
             } else {
                 if !self.is_muted {
-                    match self.state.players.get_player(player_index) {
-                        Some((_, player)) => match player.is_muted {
-                            MuteStatus::NotMuted => {
-                                info!("{} ({}): {}", &player.player_name, player_index, &msg);
-                                self.state.add_user_chat_message(msg, player_index);
-                            }
-                            MuteStatus::ShadowMuted => {
-                                self.state.add_directed_user_chat_message(
-                                    msg,
-                                    player_index,
-                                    player_index,
-                                );
-                            }
-                            MuteStatus::Muted => {}
-                        },
-                        _ => {
-                            return;
+                    match player.is_muted {
+                        MuteStatus::NotMuted => {
+                            info!("{} ({}): {}", &player.player_name, player_id, &msg);
+                            self.state.add_user_chat_message(msg, player_id.index);
                         }
+                        MuteStatus::ShadowMuted => {
+                            self.state.add_directed_user_chat_message(
+                                msg,
+                                player_id,
+                                player_id.index,
+                            );
+                        }
+                        MuteStatus::Muted => {}
                     }
                 }
             }
@@ -1147,17 +1159,17 @@ impl HQMServer {
     fn player_exit<B: GameMode>(&mut self, addr: SocketAddr, behaviour: &mut B) {
         let player = self.state.find_player_by_addr(addr);
 
-        if let Some((player_index, player)) = player {
+        if let Some((player_id, player)) = player {
             let player_name = player.player_name.clone();
-            behaviour.before_player_exit(self.into(), player_index.index, ExitReason::Disconnected);
-            self.remove_player(player_index.index, true);
-            info!("{} ({}) exited server", player_name, player_index);
+            behaviour.before_player_exit(self.into(), player_id, ExitReason::Disconnected);
+            self.remove_player(player_id, true);
+            info!("{} ({}) exited server", player_name, player_id);
             let msg = format!("{} exited", player_name);
             self.state.add_server_chat_message(msg);
         }
     }
 
-    fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerIndex> {
+    fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerId> {
         let res = self.state.add_player(player_name, addr);
         if let Some(player_index) = res {
             let welcome = self.config.welcome.clone();
@@ -1169,8 +1181,8 @@ impl HQMServer {
         res
     }
 
-    pub fn remove_player(&mut self, player_index: PlayerIndex, on_replay: bool) -> bool {
-        let res = self.state.remove_player(player_index, on_replay);
+    pub fn remove_player(&mut self, player_id: PlayerId, on_replay: bool) -> bool {
+        let res = self.state.remove_player(player_id, on_replay);
         if res {
             let admin_found = self.state.players.iter_players().any(|(_, x)| x.is_admin);
 
@@ -1234,11 +1246,11 @@ impl HQMServer {
             .state
             .players
             .iter_players_mut()
-            .filter_map(|(player_index, player)| {
+            .filter_map(|(player_id, player)| {
                 if let ServerPlayerData::NetworkPlayer { data } = &mut player.data {
                     data.inactivity += 1;
                     if data.inactivity > 500 {
-                        Some((player_index.index, player.player_name.clone()))
+                        Some((player_id, player.player_name.clone()))
                     } else {
                         None
                     }
@@ -1247,10 +1259,10 @@ impl HQMServer {
                 }
             })
             .collect();
-        for (player_index, player_name) in inactive_players {
-            behaviour.before_player_exit(self.into(), player_index, ExitReason::Timeout);
-            self.remove_player(player_index, true);
-            info!("{} ({}) timed out", player_name, player_index);
+        for (player_id, player_name) in inactive_players {
+            behaviour.before_player_exit(self.into(), player_id, ExitReason::Timeout);
+            self.remove_player(player_id, true);
+            info!("{} ({}) timed out", player_name, player_id);
             let chat_msg = format!("{} timed out", player_name);
             self.state.add_server_chat_message(chat_msg);
         }
@@ -1278,6 +1290,7 @@ impl HQMServer {
                 let has_replay_data = self.state.check_replay();
 
                 let res = if let Some((forced_view, tick)) = has_replay_data {
+                    let forced_view = forced_view.map(|x| x.index);
                     let game_step = tick.game_step;
                     let packets = tick.packets;
                     self.saved_packets.truncate(192 - 1);
@@ -1389,7 +1402,7 @@ impl HQMServer {
         &mut self,
         start_step: u32,
         end_step: u32,
-        force_view: Option<PlayerIndex>,
+        force_view: Option<PlayerId>,
     ) {
         if start_step > end_step {
             warn!("start_step must be less than or equal to end_step");

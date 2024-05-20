@@ -1,5 +1,5 @@
-use crate::game::PhysicsEvent;
-use crate::game::{PlayerIndex, PuckObject};
+use crate::game::PuckObject;
+use crate::game::{PhysicsEvent, PlayerId};
 use crate::gamemode::util::{add_players, get_spawnpoint, SpawnPoint};
 use crate::gamemode::{GameMode, InitialGameValues, ServerMut, ServerMutParts};
 use nalgebra::{Point3, Rotation3};
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 pub struct PermanentWarmup {
     pucks: usize,
     spawn_point: SpawnPoint,
-    team_switch_timer: HashMap<PlayerIndex, u32>,
+    team_switch_timer: HashMap<PlayerId, u32>,
 }
 
 impl PermanentWarmup {
@@ -49,7 +49,7 @@ impl GameMode for PermanentWarmup {
         _server: ServerMut,
         _cmd: &str,
         _arg: &str,
-        _player_index: PlayerIndex,
+        _player_index: PlayerId,
     ) {
     }
 

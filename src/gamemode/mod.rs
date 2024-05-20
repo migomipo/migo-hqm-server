@@ -43,7 +43,7 @@ pub trait GameMode {
         _server: ServerMut,
         _cmd: &str,
         _arg: &str,
-        _player_index: PlayerIndex,
+        _player_index: PlayerId,
     ) {
     }
 
@@ -56,13 +56,13 @@ pub trait GameMode {
     fn before_player_exit(
         &mut self,
         _server: ServerMut,
-        _player_index: PlayerIndex,
+        _player_id: PlayerId,
         _reason: ExitReason,
     ) {
     }
 
     /// Called right after a new player has joined the server.
-    fn after_player_join(&mut self, _server: ServerMut, _player_index: PlayerIndex) {}
+    fn after_player_join(&mut self, _server: ServerMut, _player_index: PlayerId) {}
 
     /// Gets the server team size that will be shown in the server list.
     fn server_list_team_size(&self) -> u32;
@@ -153,7 +153,7 @@ impl<'a> ServerMut<'a> {
         &mut self,
         start_step: u32,
         end_step: u32,
-        force_view: Option<PlayerIndex>,
+        force_view: Option<PlayerId>,
     ) {
         self.server
             .add_replay_to_queue(start_step, end_step, force_view)
@@ -248,32 +248,14 @@ impl<'a> ServerStateMut<'a> {
         &mut self.state.pucks
     }
 
-    pub fn add_user_chat_message(
-        &mut self,
-        message: impl Into<Cow<'static, str>>,
-        sender_index: PlayerIndex,
-    ) {
-        self.state.add_user_chat_message(message, sender_index);
-    }
-
     pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
         self.state.add_server_chat_message(message);
-    }
-
-    pub fn add_directed_user_chat_message(
-        &mut self,
-        message: impl Into<Cow<'static, str>>,
-        receiver_index: PlayerIndex,
-        sender_index: PlayerIndex,
-    ) {
-        self.state
-            .add_directed_user_chat_message(message, receiver_index, sender_index);
     }
 
     pub fn add_directed_server_chat_message(
         &mut self,
         message: impl Into<Cow<'static, str>>,
-        receiver_index: PlayerIndex,
+        receiver_index: PlayerId,
     ) {
         self.state
             .add_directed_server_chat_message(message, receiver_index);
@@ -282,20 +264,20 @@ impl<'a> ServerStateMut<'a> {
     pub fn add_goal_message(
         &mut self,
         team: Team,
-        goal_player_index: Option<PlayerIndex>,
-        assist_player_index: Option<PlayerIndex>,
+        goal_player_index: Option<PlayerId>,
+        assist_player_index: Option<PlayerId>,
     ) {
         self.state
             .add_goal_message(team, goal_player_index, assist_player_index);
     }
 
-    pub fn admin_deny_message(&mut self, player_index: PlayerIndex) {
+    pub fn admin_deny_message(&mut self, player_index: PlayerId) {
         self.state.admin_deny_message(player_index)
     }
 
     pub fn spawn_skater(
         &mut self,
-        player_index: PlayerIndex,
+        player_index: PlayerId,
         team: Team,
         pos: Point3<f32>,
         rot: Rotation3<f32>,
@@ -305,8 +287,8 @@ impl<'a> ServerStateMut<'a> {
             .spawn_skater(player_index, team, pos, rot, keep_stick_position)
     }
 
-    pub fn move_to_spectator(&mut self, player_index: PlayerIndex) -> bool {
-        self.state.move_to_spectator(player_index)
+    pub fn move_to_spectator(&mut self, player_id: PlayerId) -> bool {
+        self.state.move_to_spectator(player_id)
     }
 
     pub fn spawn_puck(&mut self, puck: PuckObject) -> Option<usize> {
@@ -379,15 +361,29 @@ impl<'a> ServerPlayerListMut<'a> {
     /// Returns an immutable handle to a player in the server.
     pub fn get(&self, index: PlayerIndex) -> Option<ServerPlayer> {
         self.players
-            .get_player(index)
+            .get_player_by_index(index)
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
-    /// Returns a mutable handle to a player in the server.
-    pub fn get_mut(&mut self, index: PlayerIndex) -> Option<ServerPlayer> {
+    /// Returns an immutable handle to a player in the server.
+    pub fn get_by_id(&self, id: PlayerId) -> Option<ServerPlayer> {
         self.players
-            .get_player_mut(index)
-            .map(|(id, player)| ServerPlayer { id, player })
+            .get_player(id)
+            .map(|player| ServerPlayer { id, player })
+    }
+
+    /// Returns a mutable handle to a player in the server.
+    pub fn get_mut(&mut self, index: PlayerIndex) -> Option<ServerPlayerMut> {
+        self.players
+            .get_player_mut_by_index(index)
+            .map(|(id, player)| ServerPlayerMut { id, player })
+    }
+
+    /// Returns an immutable handle to a player in the server.
+    pub fn get_mut_by_id(&mut self, id: PlayerId) -> Option<ServerPlayerMut> {
+        self.players
+            .get_player_mut(id)
+            .map(|player| ServerPlayerMut { id, player })
     }
 
     /// Convenience method to count the number of players currently in the red or blue team.
@@ -424,8 +420,15 @@ impl<'a> ServerPlayerList<'a> {
     /// Returns an immutable handle to a player in the server.
     pub fn get(&self, index: PlayerIndex) -> Option<ServerPlayer> {
         self.players
-            .get_player(index)
+            .get_player_by_index(index)
             .map(|(id, player)| ServerPlayer { id, player })
+    }
+
+    /// Returns an immutable handle to a player in the server.
+    pub fn get_by_id(&self, id: PlayerId) -> Option<ServerPlayer> {
+        self.players
+            .get_player(id)
+            .map(|player| ServerPlayer { id, player })
     }
 
     /// Convenience method to count the number of players currently in the red or blue team.
@@ -487,15 +490,6 @@ impl<'a> ServerPlayerMut<'a> {
             .object
             .as_mut()
             .map(|(_, skater, team)| (*team, skater))
-    }
-
-    pub fn add_directed_user_chat_message(
-        &mut self,
-        message: impl Into<Cow<'static, str>>,
-        sender_index: PlayerIndex,
-    ) {
-        self.player
-            .add_directed_user_chat_message(message, sender_index);
     }
 
     pub fn add_directed_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {

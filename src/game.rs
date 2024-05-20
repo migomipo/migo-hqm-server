@@ -627,9 +627,24 @@ fn get_position(bits: u32, v: f32) -> u32 {
     }
 }
 
+/**
+Player slot index.
+
+This simply represents the player "slot" that each player has in the player list, and thus two
+different users might have had the same index since the server started. Two players can
+never have the same index at the same time. This is mostly useful for handling chat commands that
+take a user number as input.
+ **/
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct PlayerIndex(pub(crate) usize);
 
+/**
+Unique player ID.
+
+This ID will be unique for each player session while this server running. That is, each player
+who connects will always get a new ID that no other user has had since the server started. A player who disconnects
+and then reconnects will get a different Id.
+**/
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct PlayerId {
     pub(crate) index: PlayerIndex,
@@ -652,7 +667,7 @@ impl std::str::FromStr for PlayerIndex {
 
 impl std::fmt::Display for PlayerId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.index.0)
+        write!(f, "{}.{}", self.index.0, self.gen)
     }
 }
 
@@ -689,7 +704,7 @@ impl Display for Team {
 
 #[derive(Debug, Copy, Clone)]
 pub enum PhysicsEvent {
-    PuckTouch { player: PlayerIndex, puck: usize },
+    PuckTouch { player: PlayerId, puck: usize },
     PuckReachedDefensiveLine { team: Team, puck: usize },
     PuckPassedDefensiveLine { team: Team, puck: usize },
     PuckReachedCenterLine { team: Team, puck: usize },

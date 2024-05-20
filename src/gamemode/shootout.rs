@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 
 use tracing::info;
 
-use crate::game::PhysicsEvent;
+use crate::game::{PhysicsEvent, PlayerId};
 use crate::game::{PlayerIndex, PuckObject, ScoreboardValues, Team};
 use crate::gamemode::util::{add_players, get_spawnpoint, SpawnPoint};
 use crate::gamemode::{ExitReason, GameMode, InitialGameValues, ServerMut, ServerMutParts};
@@ -31,7 +31,7 @@ pub struct ShootoutGameMode {
     attempts: u32,
     status: ShootoutStatus,
     paused: bool,
-    team_switch_timer: HashMap<PlayerIndex, u32>,
+    team_switch_timer: HashMap<PlayerId, u32>,
     team_max: usize,
 }
 
@@ -87,7 +87,7 @@ impl ShootoutGameMode {
         let mut blue_players = vec![];
 
         for player in server.state().players().iter() {
-            let player_index = player.id.index;
+            let player_index = player.id;
             if let Some(team) = player.team() {
                 if team == Team::Red {
                     red_players.push(player_index);
@@ -235,18 +235,18 @@ impl ShootoutGameMode {
         }
     }
 
-    fn reset_game(&mut self, mut server: ServerMut, player_index: PlayerIndex) {
-        if let Some(player) = server.state().players().get(player_index) {
+    fn reset_game(&mut self, mut server: ServerMut, player_id: PlayerId) {
+        if let Some(player) = server.state().players().get_by_id(player_id) {
             if player.is_admin() {
                 let name = player.name();
-                info!("{} ({}) reset game", name, player_index);
+                info!("{} ({}) reset game", name, player_id);
                 let msg = format!("Game reset by {}", name);
 
                 server.new_game(self.get_initial_game_values());
 
                 server.state_mut().add_server_chat_message(msg);
             } else {
-                server.state_mut().admin_deny_message(player_index);
+                server.state_mut().admin_deny_message(player_id);
             }
         }
     }
@@ -254,16 +254,17 @@ impl ShootoutGameMode {
     fn force_player_off_ice(
         &mut self,
         mut server: ServerMut,
-        admin_player_index: PlayerIndex,
+        admin_player_id: PlayerId,
         force_player_index: PlayerIndex,
     ) {
-        if let Some(player) = server.state().players().get(admin_player_index) {
+        if let Some(player) = server.state().players().get_by_id(admin_player_id) {
             if player.is_admin() {
                 let admin_player_name = player.name();
 
                 if let Some(force_player) = server.state().players().get(force_player_index) {
                     let force_player_name = force_player.name();
-                    if server.state_mut().move_to_spectator(force_player_index) {
+                    let force_player_id = force_player.id;
+                    if server.state_mut().move_to_spectator(force_player_id) {
                         let msg = format!(
                             "{} forced off ice by {}",
                             force_player_name, admin_player_name
@@ -271,16 +272,16 @@ impl ShootoutGameMode {
                         info!(
                             "{} ({}) forced {} ({}) off ice",
                             admin_player_name,
-                            admin_player_index,
+                            admin_player_id,
                             force_player_name,
                             force_player_index
                         );
                         server.state_mut().add_server_chat_message(msg);
-                        self.team_switch_timer.insert(force_player_index, 500);
+                        self.team_switch_timer.insert(force_player_id, 500);
                     }
                 }
             } else {
-                server.state_mut().admin_deny_message(admin_player_index);
+                server.state_mut().admin_deny_message(admin_player_id);
                 return;
             }
         }
@@ -291,9 +292,9 @@ impl ShootoutGameMode {
         mut server: ServerMut,
         input_team: Team,
         input_score: u32,
-        player_index: PlayerIndex,
+        player_id: PlayerId,
     ) {
-        if let Some(player) = server.state().players().get(player_index) {
+        if let Some(player) = server.state().players().get_by_id(player_id) {
             if player.is_admin() {
                 match input_team {
                     Team::Red => {
@@ -301,7 +302,7 @@ impl ShootoutGameMode {
                         server.scoreboard_mut().red_score = input_score;
                         info!(
                             "{} ({}) changed red score to {}",
-                            name, player_index, input_score
+                            name, player_id, input_score
                         );
                         let msg = format!("Red score changed by {}", name);
                         server.state_mut().add_server_chat_message(msg);
@@ -311,7 +312,7 @@ impl ShootoutGameMode {
                         server.scoreboard_mut().blue_score = input_score;
                         info!(
                             "{} ({}) changed blue score to {}",
-                            name, player_index, input_score
+                            name, player_id, input_score
                         );
                         let msg = format!("Blue score changed by {}", name);
                         server.state_mut().add_server_chat_message(msg);
@@ -319,7 +320,7 @@ impl ShootoutGameMode {
                 }
                 self.update_gameover(server);
             } else {
-                server.state_mut().admin_deny_message(player_index);
+                server.state_mut().admin_deny_message(player_id);
             }
         }
     }
@@ -329,12 +330,12 @@ impl ShootoutGameMode {
         mut server: ServerMut,
         input_team: Team,
         input_round: u32,
-        player_index: PlayerIndex,
+        player_id: PlayerId,
     ) {
         if input_round == 0 {
             return;
         }
-        if let Some(player) = server.state().players().get(player_index) {
+        if let Some(player) = server.state().players().get_by_id(player_id) {
             if player.is_admin() {
                 if let ShootoutStatus::Game {
                     state: _,
@@ -348,7 +349,7 @@ impl ShootoutGameMode {
 
                     info!(
                         "{} ({}) changed round to {} for {}",
-                        name, player_index, input_round, name
+                        name, player_id, input_round, name
                     );
                     let msg = format!(
                         "Round changed to {} for {} by {}",
@@ -358,7 +359,7 @@ impl ShootoutGameMode {
                 }
                 self.update_gameover(server);
             } else {
-                server.state_mut().admin_deny_message(player_index);
+                server.state_mut().admin_deny_message(player_id);
             }
         }
     }
@@ -368,12 +369,12 @@ impl ShootoutGameMode {
         mut server: ServerMut,
         input_team: Team,
         input_round: u32,
-        player_index: PlayerIndex,
+        player_id: PlayerId,
     ) {
         if input_round == 0 {
             return;
         }
-        if let Some(player) = server.state().players().get(player_index) {
+        if let Some(player) = server.state().players().get_by_id(player_id) {
             if player.is_admin() {
                 if let ShootoutStatus::Game {
                     state: _,
@@ -387,7 +388,7 @@ impl ShootoutGameMode {
                 let name = player.name();
                 info!(
                     "{} ({}) changed round to {} for {}",
-                    name, player_index, input_round, input_team
+                    name, player_id, input_round, input_team
                 );
                 let msg = format!(
                     "Round changed to {} for {} by {}",
@@ -400,28 +401,28 @@ impl ShootoutGameMode {
                     self.start_attempt(server.rb_mut(), input_round - 1, input_team);
                 }
             } else {
-                server.state_mut().admin_deny_message(player_index);
+                server.state_mut().admin_deny_message(player_id);
             }
         }
     }
 
-    fn pause(&mut self, mut server: ServerMut, player_index: PlayerIndex) {
-        if let Some(player) = server.state().players().get(player_index) {
+    fn pause(&mut self, mut server: ServerMut, player_id: PlayerId) {
+        if let Some(player) = server.state().players().get_by_id(player_id) {
             if player.is_admin() {
                 self.paused = true;
                 let name = player.name();
 
-                info!("{} ({}) paused game", name, player_index);
+                info!("{} ({}) paused game", name, player_id);
                 let msg = format!("Game paused by {}", name);
                 server.state_mut().add_server_chat_message(msg);
             } else {
-                server.state_mut().admin_deny_message(player_index);
+                server.state_mut().admin_deny_message(player_id);
             }
         }
     }
 
-    fn unpause(&mut self, mut server: ServerMut, player_index: PlayerIndex) {
-        if let Some(player) = server.state().players().get(player_index) {
+    fn unpause(&mut self, mut server: ServerMut, player_id: PlayerId) {
+        if let Some(player) = server.state().players().get_by_id(player_id) {
             if player.is_admin() {
                 self.paused = false;
                 if let ShootoutStatus::Game {
@@ -432,12 +433,12 @@ impl ShootoutGameMode {
                     *timer = (*timer).max(200);
                 }
                 let name = player.name();
-                info!("{} ({}) resumed game", name, player_index);
+                info!("{} ({}) resumed game", name, player_id);
                 let msg = format!("Game resumed by {}", name);
 
                 server.state_mut().add_server_chat_message(msg);
             } else {
-                server.state_mut().admin_deny_message(player_index);
+                server.state_mut().admin_deny_message(player_id);
             }
         }
     }
@@ -482,7 +483,7 @@ impl GameMode for ShootoutGameMode {
                     if let Some(touching_team) = server
                         .state()
                         .players()
-                        .get(player)
+                        .get_by_id(player)
                         .and_then(|player| player.team())
                     {
                         if let ShootoutStatus::Game {
@@ -599,20 +600,14 @@ impl GameMode for ShootoutGameMode {
         }
     }
 
-    fn handle_command(
-        &mut self,
-        server: ServerMut,
-        cmd: &str,
-        arg: &str,
-        player_index: PlayerIndex,
-    ) {
+    fn handle_command(&mut self, server: ServerMut, cmd: &str, arg: &str, player_id: PlayerId) {
         match cmd {
             "reset" | "resetgame" => {
-                self.reset_game(server, player_index);
+                self.reset_game(server, player_id);
             }
             "fs" => {
                 if let Ok(force_player_index) = arg.parse::<PlayerIndex>() {
-                    self.force_player_off_ice(server, player_index, force_player_index);
+                    self.force_player_off_ice(server, player_id, force_player_index);
                 }
             }
             "set" => {
@@ -621,12 +616,12 @@ impl GameMode for ShootoutGameMode {
                     match args[0] {
                         "redscore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
-                                self.set_score(server, Team::Red, input_score, player_index);
+                                self.set_score(server, Team::Red, input_score, player_id);
                             }
                         }
                         "bluescore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
-                                self.set_score(server, Team::Blue, input_score, player_index);
+                                self.set_score(server, Team::Blue, input_score, player_id);
                             }
                         }
                         "round" => {
@@ -638,7 +633,7 @@ impl GameMode for ShootoutGameMode {
                                 };
                                 let round = args[2].parse::<u32>();
                                 if let (Some(team), Ok(round)) = (team, round) {
-                                    self.set_round(server, team, round, player_index);
+                                    self.set_round(server, team, round, player_id);
                                 }
                             }
                         }
@@ -656,15 +651,15 @@ impl GameMode for ShootoutGameMode {
                     };
                     let round = args[1].parse::<u32>();
                     if let (Some(team), Ok(round)) = (team, round) {
-                        self.redo_round(server, team, round, player_index);
+                        self.redo_round(server, team, round, player_id);
                     }
                 }
             }
             "pause" | "pausegame" => {
-                self.pause(server, player_index);
+                self.pause(server, player_id);
             }
             "unpause" | "unpausegame" => {
-                self.unpause(server, player_index);
+                self.unpause(server, player_id);
             }
             _ => {}
         }
@@ -684,13 +679,8 @@ impl GameMode for ShootoutGameMode {
         self.status = ShootoutStatus::WaitingForGame;
     }
 
-    fn before_player_exit(
-        &mut self,
-        _server: ServerMut,
-        player_index: PlayerIndex,
-        _reason: ExitReason,
-    ) {
-        self.team_switch_timer.remove(&player_index);
+    fn before_player_exit(&mut self, _server: ServerMut, player_id: PlayerId, _reason: ExitReason) {
+        self.team_switch_timer.remove(&player_id);
     }
 
     fn server_list_team_size(&self) -> u32 {

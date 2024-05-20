@@ -2,7 +2,7 @@ use tracing::info;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::game::PhysicsEvent;
+use crate::game::{PhysicsEvent, PlayerId};
 use crate::game::{PlayerIndex, Team};
 pub use crate::gamemode::match_util::{
     IcingConfiguration, Match, MatchConfiguration, OffsideConfiguration, OffsideLineConfiguration,
@@ -14,8 +14,8 @@ use crate::gamemode::{ExitReason, GameMode, InitialGameValues, ServerMut, Server
 pub struct StandardMatchGameMode {
     pub m: Match,
     pub spawn_point: SpawnPoint,
-    pub(crate) team_switch_timer: HashMap<PlayerIndex, u32>,
-    pub(crate) show_extra_messages: HashSet<PlayerIndex>,
+    pub(crate) team_switch_timer: HashMap<PlayerId, u32>,
+    pub(crate) show_extra_messages: HashSet<PlayerId>,
     pub team_max: usize,
 }
 
@@ -58,59 +58,52 @@ impl StandardMatchGameMode {
     pub(crate) fn force_player_off_ice(
         &mut self,
         mut server: ServerMut,
-        admin_player_index: PlayerIndex,
+        admin_player_id: PlayerId,
         force_player_index: PlayerIndex,
     ) {
-        if let Some(player) = server.state().players().get(admin_player_index) {
+        if let Some(player) = server.state().players().get_by_id(admin_player_id) {
             if player.is_admin() {
                 let admin_player_name = player.name();
 
                 if let Some(force_player) = server.state().players().get(force_player_index) {
+                    let force_player_id = force_player.id;
                     let force_player_name = force_player.name();
-                    if server.state_mut().move_to_spectator(force_player_index) {
+                    if server.state_mut().move_to_spectator(force_player_id) {
                         let msg = format!(
                             "{} forced off ice by {}",
                             force_player_name, admin_player_name
                         );
                         info!(
                             "{} ({}) forced {} ({}) off ice",
-                            admin_player_name,
-                            admin_player_index,
-                            force_player_name,
-                            force_player_index
+                            admin_player_name, admin_player_id, force_player_name, force_player_id
                         );
                         server.state_mut().add_server_chat_message(msg);
-                        self.team_switch_timer.insert(force_player_index, 500);
+                        self.team_switch_timer.insert(force_player_id, 500);
                     }
                 }
             } else {
-                server.state_mut().admin_deny_message(admin_player_index);
+                server.state_mut().admin_deny_message(admin_player_id);
                 return;
             }
         }
     }
 
-    pub(crate) fn set_team_size(
-        &mut self,
-        mut server: ServerMut,
-        player_index: PlayerIndex,
-        size: &str,
-    ) {
-        if let Some(player) = server.state().players().get(player_index) {
+    pub(crate) fn set_team_size(&mut self, mut server: ServerMut, player_id: PlayerId, size: &str) {
+        if let Some(player) = server.state().players().get_by_id(player_id) {
             if player.is_admin() {
                 if let Ok(new_num) = size.parse::<usize>() {
                     if new_num > 0 && new_num <= 15 {
                         self.team_max = new_num;
                         let name = player.name();
 
-                        info!("{} ({}) set team size to {}", name, player_index, new_num);
+                        info!("{} ({}) set team size to {}", name, player_id, new_num);
                         let msg = format!("Team size set to {} by {}", new_num, name);
 
                         server.state_mut().add_server_chat_message(msg);
                     }
                 }
             } else {
-                server.state_mut().admin_deny_message(player_index);
+                server.state_mut().admin_deny_message(player_id);
             }
         }
     }
@@ -134,7 +127,7 @@ impl GameMode for StandardMatchGameMode {
         mut server: ServerMut,
         command: &str,
         arg: &str,
-        player_index: PlayerIndex,
+        player_id: PlayerId,
     ) {
         match command {
             "set" => {
@@ -143,24 +136,22 @@ impl GameMode for StandardMatchGameMode {
                     match args[0] {
                         "redscore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
-                                self.m
-                                    .set_score(server, Team::Red, input_score, player_index);
+                                self.m.set_score(server, Team::Red, input_score, player_id);
                             }
                         }
                         "bluescore" => {
                             if let Ok(input_score) = args[1].parse::<u32>() {
-                                self.m
-                                    .set_score(server, Team::Blue, input_score, player_index);
+                                self.m.set_score(server, Team::Blue, input_score, player_id);
                             }
                         }
                         "period" => {
                             if let Ok(input_period) = args[1].parse::<u32>() {
-                                self.m.set_period(server, input_period, player_index);
+                                self.m.set_period(server, input_period, player_id);
                             }
                         }
                         "periodnum" => {
                             if let Ok(input_period) = args[1].parse::<u32>() {
-                                self.m.set_period_num(server, input_period, player_index);
+                                self.m.set_period_num(server, input_period, player_id);
                             }
                         }
                         "clock" => {
@@ -201,68 +192,68 @@ impl GameMode for StandardMatchGameMode {
                                 self.m.set_clock(
                                     server,
                                     (time_minutes * 100 * 60) + (time_seconds * 100) + time_centis,
-                                    player_index,
+                                    player_id,
                                 );
                             }
                         }
                         "icing" => {
                             if let Some(arg) = args.get(1) {
-                                self.m.set_icing_rule(server, player_index, arg);
+                                self.m.set_icing_rule(server, player_id, arg);
                             }
                         }
                         "offside" => {
                             if let Some(arg) = args.get(1) {
-                                self.m.set_offside_rule(server, player_index, arg);
+                                self.m.set_offside_rule(server, player_id, arg);
                             }
                         }
                         "twolinepass" => {
                             if let Some(arg) = args.get(1) {
-                                self.m.set_twoline_pass(server, player_index, arg);
+                                self.m.set_twoline_pass(server, player_id, arg);
                             }
                         }
                         "offsideline" => {
                             if let Some(arg) = args.get(1) {
-                                self.m.set_offside_line(server, player_index, arg);
+                                self.m.set_offside_line(server, player_id, arg);
                             }
                         }
                         "mercy" => {
                             if let Some(arg) = args.get(1) {
-                                self.m.set_mercy_rule(server, player_index, arg);
+                                self.m.set_mercy_rule(server, player_id, arg);
                             }
                         }
                         "first" => {
                             if let Some(arg) = args.get(1) {
-                                self.m.set_first_to_rule(server, player_index, arg);
+                                self.m.set_first_to_rule(server, player_id, arg);
                             }
                         }
                         "teamsize" => {
                             if let Some(arg) = args.get(1) {
-                                self.set_team_size(server, player_index, arg);
+                                self.set_team_size(server, player_id, arg);
                             }
                         }
                         "goalreplay" => {
                             if let Some(arg) = args.get(1) {
-                                self.m.set_goal_replay(server, player_index, arg);
+                                self.m.set_goal_replay(server, player_id, arg);
                             }
                         }
                         "spawnoffset" => {
                             if let Ok(rule) = args[1].parse::<f32>() {
-                                self.m.set_spawn_offset(server, player_index, rule);
+                                self.m.set_spawn_offset(server, player_id, rule);
                             }
                         }
                         "spawnplayeraltitude" => {
                             if let Ok(rule) = args[1].parse::<f32>() {
-                                self.m.set_spawn_player_altitude(server, player_index, rule);
+                                self.m.set_spawn_player_altitude(server, player_id, rule);
                             }
                         }
                         "spawnpuckaltitude" => {
                             if let Ok(rule) = args[1].parse::<f32>() {
-                                self.m.set_spawn_puck_altitude(server, player_index, rule);
+                                self.m.set_spawn_puck_altitude(server, player_id, rule);
                             }
                         }
                         "spawnplayerkeepstick" => {
                             if let Some(arg) = args.get(1) {
-                                self.m.set_spawn_keep_stick(server, player_index, arg);
+                                self.m.set_spawn_keep_stick(server, player_id, arg);
                             }
                         }
                         _ => {}
@@ -270,51 +261,51 @@ impl GameMode for StandardMatchGameMode {
                 }
             }
             "faceoff" => {
-                self.m.faceoff(server, player_index);
+                self.m.faceoff(server, player_id);
             }
             "start" | "startgame" => {
-                self.m.start_game(server, player_index);
+                self.m.start_game(server, player_id);
             }
             "reset" | "resetgame" => {
-                self.m.reset_game(server, player_index);
+                self.m.reset_game(server, player_id);
             }
             "pause" | "pausegame" => {
-                self.m.pause(server, player_index);
+                self.m.pause(server, player_id);
             }
             "unpause" | "unpausegame" => {
-                self.m.unpause(server, player_index);
+                self.m.unpause(server, player_id);
             }
             "sp" | "setposition" => {
                 self.m
-                    .set_preferred_faceoff_position(server, player_index, arg);
+                    .set_preferred_faceoff_position(server, player_id, arg);
             }
             "fs" => {
                 if let Ok(force_player_index) = arg.parse::<PlayerIndex>() {
-                    self.force_player_off_ice(server, player_index, force_player_index);
+                    self.force_player_off_ice(server, player_id, force_player_index);
                 }
             }
             "icing" => {
-                self.m.set_icing_rule(server, player_index, arg);
+                self.m.set_icing_rule(server, player_id, arg);
             }
             "offside" => {
-                self.m.set_offside_rule(server, player_index, arg);
+                self.m.set_offside_rule(server, player_id, arg);
             }
             "rules" => {
-                self.m.msg_rules(server, player_index);
+                self.m.msg_rules(server, player_id);
             }
             "chatextend" => {
                 if arg.eq_ignore_ascii_case("true") || arg.eq_ignore_ascii_case("on") {
-                    if self.show_extra_messages.insert(player_index) {
+                    if self.show_extra_messages.insert(player_id) {
                         server.state_mut().add_directed_server_chat_message(
                             "Team change messages activated",
-                            player_index,
+                            player_id,
                         );
                     }
                 } else if arg.eq_ignore_ascii_case("false") || arg.eq_ignore_ascii_case("off") {
-                    if self.show_extra_messages.remove(&player_index) {
+                    if self.show_extra_messages.remove(&player_id) {
                         server.state_mut().add_directed_server_chat_message(
                             "Team change messages de-activated",
-                            player_index,
+                            player_id,
                         );
                     }
                 }
@@ -331,15 +322,10 @@ impl GameMode for StandardMatchGameMode {
         self.m.game_started(server);
     }
 
-    fn before_player_exit(
-        &mut self,
-        _server: ServerMut,
-        player_index: PlayerIndex,
-        _reason: ExitReason,
-    ) {
-        self.m.cleanup_player(player_index);
-        self.team_switch_timer.remove(&player_index);
-        self.show_extra_messages.remove(&player_index);
+    fn before_player_exit(&mut self, _server: ServerMut, player_id: PlayerId, _reason: ExitReason) {
+        self.m.cleanup_player(player_id);
+        self.team_switch_timer.remove(&player_id);
+        self.show_extra_messages.remove(&player_id);
     }
 
     fn server_list_team_size(&self) -> u32 {

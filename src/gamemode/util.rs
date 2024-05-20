@@ -1,4 +1,4 @@
-use crate::game::{PlayerIndex, Rink, Team};
+use crate::game::{PlayerId, Rink, Team};
 use crate::gamemode::ServerStateMut;
 use nalgebra::{Point3, Rotation3};
 use smallvec::SmallVec;
@@ -9,13 +9,13 @@ use tracing::info;
 
 pub fn add_players<
     F1: Fn(Team, usize) -> (Point3<f32>, Rotation3<f32>),
-    FSpectate: FnMut(PlayerIndex) -> (),
-    FJoin: FnMut(PlayerIndex, Team) -> (),
+    FSpectate: FnMut(PlayerId) -> (),
+    FJoin: FnMut(PlayerId, Team) -> (),
 >(
     mut server: ServerStateMut,
     team_max: usize,
-    team_switch_timer: &mut HashMap<PlayerIndex, u32>,
-    show_extra_messages: Option<&HashSet<PlayerIndex>>,
+    team_switch_timer: &mut HashMap<PlayerId, u32>,
+    show_extra_messages: Option<&HashSet<PlayerId>>,
     coords: F1,
     mut on_spectate: FSpectate,
     mut on_join: FJoin,
@@ -26,16 +26,16 @@ pub fn add_players<
     let mut joining_red = SmallVec::<[_; 32]>::new();
     let mut joining_blue = SmallVec::<[_; 32]>::new();
     for player in server.players().iter() {
-        let player_index = player.id.index;
+        let player_id = player.id;
         let input = player.input();
         let team = player.team();
         team_switch_timer
-            .get_mut(&player_index)
+            .get_mut(&player_id)
             .map(|x| *x = x.saturating_sub(1));
         if let Some(team) = team {
             if input.spectate() {
-                team_switch_timer.insert(player_index, 500);
-                spectating_players.push((player_index, player.name()))
+                team_switch_timer.insert(player_id, 500);
+                spectating_players.push((player_id, player.name()))
             } else if team == Team::Red {
                 red_player_count += 1;
             } else {
@@ -43,22 +43,20 @@ pub fn add_players<
             }
         } else {
             if (input.join_red() || input.join_blue())
-                && team_switch_timer
-                    .get(&player_index)
-                    .map_or(true, |x| *x == 0)
+                && team_switch_timer.get(&player_id).map_or(true, |x| *x == 0)
             {
                 if input.join_red() {
-                    joining_red.push((player_index, player.name()));
+                    joining_red.push((player_id, player.name()));
                 } else if input.join_blue() {
-                    joining_blue.push((player_index, player.name()));
+                    joining_blue.push((player_id, player.name()));
                 }
             }
         }
     }
-    for (player_index, player_name) in spectating_players {
-        info!("{} ({}) is spectating", player_name, player_index);
-        server.move_to_spectator(player_index);
-        on_spectate(player_index);
+    for (player_id, player_name) in spectating_players {
+        info!("{} ({}) is spectating", player_name, player_id);
+        server.move_to_spectator(player_id);
+        on_spectate(player_id);
         if let Some(show_extra_messages) = show_extra_messages {
             let s = format!("{} is spectating", player_name);
             for i in show_extra_messages.iter() {
@@ -68,27 +66,24 @@ pub fn add_players<
     }
 
     let mut add_players =
-        |players: SmallVec<[(PlayerIndex, Rc<str>); 32]>, team: Team, player_count: &mut usize| {
-            for (i, (player_index, player_name)) in players.into_iter().enumerate() {
+        |players: SmallVec<[(PlayerId, Rc<str>); 32]>, team: Team, player_count: &mut usize| {
+            for (i, (player_id, player_name)) in players.into_iter().enumerate() {
                 if *player_count >= team_max {
                     break;
                 }
 
                 let (pos, rot) = coords(team, i);
 
-                let res = server.spawn_skater(player_index, team, pos, rot, false);
+                let res = server.spawn_skater(player_id, team, pos, rot, false);
 
                 if res {
-                    info!(
-                        "{} ({}) has joined team {:?}",
-                        player_name, player_index, team
-                    );
+                    info!("{} ({}) has joined team {:?}", player_name, player_id, team);
                     *player_count += 1;
-                    on_join(player_index, team);
+                    on_join(player_id, team);
                     if let Some(show_extra_messages) = show_extra_messages {
                         let s = format!("{} is playing for Red", player_name);
-                        for i in show_extra_messages.iter() {
-                            server.add_directed_server_chat_message(s.clone(), *i);
+                        for msg_player_id in show_extra_messages.iter() {
+                            server.add_directed_server_chat_message(s.clone(), *msg_player_id);
                         }
                     }
                 } else {

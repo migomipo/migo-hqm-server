@@ -1,9 +1,9 @@
-use crate::game::PhysicsEvent;
 use crate::game::RinkSideOfLine::{BlueSide, RedSide};
 use crate::game::{
-    PhysicsBody, PhysicsConfiguration, PlayerIndex, PlayerInput, PuckObject, Rink, RinkNet,
-    SkaterCollisionBall, SkaterHand, SkaterObject, Team,
+    PhysicsBody, PhysicsConfiguration, PlayerInput, PuckObject, Rink, RinkNet, SkaterCollisionBall,
+    SkaterHand, SkaterObject, Team,
 };
+use crate::game::{PhysicsEvent, PlayerId};
 use crate::server::{HQMServer, PlayerListExt};
 use nalgebra::{vector, Point3, Rotation3, Unit, Vector2, Vector3};
 use smallvec::SmallVec;
@@ -29,12 +29,12 @@ type CollisionList = SmallVec<[Collision; 32]>;
 impl HQMServer {
     pub(crate) fn simulate_step(&mut self) -> PhysicsEventList {
         let mut events: PhysicsEventList = SmallVec::new();
-        let mut players: SmallVec<[(PlayerIndex, &mut SkaterObject, &mut PlayerInput); 32]> =
+        let mut players: SmallVec<[(PlayerId, &mut SkaterObject, &mut PlayerInput); 32]> =
             SmallVec::new();
         let mut pucks: SmallVec<[(usize, &mut PuckObject); 32]> = SmallVec::new();
         for (i, p) in self.state.players.iter_players_mut() {
             if let Some((_, skater, _)) = &mut p.object {
-                players.push((i.index, skater, &mut p.input));
+                players.push((i, skater, &mut p.input));
             }
         }
         for (i, p) in self.state.pucks.iter_mut().enumerate() {
@@ -131,7 +131,7 @@ impl HQMServer {
 }
 
 fn update_sticks_and_pucks(
-    players: &mut [(PlayerIndex, &mut SkaterObject, &mut PlayerInput)],
+    players: &mut [(PlayerId, &mut SkaterObject, &mut PlayerInput)],
     pucks: &mut [(usize, &mut PuckObject)],
     rink: &Rink,
     events: &mut PhysicsEventList,
@@ -544,7 +544,7 @@ fn get_projection(a: &Vector3<f32>, normal: &Unit<Vector3<f32>>) -> Vector3<f32>
 }
 
 fn apply_collisions(
-    players: &mut [(PlayerIndex, &mut SkaterObject, &mut PlayerInput)],
+    players: &mut [(PlayerId, &mut SkaterObject, &mut PlayerInput)],
     collisions: &[Collision],
 ) {
     for _ in 0..16 {

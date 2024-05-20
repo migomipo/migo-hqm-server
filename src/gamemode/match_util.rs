@@ -1,4 +1,4 @@
-use crate::game::{PlayerIndex, PuckObject, Rink, RinkLine, RulesState, ScoreboardValues, Team};
+use crate::game::{PlayerId, PuckObject, Rink, RinkLine, RulesState, ScoreboardValues, Team};
 use crate::gamemode::InitialGameValues;
 
 use crate::game::PhysicsEvent;
@@ -84,8 +84,8 @@ impl Default for MatchConfiguration {
 pub enum MatchEvent {
     Goal {
         team: Team,
-        goal: Option<PlayerIndex>,
-        assist: Option<PlayerIndex>,
+        goal: Option<PlayerId>,
+        assist: Option<PlayerId>,
         speed: Option<f32>, // Raw meter/game tick (so meter per 1/100 of a second)
         speed_across_line: f32,
         time: u32,
@@ -103,13 +103,13 @@ pub struct Match {
     offside_status: OffsideStatus,
     twoline_pass_status: TwoLinePassStatus,
     pass: Option<Pass>,
-    pub(crate) preferred_positions: HashMap<PlayerIndex, &'static str>,
+    pub(crate) preferred_positions: HashMap<PlayerId, &'static str>,
 
-    pub started_as_goalie: Vec<PlayerIndex>,
+    pub started_as_goalie: Vec<PlayerId>,
     faceoff_game_step: u32,
     step_where_period_ended: u32,
     too_late_printed_this_period: bool,
-    start_next_replay: Option<(u32, u32, Option<PlayerIndex>)>,
+    start_next_replay: Option<(u32, u32, Option<PlayerId>)>,
     puck_touches: HashMap<usize, VecDeque<PuckTouch>>,
 }
 
@@ -135,7 +135,7 @@ impl Match {
         }
     }
 
-    pub fn clear_started_goalie(&mut self, player_index: PlayerIndex) {
+    pub fn clear_started_goalie(&mut self, player_index: PlayerId) {
         if let Some(x) = self
             .started_as_goalie
             .iter()
@@ -256,18 +256,18 @@ impl Match {
             let mut last_touch = None;
             let puck_speed_across_line = this_puck.body.linear_velocity.norm();
             if let Some(touches) = self.puck_touches.get(&puck_index) {
-                last_touch = touches.front().map(|x| x.player_index);
+                last_touch = touches.front().map(|x| x.player_id);
 
                 for touch in touches.iter() {
                     if goal_scorer_index.is_none() {
                         if touch.team == team {
-                            goal_scorer_index = Some(touch.player_index);
+                            goal_scorer_index = Some(touch.player_id);
                             goal_scorer_first_touch = touch.first_time;
                             puck_speed_from_stick = Some(touch.puck_speed);
                         }
                     } else {
                         if touch.team == team {
-                            if Some(touch.player_index) == goal_scorer_index {
+                            if Some(touch.player_id) == goal_scorer_index {
                                 goal_scorer_first_touch = touch.first_time;
                             } else {
                                 // This is the first player on the scoring team that touched it apart from the goal scorer
@@ -277,7 +277,7 @@ impl Match {
                                 let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
 
                                 if diff <= 1000 {
-                                    assist_index = Some(touch.player_index)
+                                    assist_index = Some(touch.player_id)
                                 }
                                 break;
                             }
@@ -388,19 +388,14 @@ impl Match {
         }
     }
 
-    fn handle_puck_touch(
-        &mut self,
-        mut server: ServerMut,
-        player_index: PlayerIndex,
-        puck_index: usize,
-    ) {
-        if let Some(player) = server.state().players().get(player_index) {
+    fn handle_puck_touch(&mut self, mut server: ServerMut, player_id: PlayerId, puck_index: usize) {
+        if let Some(player) = server.state().players().get_by_id(player_id) {
             if let Some(touching_team) = player.team() {
                 if let Some(puck) = server.state().get_puck(puck_index) {
                     add_touch(
                         puck,
                         self.puck_touches.entry(puck_index),
-                        player_index,
+                        player_id,
                         touching_team,
                         server.scoreboard().time,
                     );
@@ -413,14 +408,14 @@ impl Match {
                         team: touching_team,
                         side,
                         from: None,
-                        player: player_index,
+                        player: player_id,
                     });
 
                     let other_team = touching_team.get_other_team();
 
                     if let OffsideStatus::Warning(team, side, position, i) = self.offside_status {
                         if team == touching_team {
-                            let self_touch = player_index == i;
+                            let self_touch = player_id == i;
 
                             self.call_offside(server, touching_team, side, position, self_touch);
                             return;
@@ -429,7 +424,7 @@ impl Match {
                     if let TwoLinePassStatus::Warning(team, side, position, ref i) =
                         self.twoline_pass_status
                     {
-                        if team == touching_team && i.contains(&player_index) {
+                        if team == touching_team && i.contains(&player_id) {
                             self.call_twoline_pass(server, touching_team, side, position);
                             return;
                         } else {
@@ -440,8 +435,7 @@ impl Match {
                         }
                     }
                     if let IcingStatus::Warning(team, side) = self.icing_status {
-                        if touching_team != team && !self.started_as_goalie.contains(&player_index)
-                        {
+                        if touching_team != team && !self.started_as_goalie.contains(&player_id) {
                             self.call_icing(server, other_team, side);
                         } else {
                             self.icing_status = IcingStatus::No;
@@ -598,7 +592,7 @@ impl Match {
         team: Team,
         side: RinkSide,
         from: PassLocation,
-        pass_player: PlayerIndex,
+        pass_player: PlayerId,
         is_offensive_line: bool,
     ) {
         let line = if is_offensive_line {
@@ -611,12 +605,11 @@ impl Match {
         };
         let mut players_past_line = vec![];
         for player in server.state().players().iter() {
-            let player_index = player.id.index;
-            if player_index == pass_player {
+            if player.id == pass_player {
                 continue;
             }
             if is_past_line(player, team, line) {
-                players_past_line.push(player_index);
+                players_past_line.push(player.id);
             }
         }
         if !players_past_line.is_empty() {
@@ -881,7 +874,7 @@ impl Match {
         };
     }
 
-    pub fn cleanup_player(&mut self, player_index: PlayerIndex) {
+    pub fn cleanup_player(&mut self, player_index: PlayerId) {
         if let Some(x) = self
             .started_as_goalie
             .iter()
@@ -972,7 +965,7 @@ struct Pass {
     pub team: Team,
     pub side: RinkSide,
     pub from: Option<PassLocation>,
-    pub player: PlayerIndex,
+    pub player: PlayerId,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -984,22 +977,22 @@ enum IcingStatus {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 enum OffsideStatus {
-    Neutral,                                                    // No offside
-    InOffensiveZone(Team), // No offside, puck in offensive zone
-    Warning(Team, RinkSide, Option<PassLocation>, PlayerIndex), // Warning, puck entered offensive zone in an offside situation but not touched yet
-    Offside(Team),                                              // Offside has been called
+    Neutral,                                                 // No offside
+    InOffensiveZone(Team),                                   // No offside, puck in offensive zone
+    Warning(Team, RinkSide, Option<PassLocation>, PlayerId), // Warning, puck entered offensive zone in an offside situation but not touched yet
+    Offside(Team),                                           // Offside has been called
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 enum TwoLinePassStatus {
-    No,                                                      // No offside
-    Warning(Team, RinkSide, PassLocation, Vec<PlayerIndex>), // Warning, puck entered offensive zone in an offside situation but not touched yet
-    Offside(Team),                                           // Offside has been called
+    No,                                                   // No offside
+    Warning(Team, RinkSide, PassLocation, Vec<PlayerId>), // Warning, puck entered offensive zone in an offside situation but not touched yet
+    Offside(Team),                                        // Offside has been called
 }
 
 #[derive(Debug, Clone)]
 struct PuckTouch {
-    pub player_index: PlayerIndex,
+    pub player_id: PlayerId,
     pub team: Team,
     pub puck_pos: Point3<f32>,
     pub puck_speed: f32,
@@ -1010,7 +1003,7 @@ struct PuckTouch {
 fn add_touch(
     puck: &PuckObject,
     entry: Entry<usize, VecDeque<PuckTouch>>,
-    player_index: PlayerIndex,
+    player_id: PlayerId,
     team: Team,
     time: u32,
 ) {
@@ -1022,7 +1015,7 @@ fn add_touch(
 
     match most_recent_touch {
         Some(most_recent_touch)
-            if most_recent_touch.player_index == player_index && most_recent_touch.team == team =>
+            if most_recent_touch.player_id == player_id && most_recent_touch.team == team =>
         {
             most_recent_touch.puck_pos = puck_pos;
             most_recent_touch.last_time = time;
@@ -1031,7 +1024,7 @@ fn add_touch(
         _ => {
             touches.truncate(15);
             touches.push_front(PuckTouch {
-                player_index,
+                player_id,
                 team,
                 puck_pos,
                 puck_speed,
@@ -1044,23 +1037,23 @@ fn add_touch(
 
 fn get_faceoff_positions(
     players: ServerPlayerList,
-    preferred_positions: &HashMap<PlayerIndex, &'static str>,
-) -> HashMap<PlayerIndex, (Team, &'static str)> {
+    preferred_positions: &HashMap<PlayerId, &'static str>,
+) -> HashMap<PlayerId, (Team, &'static str)> {
     let mut res = HashMap::new();
 
     let mut red_players = smallvec::SmallVec::<[_; 32]>::new();
     let mut blue_players = smallvec::SmallVec::<[_; 32]>::new();
     for player in players.iter() {
-        let player_index = player.id.index;
+        let player_id = player.id;
 
         let team = player.team();
 
-        let preferred_position = preferred_positions.get(&player_index).map(|x| *x);
+        let preferred_position = preferred_positions.get(&player_id).map(|x| *x);
 
         if team == Some(Team::Red) {
-            red_players.push((player_index, preferred_position));
+            red_players.push((player_id, preferred_position));
         } else if team == Some(Team::Blue) {
-            blue_players.push((player_index, preferred_position));
+            blue_players.push((player_id, preferred_position));
         }
     }
 
@@ -1089,7 +1082,7 @@ fn is_past_line(player: ServerPlayer, team: Team, line: &RinkLine) -> bool {
 fn has_players_in_offensive_zone(
     server: Server,
     team: Team,
-    ignore_player: Option<PlayerIndex>,
+    ignore_player: Option<PlayerId>,
 ) -> bool {
     let line = match team {
         Team::Red => &server.rink().blue_zone_blue_line,
@@ -1097,8 +1090,7 @@ fn has_players_in_offensive_zone(
     };
 
     for player in server.state().players().iter() {
-        let player_index = player.id.index;
-        if Some(player_index) == ignore_player {
+        if Some(player.id) == ignore_player {
             continue;
         }
         if is_past_line(player, team, line) {
@@ -1110,21 +1102,21 @@ fn has_players_in_offensive_zone(
 }
 
 fn setup_position(
-    positions: &mut HashMap<PlayerIndex, (Team, &'static str)>,
-    players: &[(PlayerIndex, Option<&'static str>)],
+    positions: &mut HashMap<PlayerId, (Team, &'static str)>,
+    players: &[(PlayerId, Option<&'static str>)],
     team: Team,
 ) {
     let mut available_positions = Vec::from(ALLOWED_POSITIONS);
 
     // First, we try to give each player its preferred position
-    for (player_index, player_position) in players.iter() {
+    for (player_id, player_position) in players.iter() {
         if let Some(player_position) = player_position {
             if let Some(x) = available_positions
                 .iter()
                 .position(|x| x == player_position)
             {
                 let s = available_positions.remove(x);
-                positions.insert(*player_index, (team, s));
+                positions.insert(*player_id, (team, s));
             }
         }
     }
@@ -1390,8 +1382,8 @@ fn get_faceoff_spot(
 
 #[cfg(test)]
 mod tests {
-    use crate::game::PlayerIndex;
     use crate::game::Team;
+    use crate::game::{PlayerId, PlayerIndex};
     use crate::gamemode::match_util::setup_position;
     use std::collections::HashMap;
 
@@ -1401,54 +1393,63 @@ mod tests {
         let lw = "LW";
         let rw = "RW";
         let g = "G";
-        let mut res1 = HashMap::new();
-        let players = vec![(PlayerIndex(0), None)];
-        setup_position(&mut res1, players.as_ref(), Team::Red);
-        assert_eq!(res1[&PlayerIndex(0)].1, "C");
+        let i0 = PlayerId {
+            index: PlayerIndex(0),
+            gen: 0,
+        };
+        let i1 = PlayerId {
+            index: PlayerIndex(1),
+            gen: 0,
+        };
 
         let mut res1 = HashMap::new();
-        let players = vec![(PlayerIndex(0), Some(c))];
+        let players = vec![(i0, None)];
         setup_position(&mut res1, players.as_ref(), Team::Red);
-        assert_eq!(res1[&PlayerIndex(0)].1, "C");
+        assert_eq!(res1[&i0].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(PlayerIndex(0), Some(lw))];
+        let players = vec![(i0, Some(c))];
         setup_position(&mut res1, players.as_ref(), Team::Red);
-        assert_eq!(res1[&PlayerIndex(0)].1, "C");
+        assert_eq!(res1[&i0].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(PlayerIndex(0), Some(g))];
+        let players = vec![(i0, Some(lw))];
         setup_position(&mut res1, players.as_ref(), Team::Red);
-        assert_eq!(res1[&PlayerIndex(0)].1, "C");
+        assert_eq!(res1[&i0].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(PlayerIndex(0usize), Some(c)), (PlayerIndex(1), Some(lw))];
+        let players = vec![(i0, Some(g))];
         setup_position(&mut res1, players.as_ref(), Team::Red);
-        assert_eq!(res1[&PlayerIndex(0)].1, "C");
-        assert_eq!(res1[&PlayerIndex(1)].1, "LW");
+        assert_eq!(res1[&i0].1, "C");
 
         let mut res1 = HashMap::new();
-        let players = vec![(PlayerIndex(0), None), (PlayerIndex(1), Some(lw))];
+        let players = vec![(i0, Some(c)), (i1, Some(lw))];
         setup_position(&mut res1, players.as_ref(), Team::Red);
-        assert_eq!(res1[&PlayerIndex(0)].1, "C");
-        assert_eq!(res1[&PlayerIndex(1)].1, "LW");
+        assert_eq!(res1[&i0].1, "C");
+        assert_eq!(res1[&i1].1, "LW");
 
         let mut res1 = HashMap::new();
-        let players = vec![(PlayerIndex(0), Some(rw)), (PlayerIndex(1), Some(lw))];
+        let players = vec![(i0, None), (i1, Some(lw))];
         setup_position(&mut res1, players.as_ref(), Team::Red);
-        assert_eq!(res1[&PlayerIndex(0)].1, "C");
-        assert_eq!(res1[&PlayerIndex(1)].1, "LW");
+        assert_eq!(res1[&i0].1, "C");
+        assert_eq!(res1[&i1].1, "LW");
 
         let mut res1 = HashMap::new();
-        let players = vec![(PlayerIndex(0), Some(g)), (PlayerIndex(1), Some(lw))];
+        let players = vec![(i0, Some(rw)), (i1, Some(lw))];
         setup_position(&mut res1, players.as_ref(), Team::Red);
-        assert_eq!(res1[&PlayerIndex(0)].1, "G");
-        assert_eq!(res1[&PlayerIndex(1)].1, "C");
+        assert_eq!(res1[&i0].1, "C");
+        assert_eq!(res1[&i1].1, "LW");
 
         let mut res1 = HashMap::new();
-        let players = vec![(PlayerIndex(0usize), Some(c)), (PlayerIndex(1), Some(c))];
+        let players = vec![(i0, Some(g)), (i1, Some(lw))];
         setup_position(&mut res1, players.as_ref(), Team::Red);
-        assert_eq!(res1[&PlayerIndex(0)].1, "C");
-        assert_eq!(res1[&PlayerIndex(1)].1, "LW");
+        assert_eq!(res1[&i0].1, "G");
+        assert_eq!(res1[&i1].1, "C");
+
+        let mut res1 = HashMap::new();
+        let players = vec![(i0, Some(c)), (i1, Some(c))];
+        setup_position(&mut res1, players.as_ref(), Team::Red);
+        assert_eq!(res1[&i0].1, "C");
+        assert_eq!(res1[&i1].1, "LW");
     }
 }

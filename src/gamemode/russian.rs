@@ -2,7 +2,7 @@ use nalgebra::{Point3, Rotation3, Vector3};
 use std::collections::HashMap;
 use tracing::info;
 
-use crate::game::PhysicsEvent;
+use crate::game::{PhysicsEvent, PlayerId};
 use crate::game::{PlayerIndex, PuckObject, ScoreboardValues, Team};
 use crate::gamemode::util::add_players;
 use crate::gamemode::{ExitReason, GameMode, InitialGameValues, ServerMut, ServerMutParts};
@@ -26,7 +26,7 @@ enum RussianStatus {
 pub struct RussianGameMode {
     attempts: u32,
     status: RussianStatus,
-    team_switch_timer: HashMap<PlayerIndex, u32>,
+    team_switch_timer: HashMap<PlayerId, u32>,
     team_max: usize,
 }
 
@@ -135,31 +135,31 @@ impl RussianGameMode {
         self.place_puck_for_team(server.rb_mut(), Team::Red);
 
         for player in server.state().players().iter() {
-            let player_index = player.id.index;
+            let player_id = player.id;
             if let Some(team) = player.team() {
                 if team == Team::Red {
-                    red_players.push(player_index);
+                    red_players.push(player_id);
                 } else if team == Team::Blue {
-                    blue_players.push(player_index);
+                    blue_players.push(player_id);
                 }
             }
         }
 
         let rot = Rotation3::from_euler_angles(0.0, 3.0 * FRAC_PI_2, 0.0);
         let length = server.rink().length;
-        for (index, player_index) in red_players.into_iter().enumerate() {
+        for (index, player_id) in red_players.into_iter().enumerate() {
             let z = (length / 2.0) + (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
             server
                 .state_mut()
-                .spawn_skater(player_index, Team::Red, pos, rot.clone(), false);
+                .spawn_skater(player_id, Team::Red, pos, rot.clone(), false);
         }
-        for (index, player_index) in blue_players.into_iter().enumerate() {
+        for (index, player_id) in blue_players.into_iter().enumerate() {
             let z = (length / 2.0) - (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
             server
                 .state_mut()
-                .spawn_skater(player_index, Team::Blue, pos, rot.clone(), false);
+                .spawn_skater(player_id, Team::Blue, pos, rot.clone(), false);
         }
     }
 
@@ -185,18 +185,18 @@ impl RussianGameMode {
         }
     }
 
-    fn reset_game(&mut self, mut server: ServerMut, player_index: PlayerIndex) {
-        if let Some(player) = server.state().players().get(player_index) {
+    fn reset_game(&mut self, mut server: ServerMut, player_id: PlayerId) {
+        if let Some(player) = server.state().players().get_by_id(player_id) {
             if player.is_admin() {
                 let name = player.name();
-                info!("{} ({}) reset game", name, player_index);
+                info!("{} ({}) reset game", name, player_id);
                 let msg = format!("Game reset by {}", name);
 
                 server.new_game(self.get_initial_game_values());
 
                 server.state_mut().add_server_chat_message(msg);
             } else {
-                server.state_mut().admin_deny_message(player_index);
+                server.state_mut().admin_deny_message(player_id);
             }
         }
     }
@@ -204,16 +204,17 @@ impl RussianGameMode {
     fn force_player_off_ice(
         &mut self,
         mut server: ServerMut,
-        admin_player_index: PlayerIndex,
+        admin_player_id: PlayerId,
         force_player_index: PlayerIndex,
     ) {
-        if let Some(player) = server.state().players().get(admin_player_index) {
+        if let Some(player) = server.state().players().get_by_id(admin_player_id) {
             if player.is_admin() {
                 let admin_player_name = player.name();
 
                 if let Some(force_player) = server.state().players().get(force_player_index) {
+                    let force_player_id = force_player.id;
                     let force_player_name = force_player.name();
-                    if server.state_mut().move_to_spectator(force_player_index) {
+                    if server.state_mut().move_to_spectator(force_player_id) {
                         let msg = format!(
                             "{} forced off ice by {}",
                             force_player_name, admin_player_name
@@ -221,16 +222,16 @@ impl RussianGameMode {
                         info!(
                             "{} ({}) forced {} ({}) off ice",
                             admin_player_name,
-                            admin_player_index,
+                            admin_player_id,
                             force_player_name,
                             force_player_index
                         );
                         server.state_mut().add_server_chat_message(msg);
-                        self.team_switch_timer.insert(force_player_index, 500);
+                        self.team_switch_timer.insert(force_player_id, 500);
                     }
                 }
             } else {
-                server.state_mut().admin_deny_message(admin_player_index);
+                server.state_mut().admin_deny_message(admin_player_id);
                 return;
             }
         }
@@ -346,7 +347,7 @@ impl GameMode for RussianGameMode {
                             self.check_ending(server.scoreboard_mut());
                         }
                         PhysicsEvent::PuckTouch { player, .. } => {
-                            if let Some(player) = server.state().players().get(*player) {
+                            if let Some(player) = server.state().players().get_by_id(*player) {
                                 if let Some(touching_team) = player.team() {
                                     self.fix_status(server.rb_mut(), touching_team);
                                 }
@@ -381,13 +382,7 @@ impl GameMode for RussianGameMode {
         }
     }
 
-    fn handle_command(
-        &mut self,
-        server: ServerMut,
-        cmd: &str,
-        arg: &str,
-        player_index: PlayerIndex,
-    ) {
+    fn handle_command(&mut self, server: ServerMut, cmd: &str, arg: &str, player_index: PlayerId) {
         match cmd {
             "reset" | "resetgame" => {
                 self.reset_game(server, player_index);
@@ -415,13 +410,8 @@ impl GameMode for RussianGameMode {
         self.status = RussianStatus::WaitingForGame;
     }
 
-    fn before_player_exit(
-        &mut self,
-        _server: ServerMut,
-        player_index: PlayerIndex,
-        _reason: ExitReason,
-    ) {
-        self.team_switch_timer.remove(&player_index);
+    fn before_player_exit(&mut self, _server: ServerMut, player_id: PlayerId, _reason: ExitReason) {
+        self.team_switch_timer.remove(&player_id);
     }
 
     fn server_list_team_size(&self) -> u32 {
