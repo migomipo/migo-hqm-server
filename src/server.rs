@@ -113,52 +113,45 @@ impl PlayerListExt for [ServerStatePlayerItem] {
         &self,
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &HQMServerPlayer)> {
-        self.get(player_index.0)
-            .and_then(|(gen, x)| x.as_ref().map(|x| (*gen, x)))
-            .and_then(|(gen, x)| match x {
-                HQMServerPlayerEnum::Player(p) => Some((
-                    PlayerId {
-                        index: player_index,
-                        gen,
-                    },
-                    p,
-                )),
-                _ => None,
-            })
+        self.get(player_index.0).and_then(|(gen, x)| match x {
+            Some(HQMServerPlayerEnum::Player(p)) => Some((
+                PlayerId {
+                    index: player_index,
+                    gen: *gen,
+                },
+                p,
+            )),
+            _ => None,
+        })
     }
 
     fn get_player(&self, player_id: PlayerId) -> Option<&HQMServerPlayer> {
-        self.get(player_id.index.0)
-            .and_then(|(gen, x)| x.as_ref().map(|x| (*gen, x)))
-            .and_then(|(gen, x)| match x {
-                HQMServerPlayerEnum::Player(p) if gen == player_id.gen => Some(p),
-                _ => None,
-            })
+        self.get(player_id.index.0).and_then(|(gen, x)| match x {
+            Some(HQMServerPlayerEnum::Player(p)) if *gen == player_id.gen => Some(p),
+            _ => None,
+        })
     }
 
     fn get_player_mut_by_index(
         &mut self,
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &mut HQMServerPlayer)> {
-        self.get_mut(player_index.0)
-            .and_then(|(gen, x)| x.as_mut().map(|x| (*gen, x)))
-            .and_then(|(gen, x)| match x {
-                HQMServerPlayerEnum::Player(p) => Some((
-                    PlayerId {
-                        index: player_index,
-                        gen,
-                    },
-                    p,
-                )),
-                _ => None,
-            })
+        self.get_mut(player_index.0).and_then(|(gen, x)| match x {
+            Some(HQMServerPlayerEnum::Player(p)) => Some((
+                PlayerId {
+                    index: player_index,
+                    gen: *gen,
+                },
+                p,
+            )),
+            _ => None,
+        })
     }
 
     fn get_player_mut(&mut self, player_id: PlayerId) -> Option<&mut HQMServerPlayer> {
         self.get_mut(player_id.index.0)
-            .and_then(|(gen, x)| x.as_mut().map(|x| (*gen, x)))
             .and_then(|(gen, x)| match x {
-                HQMServerPlayerEnum::Player(p) if gen == player_id.gen => Some(p),
+                Some(HQMServerPlayerEnum::Player(p)) if *gen == player_id.gen => Some(p),
                 _ => None,
             })
     }
@@ -166,34 +159,30 @@ impl PlayerListExt for [ServerStatePlayerItem] {
     fn iter_players(&self) -> impl Iterator<Item = (PlayerId, &HQMServerPlayer)> {
         self.iter()
             .enumerate()
-            .filter_map(|(player_index, (gen, player))| {
-                player.as_ref().and_then(|x| match x {
-                    HQMServerPlayerEnum::Player(p) => Some((
-                        PlayerId {
-                            index: PlayerIndex(player_index),
-                            gen: *gen,
-                        },
-                        p,
-                    )),
-                    HQMServerPlayerEnum::ReplayPlaceholder(_) => None,
-                })
+            .filter_map(|(player_index, (gen, player))| match player {
+                Some(HQMServerPlayerEnum::Player(p)) => Some((
+                    PlayerId {
+                        index: PlayerIndex(player_index),
+                        gen: *gen,
+                    },
+                    p,
+                )),
+                _ => None,
             })
     }
 
     fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerId, &mut HQMServerPlayer)> {
         self.iter_mut()
             .enumerate()
-            .filter_map(|(player_index, (gen, player))| {
-                player.as_mut().and_then(|x| match x {
-                    HQMServerPlayerEnum::Player(p) => Some((
-                        PlayerId {
-                            index: PlayerIndex(player_index),
-                            gen: *gen,
-                        },
-                        p,
-                    )),
-                    HQMServerPlayerEnum::ReplayPlaceholder(_) => None,
-                })
+            .filter_map(|(player_index, (gen, player))| match player {
+                Some(HQMServerPlayerEnum::Player(p)) => Some((
+                    PlayerId {
+                        index: PlayerIndex(player_index),
+                        gen: *gen,
+                    },
+                    p,
+                )),
+                _ => None,
             })
     }
 }
