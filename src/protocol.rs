@@ -602,23 +602,22 @@ pub(crate) fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage)
                 },
             );
         }
-        HQMMessage::PlayerUpdate {
-            player_name,
-            object,
-            player_index,
-            in_server,
-        } => {
+        HQMMessage::PlayerUpdate { player_index, data } => {
             writer.write_bits(6, 0);
             writer.write_bits(6, player_index.0 as u32);
-            writer.write_bits(1, if *in_server { 1 } else { 0 });
-            let (object_index, team_num) = match object {
-                Some((i, team)) => (*i as u32, team.get_num()),
+
+            let (in_server, name_bytes) = match data {
+                None => (false, &[] as &[u8]),
+                Some(p) => (true, p.player_name.as_bytes()),
+            };
+            let (object_index, team_num) = match data.as_ref().and_then(|x| x.object) {
+                Some((i, team)) => (i as u32, team.get_num()),
                 None => (u32::MAX, u32::MAX),
             };
+            writer.write_bits(1, if in_server { 1 } else { 0 });
             writer.write_bits(2, team_num);
             writer.write_bits(6, object_index);
 
-            let name_bytes = player_name.as_bytes();
             for i in 0usize..31 {
                 let v = if i < name_bytes.len() {
                     name_bytes[i]

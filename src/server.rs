@@ -56,12 +56,16 @@ impl HQMClientVersion {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct PlayerUpdateData {
+    pub(crate) player_name: Rc<str>,
+    pub(crate) object: Option<(usize, Team)>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum HQMMessage {
     PlayerUpdate {
-        player_name: Rc<str>,
-        object: Option<(usize, Team)>,
         player_index: PlayerIndex,
-        in_server: bool,
+        data: Option<PlayerUpdateData>,
     },
     Goal {
         team: Team,
@@ -230,12 +234,10 @@ impl HQMServerState {
                         let update = player.get_update_message(player_index);
                         messages.push((update, true, true));
                     }
-                    HQMServerPlayerEnum::ReplayPlaceholder(player) => {
+                    HQMServerPlayerEnum::ReplayPlaceholder(_) => {
                         let update = HQMMessage::PlayerUpdate {
-                            player_name: player.player_name.clone(),
-                            object: None,
                             player_index,
-                            in_server: false,
+                            data: None,
                         };
                         messages.push((update, false, false));
                         *p = None;
@@ -389,16 +391,18 @@ impl HQMServerState {
                 };
 
                 let change1 = Rc::new(HQMMessage::PlayerUpdate {
-                    player_name: team_tag_name,
-                    object,
                     player_index: sender_id.index,
-                    in_server: true,
+                    data: Some(PlayerUpdateData {
+                        player_name: team_tag_name,
+                        object,
+                    }),
                 });
                 let change2 = Rc::new(HQMMessage::PlayerUpdate {
-                    player_name: player.player_name.clone(),
-                    object,
                     player_index: sender_id.index,
-                    in_server: true,
+                    data: Some(PlayerUpdateData {
+                        player_name: player.player_name.clone(),
+                        object,
+                    }),
                 });
                 let chat = Rc::new(HQMMessage::Chat {
                     player_index: Some(sender_id.index),
@@ -533,14 +537,10 @@ impl HQMServerState {
     }
 
     pub fn remove_player(&mut self, player_id: PlayerId, on_replay: bool) -> bool {
-        if let Some(player) = self.players.get_player(player_id) {
-            let player_name = player.player_name.clone();
-
+        if let Some(_) = self.players.get_player(player_id) {
             let update = HQMMessage::PlayerUpdate {
-                player_name,
-                object: None,
                 player_index: player_id.index,
-                in_server: false,
+                data: None,
             };
 
             self.players[player_id.index.0].0 += 1;
@@ -1603,7 +1603,6 @@ pub(crate) struct HQMServerPlayer {
 }
 
 pub(crate) struct HQMServerReplayPlaceholderPlayer {
-    pub player_name: Rc<str>,
     pub original_id: PlayerId,
 }
 
@@ -1654,13 +1653,14 @@ impl HQMServerPlayer {
 
     fn get_update_message(&self, player_index: PlayerIndex) -> HQMMessage {
         HQMMessage::PlayerUpdate {
-            player_name: self.player_name.clone(),
-            object: self
-                .object
-                .as_ref()
-                .map(|(object_index, _, team)| (*object_index, *team)),
             player_index,
-            in_server: true,
+            data: Some(PlayerUpdateData {
+                player_name: self.player_name.clone(),
+                object: self
+                    .object
+                    .as_ref()
+                    .map(|(object_index, _, team)| (*object_index, *team)),
+            }),
         }
     }
 
