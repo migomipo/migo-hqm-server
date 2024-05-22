@@ -111,7 +111,7 @@ pub(crate) trait PlayerListExt {
     }
 }
 
-pub(crate) type ServerStatePlayerItem = (u32, Option<HQMServerPlayerEnum>);
+pub(crate) type ServerStatePlayerItem = (u32, Option<HQMServerPlayer>);
 
 impl PlayerListExt for [ServerStatePlayerItem] {
     fn get_player_by_index(
@@ -119,7 +119,7 @@ impl PlayerListExt for [ServerStatePlayerItem] {
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &HQMServerPlayer)> {
         self.get(player_index.0).and_then(|(gen, x)| match x {
-            Some(HQMServerPlayerEnum::Player(p)) => Some((
+            Some(p) => Some((
                 PlayerId {
                     index: player_index,
                     gen: *gen,
@@ -132,7 +132,7 @@ impl PlayerListExt for [ServerStatePlayerItem] {
 
     fn get_player(&self, player_id: PlayerId) -> Option<&HQMServerPlayer> {
         self.get(player_id.index.0).and_then(|(gen, x)| match x {
-            Some(HQMServerPlayerEnum::Player(p)) if *gen == player_id.gen => Some(p),
+            Some(p) if *gen == player_id.gen => Some(p),
             _ => None,
         })
     }
@@ -142,7 +142,7 @@ impl PlayerListExt for [ServerStatePlayerItem] {
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &mut HQMServerPlayer)> {
         self.get_mut(player_index.0).and_then(|(gen, x)| match x {
-            Some(HQMServerPlayerEnum::Player(p)) => Some((
+            Some(p) => Some((
                 PlayerId {
                     index: player_index,
                     gen: *gen,
@@ -156,7 +156,7 @@ impl PlayerListExt for [ServerStatePlayerItem] {
     fn get_player_mut(&mut self, player_id: PlayerId) -> Option<&mut HQMServerPlayer> {
         self.get_mut(player_id.index.0)
             .and_then(|(gen, x)| match x {
-                Some(HQMServerPlayerEnum::Player(p)) if *gen == player_id.gen => Some(p),
+                Some(p) if *gen == player_id.gen => Some(p),
                 _ => None,
             })
     }
@@ -165,7 +165,7 @@ impl PlayerListExt for [ServerStatePlayerItem] {
         self.iter()
             .enumerate()
             .filter_map(|(player_index, (gen, player))| match player {
-                Some(HQMServerPlayerEnum::Player(p)) => Some((
+                Some(p) => Some((
                     PlayerId {
                         index: PlayerIndex(player_index),
                         gen: *gen,
@@ -180,7 +180,7 @@ impl PlayerListExt for [ServerStatePlayerItem] {
         self.iter_mut()
             .enumerate()
             .filter_map(|(player_index, (gen, player))| match player {
-                Some(HQMServerPlayerEnum::Player(p)) => Some((
+                Some(p) => Some((
                     PlayerId {
                         index: PlayerIndex(player_index),
                         gen: *gen,
@@ -226,25 +226,12 @@ impl HQMServerState {
         self.saved_history.clear();
 
         let mut messages = smallvec::SmallVec::<[(HQMMessage, bool, bool); 32]>::new();
-        for (player_index, (gen, p)) in self.players.iter_mut().enumerate() {
+        for (player_index, (_, p)) in self.players.iter_mut().enumerate() {
             let player_index = PlayerIndex(player_index);
             if let Some(player) = p {
-                match player {
-                    HQMServerPlayerEnum::Player(player) => {
-                        player.reset(player_index);
-                        let update = player.get_update_message(player_index);
-                        messages.push((update, true, true));
-                    }
-                    HQMServerPlayerEnum::ReplayPlaceholder(_) => {
-                        let update = HQMMessage::PlayerUpdate {
-                            player_index,
-                            data: None,
-                        };
-                        messages.push((update, false, false));
-                        *p = None;
-                        *gen += 1;
-                    }
-                }
+                player.reset(player_index);
+                let update = player.get_update_message(player_index);
+                messages.push((update, true, true));
             }
         }
 
@@ -523,7 +510,7 @@ impl HQMServerState {
                 );
                 let update = new_player.get_update_message(player_index);
 
-                self.players[player_index.0].1 = Some(HQMServerPlayerEnum::Player(new_player));
+                self.players[player_index.0].1 = Some(new_player);
                 let player_id = PlayerId {
                     index: player_index,
                     gen: self.players[player_index.0].0,
@@ -1582,11 +1569,6 @@ pub(crate) enum ServerPlayerData {
     NetworkPlayer { data: NetworkPlayerData },
 }
 
-pub enum HQMServerPlayerEnum {
-    Player(HQMServerPlayer),
-    ReplayPlaceholder(HQMServerReplayPlaceholderPlayer),
-}
-
 pub(crate) struct HQMServerPlayer {
     pub player_name: Rc<str>,
     player_name_red: Rc<str>,
@@ -1597,10 +1579,6 @@ pub(crate) struct HQMServerPlayer {
     pub is_muted: MuteStatus,
     pub preferred_hand: SkaterHand,
     pub input: PlayerInput,
-}
-
-pub(crate) struct HQMServerReplayPlaceholderPlayer {
-    pub original_id: PlayerId,
 }
 
 impl HQMServerPlayer {
