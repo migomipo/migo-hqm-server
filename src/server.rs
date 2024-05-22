@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use arr_macro::arr;
+use arraydeque::{ArrayDeque, Wrapping};
 use bytes::{BufMut, BytesMut};
 use chrono::{DateTime, Utc};
 use nalgebra::{Point3, Rotation3};
@@ -583,8 +584,8 @@ pub(crate) struct HQMServer {
     replay_msg_pos: usize,
     replay_last_packet: u32,
 
-    saved_packets: VecDeque<[ObjectPacket; 32]>,
-    saved_pings: VecDeque<Instant>,
+    saved_packets: Box<ArrayDeque<[ObjectPacket; 32], 192, Wrapping>>,
+    saved_pings: Box<ArrayDeque<Instant, 100, Wrapping>>,
 
     pub(crate) ban: BanCheck,
 
@@ -615,8 +616,8 @@ impl HQMServer {
             packet: u32::MAX,
             replay_last_packet: u32::MAX,
 
-            saved_packets: VecDeque::with_capacity(192),
-            saved_pings: VecDeque::with_capacity(100),
+            saved_packets: Box::new(ArrayDeque::new()),
+            saved_pings: Box::new(ArrayDeque::new()),
 
             has_current_game_been_active: false,
 
@@ -750,7 +751,6 @@ impl HQMServer {
                 };
 
             if let Some(duration_since_packet) = duration_since_packet {
-                data.last_ping.truncate(100 - 1);
                 data.last_ping
                     .push_front(duration_since_packet.as_secs_f32());
             }
@@ -1203,14 +1203,12 @@ impl HQMServer {
                 game_step: self.game_step,
                 packets: packets.clone(),
             };
-
             self.state.saved_history.truncate(self.history_length - 1);
             self.state.saved_history.push_front(new_replay_tick);
         } else {
             self.state.saved_history.clear();
         }
 
-        self.saved_packets.truncate(192 - 1);
         self.saved_packets.push_front(packets);
         self.packet = self.packet.wrapping_add(1);
 
@@ -1289,7 +1287,7 @@ impl HQMServer {
                     let forced_view = forced_view.map(|x| x.index);
                     let game_step = tick.game_step;
                     let packets = tick.packets;
-                    self.saved_packets.truncate(192 - 1);
+
                     self.saved_packets.push_front(packets);
 
                     self.packet = self.packet.wrapping_add(1);
@@ -1299,7 +1297,6 @@ impl HQMServer {
                     (self.game_step, None)
                 };
 
-                self.saved_pings.truncate(100 - 1);
                 self.saved_pings.push_front(Instant::now());
 
                 res
@@ -1470,7 +1467,7 @@ struct ReplayTick {
 
 async fn send_updates(
     game_id: u32,
-    packets: &VecDeque<[ObjectPacket; 32]>,
+    packets: &ArrayDeque<[ObjectPacket; 32], 192, Wrapping>,
     game_step: u32,
     value: &ScoreboardValues,
     current_packet: u32,
@@ -1575,7 +1572,7 @@ pub(crate) struct NetworkPlayerData {
     pub(crate) known_msgpos: usize,
     chat_rep: Option<u8>,
     pub(crate) deltatime: u32,
-    last_ping: VecDeque<f32>,
+    last_ping: Box<ArrayDeque<f32, 100, Wrapping>>,
     pub(crate) view_player_index: PlayerIndex,
     pub game_id: u32,
     pub(crate) messages: Vec<Rc<HQMMessage>>,
@@ -1628,7 +1625,7 @@ impl HQMServerPlayer {
                     chat_rep: None,
                     // store latest deltime client sends you to respond with it
                     deltatime: 0,
-                    last_ping: VecDeque::new(),
+                    last_ping: Box::new(ArrayDeque::new()),
                     view_player_index: player_index,
                     game_id: u32::MAX,
                     messages: global_messages.into_iter().cloned().collect(),

@@ -1,10 +1,10 @@
 use crate::game::PlayerInput;
 use crate::server::{HQMClientVersion, HQMMessage};
+use arraydeque::{ArrayDeque, Wrapping};
 use bytes::{BufMut, BytesMut};
 use nalgebra::storage::Storage;
 use nalgebra::{Matrix3, Vector2, Vector3, U1, U3};
 use std::cmp::min;
-use std::collections::VecDeque;
 use std::io::Error;
 use std::string::FromUtf8Error;
 
@@ -632,7 +632,7 @@ pub(crate) fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage)
 
 pub(crate) fn write_objects(
     writer: &mut HQMMessageWriter,
-    packets: &VecDeque<[ObjectPacket; 32]>,
+    packets: &ArrayDeque<[ObjectPacket; 32], 192, Wrapping>,
     current_packet: u32,
     known_packet: u32,
 ) {

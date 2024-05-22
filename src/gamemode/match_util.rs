@@ -4,10 +4,12 @@ use crate::gamemode::InitialGameValues;
 use crate::game::PhysicsEvent;
 use crate::game::RinkSideOfLine::{BlueSide, RedSide};
 use crate::gamemode::{Server, ServerMut, ServerPlayer, ServerPlayerList};
+
+use arraydeque::{ArrayDeque, Wrapping};
 use nalgebra::{Point3, Rotation3, Vector3};
 use reborrow::{Reborrow, ReborrowMut};
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::f32::consts::PI;
 
 pub const ALLOWED_POSITIONS: [&str; 18] = [
@@ -110,7 +112,7 @@ pub struct Match {
     step_where_period_ended: u32,
     too_late_printed_this_period: bool,
     start_next_replay: Option<(u32, u32, Option<PlayerId>)>,
-    puck_touches: HashMap<usize, VecDeque<PuckTouch>>,
+    puck_touches: HashMap<usize, ArrayDeque<PuckTouch, 16, Wrapping>>,
 }
 
 impl Match {
@@ -1002,7 +1004,7 @@ struct PuckTouch {
 
 fn add_touch(
     puck: &PuckObject,
-    entry: Entry<usize, VecDeque<PuckTouch>>,
+    entry: Entry<usize, ArrayDeque<PuckTouch, 16, Wrapping>>,
     player_id: PlayerId,
     team: Team,
     time: u32,
@@ -1010,7 +1012,7 @@ fn add_touch(
     let puck_pos = puck.body.pos.clone();
     let puck_speed = puck.body.linear_velocity.norm();
 
-    let touches = entry.or_insert_with(|| VecDeque::new());
+    let touches = entry.or_insert_with(|| ArrayDeque::new());
     let most_recent_touch = touches.front_mut();
 
     match most_recent_touch {
@@ -1022,7 +1024,6 @@ fn add_touch(
             most_recent_touch.puck_speed = puck_speed;
         }
         _ => {
-            touches.truncate(15);
             touches.push_front(PuckTouch {
                 player_id,
                 team,
