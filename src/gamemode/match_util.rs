@@ -1,4 +1,4 @@
-use crate::game::{PlayerId, PuckObject, Rink, RinkLine, RulesState, ScoreboardValues, Team};
+use crate::game::{PlayerId, Puck, Rink, RinkLine, RulesState, ScoreboardValues, Team};
 use crate::gamemode::InitialGameValues;
 
 use crate::game::PhysicsEvent;
@@ -165,7 +165,7 @@ impl Match {
 
         server
             .state_mut()
-            .spawn_puck(PuckObject::new(puck_pos, Rotation3::identity()));
+            .spawn_puck(Puck::new(puck_pos, Rotation3::identity()));
 
         self.started_as_goalie.clear();
         for (player_index, (team, faceoff_position)) in positions {
@@ -391,7 +391,7 @@ impl Match {
     }
 
     fn handle_puck_touch(&mut self, mut server: ServerMut, player_id: PlayerId, puck_index: usize) {
-        if let Some(player) = server.state().players().get_by_id(player_id) {
+        if let Some(player) = server.state().players().get(player_id) {
             if let Some(touching_team) = player.team() {
                 if let Some(puck) = server.state().get_puck(puck_index) {
                     add_touch(
@@ -918,7 +918,7 @@ impl Match {
                 length / 2.0,
             );
             let rot = Rotation3::identity();
-            server.state_mut().spawn_puck(PuckObject::new(pos, rot));
+            server.state_mut().spawn_puck(Puck::new(pos, rot));
         }
     }
 }
@@ -1003,7 +1003,7 @@ struct PuckTouch {
 }
 
 fn add_touch(
-    puck: &PuckObject,
+    puck: &Puck,
     entry: Entry<usize, ArrayDeque<PuckTouch, 16, Wrapping>>,
     player_id: PlayerId,
     team: Team,

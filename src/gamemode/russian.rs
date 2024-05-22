@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tracing::info;
 
 use crate::game::{PhysicsEvent, PlayerId};
-use crate::game::{PlayerIndex, PuckObject, ScoreboardValues, Team};
+use crate::game::{PlayerIndex, Puck, ScoreboardValues, Team};
 use crate::gamemode::util::add_players;
 use crate::gamemode::{ExitReason, GameMode, InitialGameValues, ServerMut, ServerMutParts};
 use crate::physics;
@@ -74,7 +74,7 @@ impl RussianGameMode {
 
         server
             .state_mut()
-            .spawn_puck(PuckObject::new(puck_pos, Rotation3::identity()));
+            .spawn_puck(Puck::new(puck_pos, Rotation3::identity()));
 
         self.fix_status(server, team);
     }
@@ -214,7 +214,7 @@ impl RussianGameMode {
         {
             let admin_player_name = player.name();
 
-            if let Some(force_player) = server.state().players().get(force_player_index) {
+            if let Some(force_player) = server.state().players().get_by_index(force_player_index) {
                 let force_player_id = force_player.id;
                 let force_player_name = force_player.name();
                 if server.state_mut().move_to_spectator(force_player_id) {
@@ -343,7 +343,7 @@ impl GameMode for RussianGameMode {
                             self.check_ending(server.scoreboard_mut());
                         }
                         PhysicsEvent::PuckTouch { player, .. } => {
-                            if let Some(player) = server.state().players().get_by_id(*player) {
+                            if let Some(player) = server.state().players().get(*player) {
                                 if let Some(touching_team) = player.team() {
                                     self.fix_status(server.rb_mut(), touching_team);
                                 }

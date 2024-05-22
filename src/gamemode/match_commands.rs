@@ -464,7 +464,7 @@ impl Match {
             .into_iter()
             .find(|x| x.eq_ignore_ascii_case(input_position.as_str()))
         {
-            if let Some(player) = server.state().players().get_by_id(player_id) {
+            if let Some(player) = server.state().players().get(player_id) {
                 let name = player.name();
 
                 info!("{} ({}) set position {}", name, player_id, position);

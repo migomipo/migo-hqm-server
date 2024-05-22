@@ -1,6 +1,6 @@
 use crate::game::{
-    PhysicsEvent, PlayerId, PlayerIndex, PlayerInput, PuckObject, Rink, ScoreboardValues,
-    SkaterObject, Team,
+    PhysicsEvent, PlayerId, PlayerIndex, PlayerInput, Puck, Rink, ScoreboardValues, SkaterObject,
+    Team,
 };
 use crate::server::{
     HQMServer, HQMServerPlayer, HQMServerState, PlayerListExt, ServerStatePlayerItem,
@@ -207,7 +207,7 @@ impl<'a> Server<'a> {
 #[non_exhaustive]
 pub struct ServerStateMutParts<'a> {
     pub players: ServerPlayerListMut<'a>,
-    pub pucks: &'a mut [Option<PuckObject>],
+    pub pucks: &'a mut [Option<Puck>],
 }
 
 /// Mutable handle to puck and player state.
@@ -240,11 +240,11 @@ impl<'a> ServerStateMut<'a> {
         }
     }
 
-    pub fn pucks(&self) -> &[Option<PuckObject>] {
+    pub fn pucks(&self) -> &[Option<Puck>] {
         &self.state.pucks
     }
 
-    pub fn pucks_mut(&mut self) -> &mut [Option<PuckObject>] {
+    pub fn pucks_mut(&mut self) -> &mut [Option<Puck>] {
         &mut self.state.pucks
     }
 
@@ -287,7 +287,7 @@ impl<'a> ServerStateMut<'a> {
         self.state.move_to_spectator(player_id)
     }
 
-    pub fn spawn_puck(&mut self, puck: PuckObject) -> Option<usize> {
+    pub fn spawn_puck(&mut self, puck: Puck) -> Option<usize> {
         if let Some(object_index) = self.state.pucks.iter().position(|x| x.is_none()) {
             self.state.pucks[object_index] = Some(puck);
             Some(object_index)
@@ -302,11 +302,11 @@ impl<'a> ServerStateMut<'a> {
         }
     }
 
-    pub fn get_puck(&self, index: usize) -> Option<&PuckObject> {
+    pub fn get_puck(&self, index: usize) -> Option<&Puck> {
         self.state.get_puck(index)
     }
 
-    pub fn get_puck_mut(&mut self, index: usize) -> Option<&mut PuckObject> {
+    pub fn get_puck_mut(&mut self, index: usize) -> Option<&mut Puck> {
         self.state.get_puck_mut(index)
     }
 }
@@ -323,11 +323,11 @@ impl<'a> ServerState<'a> {
             players: &self.state.players,
         }
     }
-    pub fn pucks(&self) -> &[Option<PuckObject>] {
+    pub fn pucks(&self) -> &[Option<Puck>] {
         &self.state.pucks
     }
 
-    pub fn get_puck(&self, index: usize) -> Option<&PuckObject> {
+    pub fn get_puck(&self, index: usize) -> Option<&Puck> {
         self.state.get_puck(index)
     }
 }
@@ -355,33 +355,34 @@ impl<'a> ServerPlayerListMut<'a> {
     }
 
     /// Returns an immutable handle to a player in the server.
-    pub fn get(&self, index: PlayerIndex) -> Option<ServerPlayer> {
+    pub fn get_by_index(&self, index: PlayerIndex) -> Option<ServerPlayer> {
         self.players
             .get_player_by_index(index)
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
-    pub fn get_by_id(&self, id: PlayerId) -> Option<ServerPlayer> {
+    pub fn get(&self, id: PlayerId) -> Option<ServerPlayer> {
         self.players
             .get_player(id)
             .map(|player| ServerPlayer { id, player })
     }
 
     /// Returns a mutable handle to a player in the server.
-    pub fn get_mut(&mut self, index: PlayerIndex) -> Option<ServerPlayerMut> {
+    pub fn get_by_index_mut(&mut self, index: PlayerIndex) -> Option<ServerPlayerMut> {
         self.players
             .get_player_mut_by_index(index)
             .map(|(id, player)| ServerPlayerMut { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
-    pub fn get_mut_by_id(&mut self, id: PlayerId) -> Option<ServerPlayerMut> {
+    pub fn get_mut(&mut self, id: PlayerId) -> Option<ServerPlayerMut> {
         self.players
             .get_player_mut(id)
             .map(|player| ServerPlayerMut { id, player })
     }
 
+    /// Returns a player object if the player is admin, otherwise sends a message telling the user to log in first.
     pub fn check_admin_or_deny(&mut self, player_id: PlayerId) -> Option<ServerPlayer> {
         self.players
             .check_admin_or_deny(player_id)
@@ -423,14 +424,14 @@ impl<'a> ServerPlayerList<'a> {
     }
 
     /// Returns an immutable handle to a player in the server.
-    pub fn get(&self, index: PlayerIndex) -> Option<ServerPlayer> {
+    pub fn get_by_index(&self, index: PlayerIndex) -> Option<ServerPlayer> {
         self.players
             .get_player_by_index(index)
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
-    pub fn get_by_id(&self, id: PlayerId) -> Option<ServerPlayer> {
+    pub fn get(&self, id: PlayerId) -> Option<ServerPlayer> {
         self.players
             .get_player(id)
             .map(|player| ServerPlayer { id, player })

@@ -21,7 +21,7 @@ use tracing::{info, warn};
 use crate::gamemode::{ExitReason, GameMode, InitialGameValues};
 
 use crate::game::{
-    PhysicsConfiguration, PlayerId, PlayerIndex, PlayerInput, PuckObject, Rink, RulesState,
+    PhysicsConfiguration, PlayerId, PlayerIndex, PlayerInput, Puck, Rink, RulesState,
     ScoreboardValues, SkaterHand, SkaterObject, Team,
 };
 use crate::protocol::{
@@ -194,7 +194,7 @@ impl PlayerListExt for [ServerStatePlayerItem] {
 
 pub(crate) struct HQMServerState {
     pub(crate) players: Vec<ServerStatePlayerItem>,
-    pub(crate) pucks: Vec<Option<PuckObject>>,
+    pub(crate) pucks: Vec<Option<Puck>>,
     persistent_messages: Vec<Rc<HQMMessage>>,
     replay_messages: Vec<Rc<HQMMessage>>,
 
@@ -465,11 +465,11 @@ impl HQMServerState {
         false
     }
 
-    pub fn get_puck(&self, index: usize) -> Option<&PuckObject> {
+    pub fn get_puck(&self, index: usize) -> Option<&Puck> {
         self.pucks.get(index).map(|x| x.as_ref()).flatten()
     }
 
-    pub fn get_puck_mut(&mut self, index: usize) -> Option<&mut PuckObject> {
+    pub fn get_puck_mut(&mut self, index: usize) -> Option<&mut Puck> {
         self.pucks.get_mut(index).map(|x| x.as_mut()).flatten()
     }
 

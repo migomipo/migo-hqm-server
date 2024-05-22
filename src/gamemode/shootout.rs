@@ -6,7 +6,7 @@ use std::f32::consts::PI;
 use tracing::info;
 
 use crate::game::{PhysicsEvent, PlayerId};
-use crate::game::{PlayerIndex, PuckObject, ScoreboardValues, Team};
+use crate::game::{PlayerIndex, Puck, ScoreboardValues, Team};
 use crate::gamemode::util::{add_players, get_spawnpoint, SpawnPoint};
 use crate::gamemode::{ExitReason, GameMode, InitialGameValues, ServerMut, ServerMutParts};
 
@@ -81,7 +81,7 @@ impl ShootoutGameMode {
         let puck_pos = Point3::new(width / 2.0, 1.0, length / 2.0);
         server
             .state_mut()
-            .spawn_puck(PuckObject::new(puck_pos, Rotation3::identity()));
+            .spawn_puck(Puck::new(puck_pos, Rotation3::identity()));
 
         let mut red_players = vec![];
         let mut blue_players = vec![];
@@ -264,7 +264,7 @@ impl ShootoutGameMode {
         {
             let admin_player_name = player.name();
 
-            if let Some(force_player) = server.state().players().get(force_player_index) {
+            if let Some(force_player) = server.state().players().get_by_index(force_player_index) {
                 let force_player_name = force_player.name();
                 let force_player_id = force_player.id;
                 if server.state_mut().move_to_spectator(force_player_id) {
@@ -479,7 +479,7 @@ impl GameMode for ShootoutGameMode {
                     if let Some(touching_team) = server
                         .state()
                         .players()
-                        .get_by_id(player)
+                        .get(player)
                         .and_then(|player| player.team())
                     {
                         if let ShootoutStatus::Game {

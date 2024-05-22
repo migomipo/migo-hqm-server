@@ -68,7 +68,7 @@ impl StandardMatchGameMode {
         {
             let admin_player_name = player.name();
 
-            if let Some(force_player) = server.state().players().get(force_player_index) {
+            if let Some(force_player) = server.state().players().get_by_index(force_player_index) {
                 let force_player_id = force_player.id;
                 let force_player_name = force_player.name();
                 if server.state_mut().move_to_spectator(force_player_id) {

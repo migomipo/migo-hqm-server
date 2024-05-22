@@ -1,4 +1,4 @@
-use crate::game::PuckObject;
+use crate::game::Puck;
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::gamemode::util::{add_players, get_spawnpoint, SpawnPoint};
 use crate::gamemode::{GameMode, InitialGameValues, ServerMut, ServerMutParts};
@@ -72,7 +72,7 @@ impl GameMode for PermanentWarmup {
         for i in 0..warmup_pucks {
             let pos = Point3::new(puck_line_start + 0.8 * (i as f32), 1.5, length / 2.0);
             let rot = Rotation3::identity();
-            server.state_mut().spawn_puck(PuckObject::new(pos, rot));
+            server.state_mut().spawn_puck(Puck::new(pos, rot));
         }
     }
 

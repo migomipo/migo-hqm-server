@@ -1,6 +1,6 @@
 use crate::game::RinkSideOfLine::{BlueSide, RedSide};
 use crate::game::{
-    PhysicsBody, PhysicsConfiguration, PlayerInput, PuckObject, Rink, RinkNet, SkaterCollisionBall,
+    PhysicsBody, PhysicsConfiguration, PlayerInput, Puck, Rink, RinkNet, SkaterCollisionBall,
     SkaterHand, SkaterObject, Team,
 };
 use crate::game::{PhysicsEvent, PlayerId};
@@ -31,7 +31,7 @@ impl HQMServer {
         let mut events: PhysicsEventList = SmallVec::new();
         let mut players: SmallVec<[(PlayerId, &mut SkaterObject, &mut PlayerInput); 32]> =
             SmallVec::new();
-        let mut pucks: SmallVec<[(usize, &mut PuckObject); 32]> = SmallVec::new();
+        let mut pucks: SmallVec<[(usize, &mut Puck); 32]> = SmallVec::new();
         for (i, p) in self.state.players.iter_players_mut() {
             if let Some((_, skater, _)) = &mut p.object {
                 players.push((i, skater, &mut p.input));
@@ -132,7 +132,7 @@ impl HQMServer {
 
 fn update_sticks_and_pucks(
     players: &mut [(PlayerId, &mut SkaterObject, &mut PlayerInput)],
-    pucks: &mut [(usize, &mut PuckObject)],
+    pucks: &mut [(usize, &mut Puck)],
     rink: &Rink,
     events: &mut PhysicsEventList,
     physics_config: &PhysicsConfiguration,
@@ -601,7 +601,7 @@ fn apply_collisions(
 }
 
 fn puck_detection(
-    puck: &mut PuckObject,
+    puck: &mut Puck,
     puck_index: usize,
     old_puck_pos: &Point3<f32>,
     rink: &Rink,
@@ -753,7 +753,7 @@ fn puck_detection(
 }
 
 fn do_puck_net_forces(
-    puck: &mut PuckObject,
+    puck: &mut Puck,
     net: &RinkNet,
     puck_linear_velocity: &Vector3<f32>,
     puck_angular_velocity: &Vector3<f32>,
@@ -782,7 +782,7 @@ fn do_puck_net_forces(
 }
 
 fn do_puck_post_forces(
-    puck: &mut PuckObject,
+    puck: &mut Puck,
     net: &RinkNet,
     puck_linear_velocity: &Vector3<f32>,
     puck_angular_velocity: &Vector3<f32>,
@@ -811,7 +811,7 @@ fn do_puck_post_forces(
 }
 
 fn do_puck_stick_forces(
-    puck: &mut PuckObject,
+    puck: &mut Puck,
     player: &mut SkaterObject,
     puck_vertices: &[Point3<f32>],
     puck_linear_velocity: &Vector3<f32>,
@@ -846,7 +846,7 @@ fn do_puck_stick_forces(
 }
 
 fn do_puck_rink_forces(
-    puck: &mut PuckObject,
+    puck: &mut Puck,
     puck_vertices: &[Point3<f32>],
     rink: &Rink,
     puck_linear_velocity: &Vector3<f32>,

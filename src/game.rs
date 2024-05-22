@@ -315,7 +315,7 @@ pub struct PhysicsBody {
 /// Represents a skater object.
 ///
 /// If you set the position, rotation, and/or linear velocity directly without adjusting the collision balls,
-/// some weird things will happen with the inertia of the player. To fix this, use the reset_collision_balls method after
+/// some weird things will happen with the inertia of the player. To fix this, use the [SkaterObject::reset_collision_balls] method after
 /// changing the physics properties.
 #[derive(Debug, Clone)]
 pub struct SkaterObject {
@@ -553,15 +553,15 @@ pub enum SkaterHand {
 
 /// Represents an HQM puck.
 #[derive(Debug, Clone)]
-pub struct PuckObject {
+pub struct Puck {
     pub body: PhysicsBody,
     pub radius: f32,
     pub height: f32,
 }
 
-impl PuckObject {
+impl Puck {
     pub fn new(pos: Point3<f32>, rot: Rotation3<f32>) -> Self {
-        PuckObject {
+        Puck {
             body: PhysicsBody {
                 pos,
                 linear_velocity: Vector3::new(0.0, 0.0, 0.0),
