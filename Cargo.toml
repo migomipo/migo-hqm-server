@@ -4,6 +4,7 @@ version = "2.0.0"
 authors = ["John Eriksson <john.eriksson.16@gmail.com>"]
 edition = "2021"
 build = "src/build.rs"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 arr_macro = "0.2.1"
