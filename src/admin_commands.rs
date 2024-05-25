@@ -2,7 +2,7 @@ use crate::server::{HQMServer, MuteStatus, PlayerListExt, ServerPlayerData};
 
 use crate::game::{PlayerId, PlayerIndex};
 use crate::gamemode::{ExitReason, GameMode};
-use crate::ReplayEnabled;
+use crate::ReplayRecording;
 use systemctl::restart;
 use tracing::info;
 
@@ -388,7 +388,7 @@ impl HQMServer {
         if let Some(player) = self.state.players.check_admin_or_deny(admin_player_id) {
             match rule {
                 "on" => {
-                    self.config.replays_enabled = ReplayEnabled::On;
+                    self.config.replays_enabled = ReplayRecording::On;
 
                     info!(
                         "{} ({}) enabled replays",
@@ -399,7 +399,7 @@ impl HQMServer {
                     self.state.add_server_chat_message(msg);
                 }
                 "off" => {
-                    self.config.replays_enabled = ReplayEnabled::Off;
+                    self.config.replays_enabled = ReplayRecording::Off;
 
                     info!(
                         "{} ({}) disabled replay recording",
@@ -410,7 +410,7 @@ impl HQMServer {
                     self.state.add_server_chat_message(msg);
                 }
                 "standby" => {
-                    self.config.replays_enabled = ReplayEnabled::Standby;
+                    self.config.replays_enabled = ReplayRecording::Standby;
 
                     info!(
                         "{} ({}) enabled standby replay recording",

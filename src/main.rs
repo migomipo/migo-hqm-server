@@ -15,7 +15,8 @@ use migo_hqm_server::gamemode::standard_match::{
 };
 use migo_hqm_server::gamemode::util::SpawnPoint;
 use migo_hqm_server::gamemode::warmup::PermanentWarmup;
-use migo_hqm_server::{ReplayEnabled, ReplaySaving, ServerConfiguration};
+use migo_hqm_server::record::{FileReplaySaving, HttpEndpointReplaySaving, ReplaySaving};
+use migo_hqm_server::{ReplayRecording, ServerConfiguration};
 use tracing_appender;
 use tracing_subscriber;
 
@@ -86,9 +87,9 @@ async fn main() -> anyhow::Result<()> {
             });
 
         let replays_enabled = match server_section.get("replays") {
-            Some(s) if is_true(s) => ReplayEnabled::On,
-            Some(s) if s.eq_ignore_ascii_case("standby") => ReplayEnabled::Standby,
-            _ => ReplayEnabled::Off,
+            Some(s) if is_true(s) => ReplayRecording::On,
+            Some(s) if s.eq_ignore_ascii_case("standby") => ReplayRecording::Standby,
+            _ => ReplayRecording::Off,
         };
 
         let log_name = server_section
@@ -103,12 +104,12 @@ async fn main() -> anyhow::Result<()> {
             .filter(|x| !x.is_empty())
             .collect();
 
-        let replay_saving =
-            server_section
-                .get("replay_endpoint")
-                .map_or(ReplaySaving::File, |url| ReplaySaving::Endpoint {
-                    url: url.to_string(),
-                });
+        let replay_saving = server_section
+            .get("replay_endpoint")
+            .map_or_else::<Box<dyn ReplaySaving>, _, _>(
+                || Box::new(FileReplaySaving::new()),
+                |url| Box::new(HttpEndpointReplaySaving::new(url.to_string())),
+            );
 
         fn get_optional<U, F: FnOnce(&str) -> U>(
             section: Option<&Properties>,
@@ -133,7 +134,6 @@ async fn main() -> anyhow::Result<()> {
             password: server_password,
             player_max: server_player_max,
             replays_enabled,
-            replay_saving,
             server_name,
             server_service,
         };
@@ -333,6 +333,7 @@ async fn main() -> anyhow::Result<()> {
                     config,
                     physics_config,
                     ban,
+                    replay_saving,
                     StandardMatchGameMode::new(match_config, server_team_max, spawn_point),
                 )
                 .await?
@@ -354,6 +355,7 @@ async fn main() -> anyhow::Result<()> {
                     config,
                     physics_config,
                     ban,
+                    replay_saving,
                     PermanentWarmup::new(warmup_pucks, spawn_point),
                 )
                 .await?
@@ -368,6 +370,7 @@ async fn main() -> anyhow::Result<()> {
                     config,
                     physics_config,
                     ban,
+                    replay_saving,
                     RussianGameMode::new(attempts, server_team_max),
                 )
                 .await?
@@ -382,6 +385,7 @@ async fn main() -> anyhow::Result<()> {
                     config,
                     physics_config,
                     ban,
+                    replay_saving,
                     ShootoutGameMode::new(attempts),
                 )
                 .await?;

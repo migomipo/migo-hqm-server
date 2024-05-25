@@ -6,18 +6,13 @@ pub mod ban;
 pub mod game;
 pub mod physics;
 mod protocol;
+pub mod record;
 mod server;
 
 pub use server::run_server;
 
-#[derive(Debug, Clone)]
-pub enum ReplaySaving {
-    File,
-    Endpoint { url: String },
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
-pub enum ReplayEnabled {
+pub enum ReplayRecording {
     Off,
     On,
     Standby,
@@ -29,8 +24,7 @@ pub struct ServerConfiguration {
     pub password: Option<String>,
     pub player_max: usize,
 
-    pub replays_enabled: ReplayEnabled,
-    pub replay_saving: ReplaySaving,
+    pub replays_enabled: ReplayRecording,
     pub server_name: String,
     pub server_service: Option<String>,
 }

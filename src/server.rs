@@ -3,7 +3,7 @@ use std::cmp::min;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,8 +16,7 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use nalgebra::{Point3, Rotation3};
 use std::error::Error;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+
 use tokio::net::UdpSocket;
 use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
@@ -33,7 +32,8 @@ use crate::protocol::{
     write_message, write_objects, HQMClientToServerMessage, HQMMessageCodec, HQMMessageWriter,
     ObjectPacket,
 };
-use crate::{ReplayEnabled, ReplaySaving, ServerConfiguration};
+use crate::record::ReplaySaving;
+use crate::{ReplayRecording, ServerConfiguration};
 
 pub(crate) const GAME_HEADER: &[u8] = b"Hock";
 
@@ -571,7 +571,6 @@ pub(crate) struct HQMServer {
     pub game_step: u32,
     pub is_muted: bool,
     pub start_time: DateTime<Utc>,
-    reqwest_client: reqwest::Client,
 
     has_current_game_been_active: bool,
 
@@ -584,6 +583,7 @@ pub(crate) struct HQMServer {
     saved_pings: Box<ArrayDeque<Instant, 100, Wrapping>>,
 
     pub(crate) ban: Box<dyn BanCheck>,
+    pub(crate) replay: Box<dyn ReplaySaving>,
 
     pub history_length: usize,
 }
@@ -593,10 +593,9 @@ impl HQMServer {
         initial_values: InitialGameValues,
         config: ServerConfiguration,
         physics_config: PhysicsConfiguration,
-        ban_check: Box<dyn BanCheck>,
+        ban: Box<dyn BanCheck>,
+        replay: Box<dyn ReplaySaving>,
     ) -> Self {
-        let reqwest_client = reqwest::Client::new();
-
         let server = HQMServer {
             state: HQMServerState::new(initial_values.puck_slots),
             allow_join: true,
@@ -606,7 +605,7 @@ impl HQMServer {
             is_muted: false,
             config,
             game_id: 1,
-            reqwest_client: reqwest_client.clone(),
+
             replay_data: BytesMut::with_capacity(64 * 1024 * 1024),
             replay_msg_pos: 0,
             packet: u32::MAX,
@@ -616,7 +615,8 @@ impl HQMServer {
             saved_pings: Box::new(ArrayDeque::new()),
 
             has_current_game_been_active: false,
-            ban: ban_check,
+            ban,
+            replay,
 
             history_length: 0,
             game_step: u32::MAX,
@@ -884,7 +884,7 @@ impl HQMServer {
             "clearbans" => {
                 self.clear_bans(player_id);
             }
-            "replay" => self.set_replay(player_id, arg),
+            "replay" | "record" => self.set_replay(player_id, arg),
             "lefty" => {
                 self.set_hand(SkaterHand::Left, player_id);
             }
@@ -1207,7 +1207,7 @@ impl HQMServer {
         self.saved_packets.push_front(packets);
         self.packet = self.packet.wrapping_add(1);
 
-        if self.config.replays_enabled != ReplayEnabled::Off
+        if self.config.replays_enabled != ReplayRecording::Off
             && behaviour.save_replay_data(self.into())
         {
             self.write_replay();
@@ -1317,51 +1317,15 @@ impl HQMServer {
         }
     }
 
-    fn save_replay(&self, old_replay_data: BytesMut) {
+    fn save_replay(&mut self, old_replay_data: BytesMut) {
         let size = old_replay_data.len();
         let mut replay_data = BytesMut::with_capacity(size + 8);
         replay_data.put_u32_le(0u32);
         replay_data.put_u32_le(size as u32);
         replay_data.put_slice(&old_replay_data);
         let replay_data = replay_data.freeze();
-        let time = self.start_time.format("%Y-%m-%dT%H%M%S").to_string();
-        let file_name = format!("{}.{}.hrp", self.config.server_name, time);
-        let server_name = self.config.server_name.clone();
-        match self.config.replay_saving {
-            ReplaySaving::File => {
-                tokio::spawn(async move {
-                    if tokio::fs::create_dir_all("replays").await.is_err() {
-                        return;
-                    };
-                    let path: PathBuf = ["replays", &file_name].iter().collect();
-
-                    let mut file_handle = match File::create(path).await {
-                        Ok(file) => file,
-                        Err(_) => {
-                            return;
-                        }
-                    };
-
-                    let _x = file_handle.write(&replay_data).await;
-                    let _x = file_handle.sync_all().await;
-                });
-            }
-            ReplaySaving::Endpoint { ref url } => {
-                let client = self.reqwest_client.clone();
-                let form = reqwest::multipart::Form::new()
-                    .text("time", time)
-                    .text("server", server_name)
-                    .part(
-                        "replay",
-                        reqwest::multipart::Part::stream(replay_data).file_name(file_name),
-                    );
-
-                let request = client.post(url).multipart(form);
-                tokio::spawn(async move {
-                    let _x = request.send().await;
-                });
-            }
-        }
+        self.replay
+            .save_replay_data(&self.config, replay_data, self.start_time)
     }
     pub fn new_game(&mut self, v: InitialGameValues) {
         self.scoreboard = v.values;
@@ -1379,7 +1343,7 @@ impl HQMServer {
 
         let old_replay_data = std::mem::replace(&mut self.replay_data, BytesMut::new());
 
-        if self.config.replays_enabled == ReplayEnabled::On && !old_replay_data.is_empty() {
+        if self.config.replays_enabled == ReplayRecording::On && !old_replay_data.is_empty() {
             self.save_replay(old_replay_data);
         }
 
@@ -1741,13 +1705,14 @@ pub async fn run_server<B: GameMode>(
     config: ServerConfiguration,
     physics_config: PhysicsConfiguration,
     ban: Box<dyn BanCheck>,
+    replay: Box<dyn ReplaySaving>,
     mut behaviour: B,
 ) -> std::io::Result<()> {
     let initial_values = behaviour.get_initial_game_values();
 
     let reqwest_client = reqwest::Client::new();
 
-    let mut server = HQMServer::new(initial_values, config, physics_config, ban);
+    let mut server = HQMServer::new(initial_values, config, physics_config, ban, replay);
     info!("Server started");
 
     behaviour.init((&mut server).into());
