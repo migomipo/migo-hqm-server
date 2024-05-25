@@ -1,9 +1,30 @@
-mod hqm_admin_commands;
+mod admin_commands;
 
-pub mod hqm_behaviour;
-pub mod hqm_game;
-mod hqm_match_commands;
-pub mod hqm_match_util;
-mod hqm_parse;
-pub mod hqm_server;
-pub mod hqm_simulate;
+pub mod gamemode;
+
+pub mod ban;
+pub mod game;
+pub mod physics;
+mod protocol;
+pub mod record;
+mod server;
+
+pub use server::run_server;
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+pub enum ReplayRecording {
+    Off,
+    On,
+    Standby,
+}
+
+#[derive(Debug, Clone)]
+pub struct ServerConfiguration {
+    pub welcome: Vec<String>,
+    pub password: Option<String>,
+    pub player_max: usize,
+
+    pub replays_enabled: ReplayRecording,
+    pub server_name: String,
+    pub server_service: Option<String>,
+}
