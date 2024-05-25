@@ -5,7 +5,7 @@ use tracing::info;
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::game::{PlayerIndex, Puck, ScoreboardValues, Team};
 use crate::gamemode::util::add_players;
-use crate::gamemode::{ExitReason, GameMode, InitialGameValues, ServerMut, ServerMutParts};
+use crate::gamemode::{ExitReason, GameMode, InitialGameValues, Server, ServerMut, ServerMutParts};
 use crate::physics;
 use reborrow::ReborrowMut;
 use std::f32::consts::FRAC_PI_2;
@@ -414,7 +414,7 @@ impl GameMode for RussianGameMode {
         self.team_max as u32
     }
 
-    fn save_replay_data(&self, _server: ServerMut) -> bool {
+    fn include_tick_in_replay(&self, _server: Server) -> bool {
         !matches!(self.status, RussianStatus::WaitingForGame)
     }
 }

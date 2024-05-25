@@ -1208,7 +1208,7 @@ impl HQMServer {
         self.packet = self.packet.wrapping_add(1);
 
         if self.config.replays_enabled != ReplayRecording::Off
-            && behaviour.save_replay_data(self.into())
+            && behaviour.include_tick_in_replay((&*self).into())
         {
             self.write_replay();
         }
@@ -1325,7 +1325,7 @@ impl HQMServer {
         replay_data.put_slice(&old_replay_data);
         let replay_data = replay_data.freeze();
         self.replay
-            .save_replay_data(&self.config, replay_data, self.start_time)
+            .save_replay_data(&self.config, replay_data, self.start_time);
     }
     pub fn new_game(&mut self, v: InitialGameValues) {
         self.scoreboard = v.values;

@@ -67,7 +67,7 @@ pub trait GameMode {
     /// Gets the server team size that will be shown in the server list.
     fn server_list_team_size(&self) -> u32;
 
-    fn save_replay_data(&self, _server: ServerMut) -> bool {
+    fn include_tick_in_replay(&self, _server: Server) -> bool {
         false
     }
 }
@@ -176,6 +176,12 @@ impl<'a> ServerMut<'a> {
 #[derive(ReborrowCopyTraits)]
 pub struct Server<'a> {
     pub(crate) server: &'a HQMServer,
+}
+
+impl<'a> From<&'a HQMServer> for Server<'a> {
+    fn from(server: &'a HQMServer) -> Self {
+        Self { server }
+    }
 }
 
 impl<'a> Server<'a> {

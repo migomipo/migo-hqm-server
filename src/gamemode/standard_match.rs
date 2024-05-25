@@ -9,7 +9,7 @@ pub use crate::gamemode::match_util::{
     TwoLinePassConfiguration, ALLOWED_POSITIONS,
 };
 use crate::gamemode::util::{add_players, get_spawnpoint, SpawnPoint};
-use crate::gamemode::{ExitReason, GameMode, InitialGameValues, ServerMut, ServerMutParts};
+use crate::gamemode::{ExitReason, GameMode, InitialGameValues, Server, ServerMut, ServerMutParts};
 
 pub struct StandardMatchGameMode {
     pub m: Match,
@@ -331,7 +331,7 @@ impl GameMode for StandardMatchGameMode {
         self.team_max as u32
     }
 
-    fn save_replay_data(&self, server: ServerMut) -> bool {
+    fn include_tick_in_replay(&self, server: Server) -> bool {
         server.scoreboard().period > 0
     }
 }
