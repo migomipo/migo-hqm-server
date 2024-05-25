@@ -246,7 +246,7 @@ impl HQMServer {
                         self.remove_player(player_id, true);
 
                         if ban_player {
-                            self.ban.insert(player_addr.ip());
+                            self.ban.ban_ip(player_addr.ip());
 
                             info!(
                                 "{} ({}) banned {} ({})",
@@ -332,7 +332,7 @@ impl HQMServer {
                         self.remove_player(kick_player_id, true);
 
                         if ban_player {
-                            self.ban.insert(kick_ip);
+                            self.ban.ban_ip(kick_ip);
 
                             info!(
                                 "{} ({}) banned {} ({})",
@@ -376,7 +376,7 @@ impl HQMServer {
 
     pub(crate) fn clear_bans(&mut self, admin_player_id: PlayerId) {
         if let Some(player) = self.state.players.check_admin_or_deny(admin_player_id) {
-            self.ban.clear();
+            self.ban.clear_all_bans();
             info!("{} ({}) cleared bans", player.player_name, admin_player_id);
 
             let msg = format!("Bans cleared by {}", player.player_name);

@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // INI Crate For configuration
-extern crate ini;
 use ini::Ini;
 use std::env;
 
 use ini::Properties;
+use migo_hqm_server::ban::{BanCheck, FileBanCheck, InMemoryBanCheck};
 use migo_hqm_server::game::PhysicsConfiguration;
 use migo_hqm_server::gamemode::russian::RussianGameMode;
 use migo_hqm_server::gamemode::shootout::ShootoutGameMode;
@@ -15,7 +15,7 @@ use migo_hqm_server::gamemode::standard_match::{
 };
 use migo_hqm_server::gamemode::util::SpawnPoint;
 use migo_hqm_server::gamemode::warmup::PermanentWarmup;
-use migo_hqm_server::{BanCheck, ReplayEnabled, ReplaySaving, ServerConfiguration};
+use migo_hqm_server::{ReplayEnabled, ReplaySaving, ServerConfiguration};
 use tracing_appender;
 use tracing_subscriber;
 
@@ -201,15 +201,10 @@ async fn main() -> anyhow::Result<()> {
             .with_writer(non_blocking)
             .init();
 
-        let ban = if let Some(ban_file) = ban_file.as_deref() {
-            let path = PathBuf::from(ban_file.to_string());
-            BanCheck::new_file(path).await
+        let ban: Box<dyn BanCheck> = if let Some(ban_file) = ban_file.as_deref() {
+            Box::new(FileBanCheck::new(ban_file.to_string().into()).await?)
         } else {
-            BanCheck::InMemory {
-                file: None,
-                ban_list: Default::default(),
-                watcher: None,
-            }
+            Box::new(InMemoryBanCheck::new())
         };
 
         match mode {

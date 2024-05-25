@@ -2,32 +2,38 @@ use std::borrow::Cow;
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::fmt::Debug;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use arr_macro::arr;
 use arraydeque::{ArrayDeque, Wrapping};
+use async_stream::stream;
 use bytes::{BufMut, BytesMut};
 use chrono::{DateTime, Utc};
+use futures::StreamExt;
 use nalgebra::{Point3, Rotation3};
+use std::error::Error;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UdpSocket;
+use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
 
 use crate::gamemode::{ExitReason, GameMode, InitialGameValues};
 
+use crate::ban::{BanCheck, BanCheckResponse};
 use crate::game::{
     PhysicsConfiguration, PlayerId, PlayerIndex, PlayerInput, Puck, Rink, RulesState,
     ScoreboardValues, SkaterHand, SkaterObject, Team,
 };
 use crate::protocol::{
-    write_message, write_objects, HQMClientToServerMessage, HQMMessageWriter, ObjectPacket,
+    write_message, write_objects, HQMClientToServerMessage, HQMMessageCodec, HQMMessageWriter,
+    ObjectPacket,
 };
-use crate::{BanCheck, ReplayEnabled, ReplaySaving, ServerConfiguration};
+use crate::{ReplayEnabled, ReplaySaving, ServerConfiguration};
 
 pub(crate) const GAME_HEADER: &[u8] = b"Hock";
 
@@ -499,6 +505,9 @@ impl HQMServerState {
                 .position(|(_, x)| x.is_none())
                 .map(PlayerIndex);
         }
+        if self.find_player_by_addr(addr).is_some() {
+            return None;
+        }
         let player_index = find_empty_player_slot(&self.players);
         match player_index {
             Some(player_index) => {
@@ -574,7 +583,7 @@ pub(crate) struct HQMServer {
     saved_packets: Box<ArrayDeque<[ObjectPacket; 32], 192, Wrapping>>,
     saved_pings: Box<ArrayDeque<Instant, 100, Wrapping>>,
 
-    pub(crate) ban: BanCheck,
+    pub(crate) ban: Box<dyn BanCheck>,
 
     pub history_length: usize,
 }
@@ -584,7 +593,7 @@ impl HQMServer {
         initial_values: InitialGameValues,
         config: ServerConfiguration,
         physics_config: PhysicsConfiguration,
-        ban: BanCheck,
+        ban_check: Box<dyn BanCheck>,
     ) -> Self {
         let reqwest_client = reqwest::Client::new();
 
@@ -607,8 +616,7 @@ impl HQMServer {
             saved_pings: Box::new(ArrayDeque::new()),
 
             has_current_game_been_active: false,
-
-            ban,
+            ban: ban_check,
 
             history_length: 0,
             game_step: u32::MAX,
@@ -783,7 +791,7 @@ impl HQMServer {
         }
 
         // Check ban list
-        if self.ban.is_banned(addr.ip()) {
+        if self.ban.check_ip_banned(addr.ip()) != BanCheckResponse::Allowed {
             return;
         }
 
@@ -1724,4 +1732,115 @@ struct PingData {
     pub max: f32,
     pub avg: f32,
     pub deviation: f32,
+}
+
+/// Starts an HQM server. This method will not return until the server has terminated.
+pub async fn run_server<B: GameMode>(
+    port: u16,
+    public: Option<&str>,
+    config: ServerConfiguration,
+    physics_config: PhysicsConfiguration,
+    ban: Box<dyn BanCheck>,
+    mut behaviour: B,
+) -> std::io::Result<()> {
+    let initial_values = behaviour.get_initial_game_values();
+
+    let reqwest_client = reqwest::Client::new();
+
+    let mut server = HQMServer::new(initial_values, config, physics_config, ban);
+    info!("Server started");
+
+    behaviour.init((&mut server).into());
+
+    // Set up timers
+    let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
+    tick_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    let socket = Arc::new(tokio::net::UdpSocket::bind(&addr).await?);
+    info!(
+        "Server listening at address {:?}",
+        socket.local_addr().unwrap()
+    );
+
+    async fn get_http_response(
+        client: &reqwest::Client,
+        address: &str,
+    ) -> Result<SocketAddr, Box<dyn Error + Send + Sync>> {
+        let response = client.get(address).send().await?.text().await?;
+
+        let split = response.split_ascii_whitespace().collect::<Vec<&str>>();
+
+        let addr = split.get(1).unwrap_or(&"").parse::<IpAddr>()?;
+        let port = split.get(2).unwrap_or(&"").parse::<u16>()?;
+        Ok(SocketAddr::new(addr, port))
+    }
+
+    if let Some(public) = public {
+        let socket = socket.clone();
+        let reqwest_client = reqwest_client.clone();
+        let address = public.to_string();
+        tokio::spawn(async move {
+            loop {
+                let master_server = get_http_response(&reqwest_client, &address).await;
+                match master_server {
+                    Ok(addr) => {
+                        for _ in 0..60 {
+                            let msg = b"Hock\x20";
+                            let res = socket.send_to(msg, addr).await;
+                            if res.is_err() {
+                                break;
+                            }
+                            tokio::time::sleep(Duration::from_secs(10)).await;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(e);
+                        tokio::time::sleep(Duration::from_secs(15)).await;
+                    }
+                }
+            }
+        });
+    }
+    enum Msg {
+        Time,
+        Message(SocketAddr, HQMClientToServerMessage),
+    }
+
+    let timeout_stream = tokio_stream::wrappers::IntervalStream::new(tick_timer).map(|_| Msg::Time);
+    let packet_stream = {
+        let socket = socket.clone();
+        stream! {
+            let mut buf = BytesMut::with_capacity(512);
+            let codec = HQMMessageCodec;
+            loop {
+                buf.clear();
+
+                match socket.recv_buf_from(&mut buf).await {
+                    Ok((_, addr)) => {
+                        if let Ok(data) = codec.parse_message(&buf) {
+                            yield Msg::Message(addr, data)
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+    };
+    tokio::pin!(packet_stream);
+
+    let mut stream = futures::stream_select!(timeout_stream, packet_stream);
+    let mut write_buf = BytesMut::with_capacity(4096);
+    while let Some(msg) = stream.next().await {
+        match msg {
+            Msg::Time => server.tick(&socket, &mut behaviour, &mut write_buf).await,
+            Msg::Message(addr, data) => {
+                server
+                    .handle_message(addr, &socket, data, &mut behaviour, &mut write_buf)
+                    .await
+            }
+        }
+    }
+    Ok(())
 }
