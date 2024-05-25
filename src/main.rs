@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // INI Crate For configuration
 use ini::Ini;
@@ -104,12 +104,18 @@ async fn main() -> anyhow::Result<()> {
             .filter(|x| !x.is_empty())
             .collect();
 
-        let replay_saving = server_section
-            .get("replay_endpoint")
-            .map_or_else::<Box<dyn ReplaySaving>, _, _>(
-                || Box::new(FileReplaySaving::new()),
-                |url| Box::new(HttpEndpointReplaySaving::new(url.to_string())),
-            );
+        let replay_saving: Box<dyn ReplaySaving> = if let Some(url) = server_section
+            .get("replay_endpoint") {
+            Box::new(HttpEndpointReplaySaving::new(url.to_string()))
+        } else {
+            let dir = if let Some(path) = server_section
+                .get("replay_directory") {
+                PathBuf::from(path)
+            } else {
+                PathBuf::from("replays")
+            };
+            Box::new(FileReplaySaving::new(dir))
+        };
 
         fn get_optional<U, F: FnOnce(&str) -> U>(
             section: Option<&Properties>,
