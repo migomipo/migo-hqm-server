@@ -3,12 +3,14 @@ use crate::game::{
     Team,
 };
 use crate::server::{
-    HQMServer, HQMServerPlayer, HQMServerState, PlayerListExt, ServerStatePlayerItem,
+    HQMServer, HQMServerPlayer, HQMServerState, PlayerListExt, ServerPlayerData,
+    ServerStatePlayerItem,
 };
 use crate::ServerConfiguration;
 use nalgebra::{Point3, Rotation3};
 use reborrow::{ReborrowCopyTraits, ReborrowTraits};
 use std::borrow::Cow;
+use std::cmp::PartialEq;
 use std::rc::Rc;
 
 pub mod russian;
@@ -315,6 +317,31 @@ impl<'a> ServerStateMut<'a> {
     pub fn get_puck_mut(&mut self, index: usize) -> Option<&mut Puck> {
         self.state.get_puck_mut(index)
     }
+
+    pub fn add_bot(&mut self, player_name: &str) -> Option<PlayerId> {
+        self.state.add_bot(player_name)
+    }
+
+    pub fn remove_player(&mut self, player_id: PlayerId) -> bool {
+        self.state.remove_player(player_id, true)
+    }
+
+    pub fn remove_bots(&mut self) {
+        let p: Vec<_> = self
+            .players()
+            .iter()
+            .filter_map(|x| {
+                if x.player_type() == ServerPlayerType::Bot {
+                    Some(x.id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for player_id in p {
+            self.state.remove_player(player_id, true);
+        }
+    }
 }
 
 /// Immutable handle to puck and player state.
@@ -507,6 +534,19 @@ impl<'a> ServerPlayerMut<'a> {
     pub fn add_directed_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
         self.player.add_directed_server_chat_message(message);
     }
+
+    pub fn player_type(&self) -> ServerPlayerType {
+        match self.player.data {
+            ServerPlayerData::NetworkPlayer { .. } => ServerPlayerType::Player,
+            ServerPlayerData::Bot { .. } => ServerPlayerType::Bot,
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum ServerPlayerType {
+    Player,
+    Bot,
 }
 
 /// Immutable handle to player who is connected to the server.
@@ -542,6 +582,13 @@ impl<'a> ServerPlayer<'a> {
             .object
             .as_ref()
             .map(|(_, skater, team)| (*team, skater))
+    }
+
+    pub fn player_type(&self) -> ServerPlayerType {
+        match self.player.data {
+            ServerPlayerData::NetworkPlayer { .. } => ServerPlayerType::Player,
+            ServerPlayerData::Bot { .. } => ServerPlayerType::Bot,
+        }
     }
 }
 

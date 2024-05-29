@@ -499,12 +499,6 @@ impl HQMServerState {
     }
 
     fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerId> {
-        fn find_empty_player_slot(players: &[ServerStatePlayerItem]) -> Option<PlayerIndex> {
-            return players
-                .iter()
-                .position(|(_, x)| x.is_none())
-                .map(PlayerIndex);
-        }
         if self.find_player_by_addr(addr).is_some() {
             return None;
         }
@@ -517,6 +511,27 @@ impl HQMServerState {
                     addr,
                     &self.persistent_messages,
                 );
+                let update = new_player.get_update_message(player_index);
+
+                self.players[player_index.0].1 = Some(new_player);
+                let player_id = PlayerId {
+                    index: player_index,
+                    gen: self.players[player_index.0].0,
+                };
+
+                self.add_global_message(update, true, true);
+
+                Some(player_id)
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn add_bot(&mut self, player_name: &str) -> Option<PlayerId> {
+        let player_index = find_empty_player_slot(&self.players);
+        match player_index {
+            Some(player_index) => {
+                let new_player = HQMServerPlayer::new_bot(player_name);
                 let update = new_player.get_update_message(player_index);
 
                 self.players[player_index.0].1 = Some(new_player);
@@ -555,6 +570,13 @@ impl HQMServerState {
         let res = self.replay_queue.pop_front();
         res
     }
+}
+
+fn find_empty_player_slot(players: &[ServerStatePlayerItem]) -> Option<PlayerIndex> {
+    return players
+        .iter()
+        .position(|(_, x)| x.is_none())
+        .map(PlayerIndex);
 }
 
 pub(crate) struct HQMServer {
@@ -684,7 +706,7 @@ impl HQMServer {
         writer.write_bits(8, 55);
         writer.write_u32_aligned(ping);
 
-        let player_count = self.player_count();
+        let player_count = self.real_player_count();
         writer.write_bits(8, player_count as u32);
         writer.write_bits(4, 4);
         writer.write_bits(4, behaviour.server_list_team_size() as u32);
@@ -698,11 +720,12 @@ impl HQMServer {
         let _ = socket.send_to(slice, addr).await;
     }
 
-    fn player_count(&self) -> usize {
+    fn real_player_count(&self) -> usize {
         let mut player_count = 0;
         for (_, player) in self.state.players.iter_players() {
             let is_actual_player = match player.data {
                 ServerPlayerData::NetworkPlayer { .. } => true,
+                ServerPlayerData::Bot { .. } => false,
             };
             if is_actual_player {
                 player_count += 1;
@@ -777,7 +800,7 @@ impl HQMServer {
         name: String,
         behaviour: &mut B,
     ) {
-        let player_count = self.player_count();
+        let player_count = self.real_player_count();
         let max_player_count = self.config.player_max;
         if player_count >= max_player_count {
             return; // Ignore join request
@@ -1263,7 +1286,7 @@ impl HQMServer {
         behaviour: &mut B,
         write_buf: &mut BytesMut,
     ) {
-        if self.player_count() != 0 {
+        if self.real_player_count() != 0 {
             if !self.has_current_game_been_active {
                 self.start_time = Utc::now();
                 self.has_current_game_been_active = true;
@@ -1312,7 +1335,6 @@ impl HQMServer {
         } else if self.has_current_game_been_active {
             info!("Game {} abandoned", self.game_id);
             self.new_game(behaviour.get_initial_game_values());
-            behaviour.game_started(self.into());
             self.allow_join = true;
         }
     }
@@ -1523,6 +1545,7 @@ pub enum MuteStatus {
     ShadowMuted,
     Muted,
 }
+
 pub(crate) struct NetworkPlayerData {
     pub addr: SocketAddr,
     pub(crate) client_version: HQMClientVersion,
@@ -1537,8 +1560,11 @@ pub(crate) struct NetworkPlayerData {
     pub(crate) messages: Vec<Rc<HQMMessage>>,
 }
 
+pub(crate) struct BotPlayerData {}
+
 pub(crate) enum ServerPlayerData {
     NetworkPlayer { data: NetworkPlayerData },
+    Bot {},
 }
 
 pub(crate) struct HQMServerPlayer {
@@ -1581,6 +1607,20 @@ impl HQMServerPlayer {
                     messages: global_messages.into_iter().cloned().collect(),
                 },
             },
+            is_admin: false,
+            input: Default::default(),
+            is_muted: MuteStatus::NotMuted,
+            preferred_hand: SkaterHand::Right,
+        }
+    }
+
+    pub fn new_bot(player_name: &str) -> Self {
+        HQMServerPlayer {
+            player_name: player_name.into(),
+            player_name_red: format!("[Red] {}", player_name).into(),
+            player_name_blue: format!("[Blue] {}", player_name).into(),
+            object: None,
+            data: ServerPlayerData::Bot {},
             is_admin: false,
             input: Default::default(),
             is_muted: MuteStatus::NotMuted,
@@ -1651,6 +1691,7 @@ impl HQMServerPlayer {
                     deviation: dev,
                 })
             }
+            ServerPlayerData::Bot { .. } => None,
         }
     }
 
