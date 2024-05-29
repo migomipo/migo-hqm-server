@@ -15,14 +15,12 @@ pub trait ReplaySaving {
 }
 
 pub struct FileReplaySaving {
-    directory: PathBuf
+    directory: PathBuf,
 }
 
 impl FileReplaySaving {
     pub fn new(directory: PathBuf) -> Self {
-        Self {
-            directory
-        }
+        Self { directory }
     }
 }
 

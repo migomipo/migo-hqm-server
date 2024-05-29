@@ -104,18 +104,17 @@ async fn main() -> anyhow::Result<()> {
             .filter(|x| !x.is_empty())
             .collect();
 
-        let replay_saving: Box<dyn ReplaySaving> = if let Some(url) = server_section
-            .get("replay_endpoint") {
-            Box::new(HttpEndpointReplaySaving::new(url.to_string()))
-        } else {
-            let dir = if let Some(path) = server_section
-                .get("replay_directory") {
-                PathBuf::from(path)
+        let replay_saving: Box<dyn ReplaySaving> =
+            if let Some(url) = server_section.get("replay_endpoint") {
+                Box::new(HttpEndpointReplaySaving::new(url.to_string()))
             } else {
-                PathBuf::from("replays")
+                let dir = if let Some(path) = server_section.get("replay_directory") {
+                    PathBuf::from(path)
+                } else {
+                    PathBuf::from("replays")
+                };
+                Box::new(FileReplaySaving::new(dir))
             };
-            Box::new(FileReplaySaving::new(dir))
-        };
 
         fn get_optional<U, F: FnOnce(&str) -> U>(
             section: Option<&Properties>,
