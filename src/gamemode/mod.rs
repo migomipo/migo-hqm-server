@@ -269,6 +269,17 @@ impl<'a> ServerStateMut<'a> {
             .add_directed_server_chat_message(message, receiver_index);
     }
 
+    pub fn add_user_chat_message(
+        &mut self,
+        message: impl Into<Cow<'static, str>>,
+        sender_index: PlayerId,
+    ) {
+        if self.state.players.get_player(sender_index).is_some() {
+            self.state
+                .add_user_chat_message(message, sender_index.index);
+        }
+    }
+
     pub fn add_goal_message(
         &mut self,
         team: Team,
@@ -505,8 +516,12 @@ impl<'a> ServerPlayerMut<'a> {
         self.player.team()
     }
 
-    pub fn input(&self) -> PlayerInput {
-        self.player.input.clone()
+    pub fn input(&self) -> &PlayerInput {
+        &self.player.input
+    }
+
+    pub fn input_mut(&mut self) -> &mut PlayerInput {
+        &mut self.player.input
     }
 
     pub fn is_admin(&self) -> bool {
@@ -565,8 +580,8 @@ impl<'a> ServerPlayer<'a> {
         self.player.team()
     }
 
-    pub fn input(&self) -> PlayerInput {
-        self.player.input.clone()
+    pub fn input(&self) -> &PlayerInput {
+        &self.player.input
     }
 
     pub fn is_admin(&self) -> bool {

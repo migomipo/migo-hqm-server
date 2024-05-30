@@ -1027,7 +1027,7 @@ impl HQMServer {
             .iter_players()
             .filter(|(x, _)| x.index.0 >= first_index)
             .take(5)
-            .map(|(player_index, player)| format!("{}: {}", player_index, player.player_name))
+            .map(|(player_index, player)| format!("{}: {}", player_index.index, player.player_name))
             .collect();
         for msg in res {
             self.state
