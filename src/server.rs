@@ -1560,8 +1560,6 @@ pub(crate) struct NetworkPlayerData {
     pub(crate) messages: Vec<Rc<HQMMessage>>,
 }
 
-pub(crate) struct BotPlayerData {}
-
 pub(crate) enum ServerPlayerData {
     NetworkPlayer { data: NetworkPlayerData },
     Bot {},
