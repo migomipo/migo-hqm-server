@@ -7,12 +7,11 @@ build = "src/build.rs"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-arr_macro = "0.2.1"
 nalgebra = "0.32"
 tokio = { version = "1", features = ["net", "time", "macros", "rt-multi-thread", "sync", "fs", "parking_lot"] }
 rust-ini = "0.21.0" # INI For configuration
 bytes = "1.6"
-reqwest = { version = "0.12", default_features=false, features = ["multipart", "rustls-tls"] }
+reqwest = { version = "0.12", default-features=false, features = ["multipart", "rustls-tls"] }
 tracing = "0.1"
 tracing-subscriber = {version="0.3", features = ["parking_lot"]}
 tracing-appender = "0.2"

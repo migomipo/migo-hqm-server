@@ -3,7 +3,6 @@ use nalgebra::{point, Matrix3, Point3, Rotation3, Unit, Vector2, Vector3};
 
 use crate::game::RinkSideOfLine::{BlueSide, On, RedSide};
 use crate::protocol::{PuckPacket, SkaterPacket};
-use arr_macro::arr;
 use std::f32::consts::PI;
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -587,7 +586,7 @@ impl Puck {
     }
 
     pub(crate) fn get_puck_vertices(&self) -> [Point3<f32>; 48] {
-        let mut res = arr![point![0.0, 0.0, 0.0]; 48];
+        let mut res = [const { point![0.0, 0.0, 0.0] }; 48];
         for i in 0..16 {
             let (sin, cos) = ((i as f32) * PI / 8.0).sin_cos();
             for j in -1..=1 {

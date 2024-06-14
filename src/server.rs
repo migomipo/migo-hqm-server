@@ -8,7 +8,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arr_macro::arr;
 use arraydeque::{ArrayDeque, Wrapping};
 use async_stream::stream;
 use bytes::{BufMut, BytesMut};
@@ -1238,7 +1237,7 @@ impl HQMServer {
     }
 
     fn get_packets(&self) -> [ObjectPacket; 32] {
-        let mut packets = arr![ObjectPacket::None; 32];
+        let mut packets = [const { ObjectPacket::None }; 32];
         for (i, puck) in self.state.pucks.iter().enumerate() {
             if let Some(puck) = puck {
                 packets[i] = ObjectPacket::Puck(puck.get_packet())
