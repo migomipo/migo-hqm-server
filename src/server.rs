@@ -230,7 +230,7 @@ impl HQMServerState {
         self.replay_queue.clear();
         self.saved_history.clear();
 
-        let mut messages = smallvec::SmallVec::<[(HQMMessage, bool, bool); 32]>::new();
+        let mut messages = Vec::new();
         for (player_index, (_, p)) in self.players.iter_mut().enumerate() {
             let player_index = PlayerIndex(player_index);
             if let Some(player) = p {
@@ -1122,9 +1122,9 @@ impl HQMServer {
         found
     }
 
-    pub fn player_search(&self, name: &str) -> smallvec::SmallVec<[(PlayerId, Rc<str>); 64]> {
+    pub fn player_search(&self, name: &str) -> Vec<(PlayerId, Rc<str>)> {
         let name = name.to_lowercase();
-        let mut found = smallvec::SmallVec::<[_; 64]>::new();
+        let mut found = Vec::new();
         for (player_index, player) in self.state.players.iter_players() {
             if player.player_name.to_lowercase().contains(&name) {
                 found.push((player_index, player.player_name.clone()));

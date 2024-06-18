@@ -5,6 +5,7 @@ use crate::game::{
 };
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::server::{HQMServer, PlayerListExt};
+use arrayvec::ArrayVec;
 use nalgebra::{vector, Point3, Rotation3, Unit, Vector2, Vector3};
 use smallvec::SmallVec;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
@@ -29,9 +30,9 @@ type CollisionList = SmallVec<[Collision; 32]>;
 impl HQMServer {
     pub(crate) fn simulate_step(&mut self) -> PhysicsEventList {
         let mut events: PhysicsEventList = SmallVec::new();
-        let mut players: SmallVec<[(PlayerId, &mut SkaterObject, &mut PlayerInput); 32]> =
-            SmallVec::new();
-        let mut pucks: SmallVec<[(usize, &mut Puck); 32]> = SmallVec::new();
+        let mut players: ArrayVec<(PlayerId, &mut SkaterObject, &mut PlayerInput), 32> =
+            ArrayVec::new();
+        let mut pucks: ArrayVec<(usize, &mut Puck, Point3<f32>), 32> = ArrayVec::new();
         for (i, p) in self.state.players.iter_players_mut() {
             if let Some((_, skater, _)) = &mut p.object {
                 players.push((i, skater, &mut p.input));
@@ -39,7 +40,8 @@ impl HQMServer {
         }
         for (i, p) in self.state.pucks.iter_mut().enumerate() {
             if let Some(p) = p {
-                pucks.push((i, p));
+                let old_pos = p.body.pos.clone();
+                pucks.push((i, p, old_pos));
             }
         }
 
@@ -93,10 +95,7 @@ impl HQMServer {
             }
         }
 
-        let pucks_old_pos: SmallVec<[Point3<f32>; 32]> =
-            pucks.iter().map(|x| x.1.body.pos.clone()).collect();
-
-        for (_, puck) in pucks.iter_mut() {
+        for (_, puck, _) in pucks.iter_mut() {
             puck.body.linear_velocity[1] -= self.physics_config.gravity;
         }
 
@@ -108,7 +107,7 @@ impl HQMServer {
             &self.physics_config,
         );
 
-        for ((puck_index, puck), old_puck_pos) in pucks.iter_mut().zip(pucks_old_pos.iter()) {
+        for (puck_index, puck, old_puck_pos) in pucks.iter_mut() {
             if puck.body.linear_velocity.norm() > 1.0 / 65536.0 {
                 let scale = puck.body.linear_velocity.norm().powi(2) * 0.125 * 0.125;
                 let scaled = scale * puck.body.linear_velocity.normalize();
@@ -132,7 +131,7 @@ impl HQMServer {
 
 fn update_sticks_and_pucks(
     players: &mut [(PlayerId, &mut SkaterObject, &mut PlayerInput)],
-    pucks: &mut [(usize, &mut Puck)],
+    pucks: &mut [(usize, &mut Puck, Point3<f32>)],
     rink: &Rink,
     events: &mut PhysicsEventList,
     physics_config: &PhysicsConfiguration,
@@ -141,7 +140,7 @@ fn update_sticks_and_pucks(
         for (_, player, _) in players.iter_mut() {
             player.stick_pos += 0.1 * player.stick_velocity;
         }
-        for (puck_index, puck) in pucks.iter_mut() {
+        for (puck_index, puck, _) in pucks.iter_mut() {
             puck.body.pos += 0.1 * puck.body.linear_velocity;
 
             let puck_linear_velocity_before = puck.body.linear_velocity.clone_owned();
@@ -549,7 +548,7 @@ fn apply_collisions(
 ) {
     for _ in 0..16 {
         let original_ball_velocities =
-            SmallVec::<[_; 32]>::from_iter(players.iter().map(|(_, skater, _)| {
+            ArrayVec::<_, 32>::from_iter(players.iter().map(|(_, skater, _)| {
                 SmallVec::<[_; 8]>::from_iter(
                     skater
                         .collision_balls
