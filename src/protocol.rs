@@ -57,7 +57,8 @@ impl HQMMessageCodec {
         src: &[u8],
     ) -> Result<HQMClientToServerMessage, HQMClientToServerMessageDecoderError> {
         let mut parser = HQMMessageReader::new(&src);
-        let header = parser.read_bytes_aligned(4);
+        let mut header = [0; 4];
+        parser.read_bytes_aligned(&mut header);
         if header != GAME_HEADER {
             return Err(HQMClientToServerMessageDecoderError::WrongHeader);
         }
@@ -88,8 +89,9 @@ impl HQMMessageCodec {
         parser: &mut HQMMessageReader,
     ) -> Result<HQMClientToServerMessage, HQMClientToServerMessageDecoderError> {
         let version = parser.read_bits(8);
-        let player_name = parser.read_bytes_aligned(32);
-        let player_name = get_player_name(player_name)?;
+        let mut player_name = [0; 32];
+        parser.read_bytes_aligned(&mut player_name);
+        let player_name = get_player_name(&player_name)?;
         Ok(HQMClientToServerMessage::Join {
             version,
             player_name,
@@ -136,8 +138,10 @@ impl HQMMessageCodec {
             if has_chat_msg {
                 let rep = parser.read_bits(3) as u8;
                 let byte_num = parser.read_bits(8) as usize;
-                let message = parser.read_bytes_aligned(byte_num);
-                let msg = String::from_utf8(message)?;
+                let mut bytes = [0; 256];
+
+                parser.read_bytes_aligned(&mut bytes[0..byte_num]);
+                let msg = String::from_utf8((&mut bytes[0..byte_num]).to_vec())?;
                 Some((rep, msg))
             } else {
                 None
@@ -174,7 +178,7 @@ impl From<FromUtf8Error> for HQMClientToServerMessageDecoderError {
     }
 }
 
-fn get_player_name(bytes: Vec<u8>) -> Result<String, FromUtf8Error> {
+fn get_player_name(bytes: &[u8]) -> Result<String, FromUtf8Error> {
     let first_null = bytes.iter().position(|x| *x == 0);
 
     let bytes = match first_null {
@@ -414,15 +418,15 @@ impl<'a> HQMMessageReader<'a> {
         return res;
     }
 
-    pub fn read_bytes_aligned(&mut self, n: usize) -> Vec<u8> {
-        self.align();
 
-        let mut res = Vec::with_capacity(n);
-        for i in self.pos..(self.pos + n) {
-            res.push(self.safe_get_byte(i))
+    pub fn read_bytes_aligned(&mut self, out: &mut [u8]) {
+        self.align();
+        let n = out.len();
+
+        for i in 0..n {
+            out[i] = self.safe_get_byte(self.pos + i)
         }
         self.pos = self.pos + n;
-        return res;
     }
 
     pub fn read_u16_aligned(&mut self) -> u16 {
