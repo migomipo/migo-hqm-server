@@ -418,7 +418,6 @@ impl<'a> HQMMessageReader<'a> {
         return res;
     }
 
-
     pub fn read_bytes_aligned(&mut self, out: &mut [u8]) {
         self.align();
         let n = out.len();
@@ -488,10 +487,12 @@ impl<'a> HQMMessageReader<'a> {
     }
 
     pub fn read_bits(&mut self, b: u8) -> u32 {
-        let mut bits_remaining = b;
         let mut res = 0u32;
         let mut p = 0;
-        while bits_remaining > 0 {
+        while p < b {
+            let byte = self.safe_get_byte(self.pos) >> self.bit_pos;
+
+            let bits_remaining = b - p;
             let bits_possible_to_write = 8 - self.bit_pos;
             let bits = min(bits_remaining, bits_possible_to_write);
 
@@ -500,19 +501,16 @@ impl<'a> HQMMessageReader<'a> {
             } else {
                 !(u8::MAX << bits)
             };
-            let a = (self.safe_get_byte(self.pos) >> self.bit_pos) & mask;
+            let a = byte & mask;
             let a: u32 = a.into();
             res = res | (a << p);
 
-            if bits_remaining >= bits_possible_to_write {
-                bits_remaining -= bits_possible_to_write;
+            self.bit_pos += bits;
+            if self.bit_pos == 8 {
                 self.bit_pos = 0;
                 self.pos += 1;
-                p += bits;
-            } else {
-                self.bit_pos += bits_remaining;
-                bits_remaining = 0;
             }
+            p += bits;
         }
         return res;
     }
