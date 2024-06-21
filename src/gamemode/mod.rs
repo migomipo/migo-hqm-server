@@ -146,21 +146,6 @@ impl<'a> ServerMut<'a> {
         &mut self.server.scoreboard
     }
 
-    pub fn game_step(&self) -> u32 {
-        self.server.game_step
-    }
-
-    /// Adds a replay to the replay queue.
-    pub fn add_replay_to_queue(
-        &mut self,
-        start_step: u32,
-        end_step: u32,
-        force_view: Option<PlayerId>,
-    ) {
-        self.server
-            .add_replay_to_queue(start_step, end_step, force_view)
-    }
-
     pub fn set_history_length(&mut self, v: usize) {
         self.server.history_length = v;
     }
@@ -200,10 +185,6 @@ impl<'a> Server<'a> {
         &self.server.scoreboard
     }
 
-    pub fn game_step(&self) -> u32 {
-        self.server.game_step
-    }
-
     pub fn config(&self) -> &ServerConfiguration {
         &self.server.config
     }
@@ -234,6 +215,24 @@ impl<'a> ServerStateMut<'a> {
             },
             pucks: &mut self.state.pucks,
         }
+    }
+    pub fn game_step(&self) -> u32 {
+        self.state.game_step
+    }
+
+    /// Adds a replay to the replay queue.
+    pub fn add_replay_to_queue(
+        &mut self,
+        start_step: u32,
+        end_step: u32,
+        force_view: Option<PlayerId>,
+    ) {
+        self.state
+            .add_replay_to_queue(start_step, end_step, force_view)
+    }
+
+    pub fn is_in_replay(&self) -> bool {
+        self.state.is_in_replay()
     }
 
     pub fn players(&self) -> ServerPlayerList {
@@ -362,6 +361,13 @@ pub struct ServerState<'a> {
 }
 
 impl<'a> ServerState<'a> {
+    pub fn game_step(&self) -> u32 {
+        self.state.game_step
+    }
+
+    pub fn is_in_replay(&self) -> bool {
+        self.state.is_in_replay()
+    }
     pub fn players(&self) -> ServerPlayerList {
         ServerPlayerList {
             players: &self.state.players,

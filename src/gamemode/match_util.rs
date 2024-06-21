@@ -197,7 +197,7 @@ impl Match {
         self.twoline_pass_status = TwoLinePassStatus::No;
         self.pass = None;
 
-        self.faceoff_game_step = server.game_step();
+        self.faceoff_game_step = server.state().game_step();
     }
 
     pub(crate) fn update_game_over(&mut self, mut server: ServerMut) {
@@ -348,7 +348,7 @@ impl Match {
 
         self.update_game_over(server.rb_mut());
 
-        let gamestep = server.game_step();
+        let gamestep = server.state().game_step();
 
         if self.config.goal_replay {
             let force_view = goal_scorer_index.or(last_touch);
@@ -376,6 +376,7 @@ impl Match {
         for event in events {
             if let PhysicsEvent::PuckEnteredNet { .. } = event {
                 let time = server
+                    .state()
                     .game_step()
                     .saturating_sub(self.step_where_period_ended);
                 if time <= 300 && !self.too_late_printed_this_period {
@@ -827,8 +828,10 @@ impl Match {
         self.update_clock(server.rb_mut());
 
         if let Some((start_replay, end_replay, force_view)) = self.start_next_replay {
-            if end_replay <= server.game_step() {
-                server.add_replay_to_queue(start_replay, end_replay, force_view);
+            if end_replay <= server.state().game_step() {
+                server
+                    .state_mut()
+                    .add_replay_to_queue(start_replay, end_replay, force_view);
                 server.state_mut().add_server_chat_message("Goal replay");
                 self.start_next_replay = None;
             }
@@ -862,7 +865,7 @@ impl Match {
                     values.period += 1;
                     self.pause_timer = intermission_time;
                     self.is_pause_goal = false;
-                    self.step_where_period_ended = server.game_step();
+                    self.step_where_period_ended = server.state().game_step();
                     self.too_late_printed_this_period = false;
                     self.next_faceoff_spot = RinkFaceoffSpot::Center;
                     self.update_game_over(server.rb_mut());

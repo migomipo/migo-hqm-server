@@ -114,6 +114,29 @@ pub(crate) trait PlayerListExt {
             None
         }
     }
+
+    fn find_player_by_addr(&self, addr: SocketAddr) -> Option<(PlayerId, &HQMServerPlayer)> {
+        self.iter_players().find(|(_, x)| {
+            if let ServerPlayerData::NetworkPlayer { data } = &x.data {
+                data.addr == addr
+            } else {
+                false
+            }
+        })
+    }
+
+    fn find_player_by_addr_mut(
+        &mut self,
+        addr: SocketAddr,
+    ) -> Option<(PlayerId, &mut HQMServerPlayer)> {
+        self.iter_players_mut().find(|(_, x)| {
+            if let ServerPlayerData::NetworkPlayer { data } = &x.data {
+                data.addr == addr
+            } else {
+                false
+            }
+        })
+    }
 }
 
 pub(crate) type ServerStatePlayerItem = (u32, Option<HQMServerPlayer>);
@@ -198,6 +221,8 @@ impl PlayerListExt for [ServerStatePlayerItem] {
 }
 
 pub(crate) struct HQMServerState {
+    pub game_step: u32,
+
     pub(crate) players: Vec<ServerStatePlayerItem>,
     pub(crate) pucks: Vec<Option<Puck>>,
     persistent_messages: Vec<Rc<HQMMessage>>,
@@ -205,6 +230,15 @@ pub(crate) struct HQMServerState {
 
     replay_queue: VecDeque<(Option<PlayerId>, ReplayTick)>,
     saved_history: VecDeque<ReplayTick>,
+
+    packet: u32,
+    replay_data: BytesMut,
+    replay_msg_pos: usize,
+    replay_last_packet: u32,
+
+    saved_packets: Box<ArrayDeque<[ObjectPacket; 32], 192, Wrapping>>,
+
+    saved_pings: Box<ArrayDeque<Instant, 100, Wrapping>>,
 }
 
 impl HQMServerState {
@@ -215,12 +249,22 @@ impl HQMServerState {
         }
         let pucks = vec![None; puck_slots];
         Self {
+            game_step: u32::MAX,
             players,
             pucks,
             persistent_messages: vec![],
             replay_messages: vec![],
             replay_queue: Default::default(),
             saved_history: Default::default(),
+
+            replay_data: BytesMut::with_capacity(64 * 1024 * 1024),
+            replay_msg_pos: 0,
+            packet: u32::MAX,
+            replay_last_packet: u32::MAX,
+
+            saved_packets: Box::new(ArrayDeque::new()),
+
+            saved_pings: Box::new(ArrayDeque::new()),
         }
     }
 
@@ -229,6 +273,14 @@ impl HQMServerState {
         self.persistent_messages.clear();
         self.replay_queue.clear();
         self.saved_history.clear();
+        self.game_step = u32::MAX;
+        self.replay_msg_pos = 0;
+        self.packet = u32::MAX;
+        self.replay_last_packet = u32::MAX;
+
+        self.saved_packets.clear();
+
+        self.saved_pings.clear();
 
         let mut messages = Vec::new();
         for (player_index, (_, p)) in self.players.iter_mut().enumerate() {
@@ -245,32 +297,6 @@ impl HQMServerState {
         for (message, persistent, replay) in messages {
             self.add_global_message(message, persistent, replay);
         }
-    }
-
-    pub(crate) fn find_player_by_addr(
-        &self,
-        addr: SocketAddr,
-    ) -> Option<(PlayerId, &HQMServerPlayer)> {
-        self.players.iter_players().find(|(_, x)| {
-            if let ServerPlayerData::NetworkPlayer { data } = &x.data {
-                data.addr == addr
-            } else {
-                false
-            }
-        })
-    }
-
-    pub(crate) fn find_player_by_addr_mut(
-        &mut self,
-        addr: SocketAddr,
-    ) -> Option<(PlayerId, &mut HQMServerPlayer)> {
-        self.players.iter_players_mut().find(|(_, x)| {
-            if let ServerPlayerData::NetworkPlayer { data } = &x.data {
-                data.addr == addr
-            } else {
-                false
-            }
-        })
     }
 
     pub fn add_user_chat_message(
@@ -470,6 +496,34 @@ impl HQMServerState {
         false
     }
 
+    pub fn is_in_replay(&self) -> bool {
+        !self.replay_queue.is_empty()
+    }
+
+    pub fn add_replay_to_queue(
+        &mut self,
+        start_step: u32,
+        end_step: u32,
+        force_view: Option<PlayerId>,
+    ) {
+        if start_step > end_step {
+            warn!("start_step must be less than or equal to end_step");
+            return;
+        }
+
+        let game_step = self.game_step;
+
+        let i_end = game_step.saturating_sub(end_step) as usize;
+        let i_start = game_step.saturating_sub(start_step) as usize;
+
+        let data = self
+            .saved_history
+            .range(i_end..=i_start)
+            .rev()
+            .map(|x| (force_view, x.clone()));
+        self.replay_queue.extend(data);
+    }
+
     pub fn get_puck(&self, index: usize) -> Option<&Puck> {
         self.pucks.get(index).map(|x| x.as_ref()).flatten()
     }
@@ -498,7 +552,7 @@ impl HQMServerState {
     }
 
     fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerId> {
-        if self.find_player_by_addr(addr).is_some() {
+        if self.players.find_player_by_addr(addr).is_some() {
             return None;
         }
         let player_index = find_empty_player_slot(&self.players);
@@ -589,19 +643,10 @@ pub(crate) struct HQMServer {
     pub rink: Rink,
 
     game_id: u32,
-    pub game_step: u32,
     pub is_muted: bool,
     pub start_time: DateTime<Utc>,
 
     has_current_game_been_active: bool,
-
-    packet: u32,
-    replay_data: BytesMut,
-    replay_msg_pos: usize,
-    replay_last_packet: u32,
-
-    saved_packets: Box<ArrayDeque<[ObjectPacket; 32], 192, Wrapping>>,
-    saved_pings: Box<ArrayDeque<Instant, 100, Wrapping>>,
 
     pub(crate) ban: Box<dyn BanCheck>,
     pub(crate) replay: Box<dyn ReplaySaving>,
@@ -627,20 +672,11 @@ impl HQMServer {
             config,
             game_id: 1,
 
-            replay_data: BytesMut::with_capacity(64 * 1024 * 1024),
-            replay_msg_pos: 0,
-            packet: u32::MAX,
-            replay_last_packet: u32::MAX,
-
-            saved_packets: Box::new(ArrayDeque::new()),
-            saved_pings: Box::new(ArrayDeque::new()),
-
             has_current_game_been_active: false,
             ban,
             replay,
 
             history_length: 0,
-            game_step: u32::MAX,
             start_time: Default::default(),
             rink: Rink::new(30.0, 61.0, 8.5),
         };
@@ -745,7 +781,7 @@ impl HQMServer {
         client_version: HQMClientVersion,
         behaviour: &mut B,
     ) {
-        let (player_id, player) = match self.state.find_player_by_addr_mut(addr) {
+        let (player_id, player) = match self.state.players.find_player_by_addr_mut(addr) {
             Some(x) => x,
             None => {
                 return;
@@ -756,8 +792,9 @@ impl HQMServer {
 
             let duration_since_packet =
                 if data.game_id == current_game_id && data.known_packet < new_known_packet {
-                    let ticks = &self.saved_pings;
-                    self.packet
+                    let ticks = &self.state.saved_pings;
+                    self.state
+                        .packet
                         .checked_sub(new_known_packet)
                         .and_then(|diff| ticks.get(diff as usize))
                         .and_then(|last_time_received| {
@@ -807,7 +844,7 @@ impl HQMServer {
         if player_version != 55 {
             return; // Not the right version
         }
-        let current_slot = self.state.find_player_by_addr(addr);
+        let current_slot = self.state.players.find_player_by_addr(addr);
         if current_slot.is_some() {
             return; // Player has already joined
         }
@@ -1170,7 +1207,7 @@ impl HQMServer {
     }
 
     fn player_exit<B: GameMode>(&mut self, addr: SocketAddr, behaviour: &mut B) {
-        let player = self.state.find_player_by_addr(addr);
+        let player = self.state.players.find_player_by_addr(addr);
 
         if let Some((player_id, player)) = player {
             let player_name = player.player_name.clone();
@@ -1207,7 +1244,7 @@ impl HQMServer {
     }
 
     fn game_step<B: GameMode>(&mut self, behaviour: &mut B) {
-        self.game_step = self.game_step.wrapping_add(1);
+        self.state.game_step = self.state.game_step.wrapping_add(1);
 
         let events = self.simulate_step();
 
@@ -1217,7 +1254,7 @@ impl HQMServer {
 
         if self.history_length > 0 {
             let new_replay_tick = ReplayTick {
-                game_step: self.game_step,
+                game_step: self.state.game_step,
                 packets: packets.clone(),
             };
             self.state.saved_history.truncate(self.history_length - 1);
@@ -1226,8 +1263,8 @@ impl HQMServer {
             self.state.saved_history.clear();
         }
 
-        self.saved_packets.push_front(packets);
-        self.packet = self.packet.wrapping_add(1);
+        self.state.saved_packets.push_front(packets);
+        self.state.packet = self.state.packet.wrapping_add(1);
 
         if self.config.replays_enabled != ReplayRecording::Off
             && behaviour.include_tick_in_replay((&*self).into())
@@ -1305,26 +1342,26 @@ impl HQMServer {
                     let game_step = tick.game_step;
                     let packets = tick.packets;
 
-                    self.saved_packets.push_front(packets);
+                    self.state.saved_packets.push_front(packets);
 
-                    self.packet = self.packet.wrapping_add(1);
+                    self.state.packet = self.state.packet.wrapping_add(1);
                     (game_step, forced_view)
                 } else {
                     self.game_step(behaviour);
-                    (self.game_step, None)
+                    (self.state.game_step, None)
                 };
 
-                self.saved_pings.push_front(Instant::now());
+                self.state.saved_pings.push_front(Instant::now());
 
                 res
             });
 
             send_updates(
                 self.game_id,
-                &self.saved_packets,
+                &self.state.saved_packets,
                 game_step,
                 &self.scoreboard,
-                self.packet,
+                self.state.packet,
                 &self.state.players,
                 socket,
                 forced_view,
@@ -1338,12 +1375,12 @@ impl HQMServer {
         }
     }
 
-    fn save_replay(&mut self, old_replay_data: BytesMut) {
+    fn save_replay(&mut self, old_replay_data: &[u8]) {
         let size = old_replay_data.len();
         let mut replay_data = BytesMut::with_capacity(size + 8);
         replay_data.put_u32_le(0u32);
         replay_data.put_u32_le(size as u32);
-        replay_data.put_slice(&old_replay_data);
+        replay_data.put_slice(old_replay_data);
         let replay_data = replay_data.freeze();
         self.replay
             .save_replay_data(&self.config, replay_data, self.start_time);
@@ -1352,61 +1389,28 @@ impl HQMServer {
         self.scoreboard = v.values;
         self.game_id += 1;
 
-        self.replay_msg_pos = 0;
-        self.packet = u32::MAX;
-        self.replay_last_packet = u32::MAX;
-        self.game_step = u32::MAX;
-
-        self.saved_packets.clear();
-        self.saved_pings.clear();
-
         self.has_current_game_been_active = false;
 
-        let old_replay_data = std::mem::replace(&mut self.replay_data, BytesMut::new());
+        let old_replay_data = std::mem::replace(&mut self.state.replay_data, BytesMut::new());
 
         if self.config.replays_enabled == ReplayRecording::On && !old_replay_data.is_empty() {
-            self.save_replay(old_replay_data);
+            self.save_replay(&old_replay_data);
         }
 
         self.state.new_game(v.puck_slots);
     }
 
-    pub fn add_replay_to_queue(
-        &mut self,
-        start_step: u32,
-        end_step: u32,
-        force_view: Option<PlayerId>,
-    ) {
-        if start_step > end_step {
-            warn!("start_step must be less than or equal to end_step");
-            return;
-        }
-
-        let game_step = self.game_step;
-
-        let i_end = game_step.saturating_sub(end_step) as usize;
-        let i_start = game_step.saturating_sub(start_step) as usize;
-
-        let data = self
-            .state
-            .saved_history
-            .range(i_end..=i_start)
-            .rev()
-            .map(|x| (force_view, x.clone()));
-        self.state.replay_queue.extend(data);
-    }
-
     fn write_replay(&mut self) {
-        let replay_messages_to_send = &self.state.replay_messages[self.replay_msg_pos..];
+        let replay_messages_to_send = &self.state.replay_messages[self.state.replay_msg_pos..];
         let remaining_messages = replay_messages_to_send.len();
-        self.replay_data.reserve(
+        self.state.replay_data.reserve(
             9 // Header, time, score, period, etc.
             + 8 // Position metadata
             + (32*30) // 32 objects that can be at most 30 bytes each
             + 4 // Message metadata
             + remaining_messages * 66, // Chat message can be up to 66 bytes each
         );
-        let mut writer = HQMMessageWriter::new(&mut self.replay_data);
+        let mut writer = HQMMessageWriter::new(&mut self.state.replay_data);
 
         writer.write_byte_aligned(5);
         writer.write_bits(
@@ -1423,18 +1427,23 @@ impl HQMServer {
         writer.write_bits(16, self.scoreboard.goal_message_timer);
         writer.write_bits(8, self.scoreboard.period); // 8.1
 
-        let packets = &self.saved_packets;
+        let packets = &self.state.saved_packets;
 
-        write_objects(&mut writer, packets, self.packet, self.replay_last_packet);
-        self.replay_last_packet = self.packet;
+        write_objects(
+            &mut writer,
+            packets,
+            self.state.packet,
+            self.state.replay_last_packet,
+        );
+        self.state.replay_last_packet = self.state.packet;
 
         writer.write_bits(16, remaining_messages as u32);
-        writer.write_bits(16, self.replay_msg_pos as u32);
+        writer.write_bits(16, self.state.replay_msg_pos as u32);
 
         for message in replay_messages_to_send {
             write_message(&mut writer, Rc::as_ref(message));
         }
-        self.replay_msg_pos = self.state.replay_messages.len();
+        self.state.replay_msg_pos = self.state.replay_messages.len();
         writer.replay_fix();
     }
 }
