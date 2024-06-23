@@ -659,7 +659,7 @@ impl GameMode for ShootoutGameMode {
         self.team_max as u32
     }
 
-    fn include_tick_in_replay(&self, _server: Server) -> bool {
+    fn include_tick_in_recording(&self, _server: Server) -> bool {
         !matches!(self.status, ShootoutStatus::WaitingForGame)
     }
 }

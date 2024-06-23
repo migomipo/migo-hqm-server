@@ -323,7 +323,7 @@ impl GameMode for StandardMatchGameMode {
         self.team_max as u32
     }
 
-    fn include_tick_in_replay(&self, server: Server) -> bool {
+    fn include_tick_in_recording(&self, server: Server) -> bool {
         server.scoreboard().period > 0
     }
 }

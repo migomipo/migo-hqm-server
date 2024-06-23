@@ -69,7 +69,7 @@ pub trait GameMode {
     /// Gets the server team size that will be shown in the server list.
     fn server_list_team_size(&self) -> u32;
 
-    fn include_tick_in_replay(&self, _server: Server) -> bool {
+    fn include_tick_in_recording(&self, _server: Server) -> bool {
         false
     }
 }

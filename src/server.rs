@@ -1344,7 +1344,7 @@ impl HQMServer {
         self.state.packet = self.state.packet.wrapping_add(1);
 
         if self.config.recording_enabled != ReplayRecording::Off
-            && behaviour.include_tick_in_replay((&*self).into())
+            && behaviour.include_tick_in_recording((&*self).into())
         {
             self.write_recording_tick();
         }
