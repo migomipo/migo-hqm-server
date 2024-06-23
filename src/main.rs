@@ -15,7 +15,9 @@ use migo_hqm_server::gamemode::standard_match::{
 };
 use migo_hqm_server::gamemode::util::SpawnPoint;
 use migo_hqm_server::gamemode::warmup::PermanentWarmup;
-use migo_hqm_server::record::{FileReplaySaving, HttpEndpointReplaySaving, ReplaySaving};
+use migo_hqm_server::record::{
+    RecordingSaveMethod, RecordingSaveToFile, RecordingSendToHttpEndpoint,
+};
 use migo_hqm_server::{ReplayRecording, ServerConfiguration};
 use tracing_appender;
 use tracing_subscriber;
@@ -104,16 +106,16 @@ async fn main() -> anyhow::Result<()> {
             .filter(|x| !x.is_empty())
             .collect();
 
-        let replay_saving: Box<dyn ReplaySaving> =
+        let replay_saving: Box<dyn RecordingSaveMethod> =
             if let Some(url) = server_section.get("replay_endpoint") {
-                Box::new(HttpEndpointReplaySaving::new(url.to_string()))
+                Box::new(RecordingSendToHttpEndpoint::new(url.to_string()))
             } else {
                 let dir = if let Some(path) = server_section.get("replay_directory") {
                     PathBuf::from(path)
                 } else {
                     PathBuf::from("replays")
                 };
-                Box::new(FileReplaySaving::new(dir))
+                Box::new(RecordingSaveToFile::new(dir))
             };
 
         fn get_optional<U, F: FnOnce(&str) -> U>(

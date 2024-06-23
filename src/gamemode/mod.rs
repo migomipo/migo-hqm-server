@@ -3,8 +3,8 @@ use crate::game::{
     Team,
 };
 use crate::server::{
-    HQMServer, HQMServerPlayer, HQMServerState, PlayerListExt, ServerPlayerData,
-    ServerStatePlayerItem,
+    HQMServer, HQMServerPlayer, HQMServerPlayersAndMessages, HQMTickHistory, PlayerListExt,
+    ServerPlayerData,
 };
 use crate::ServerConfiguration;
 use nalgebra::{Point3, Rotation3};
@@ -79,10 +79,12 @@ pub trait GameMode {
 /// This is useful if you want to mutably borrow several properties at once without getting in trouble with the borrow checker.
 #[non_exhaustive]
 pub struct ServerMutParts<'a> {
-    pub state: ServerStateMut<'a>,
+    pub players: ServerPlayersMut<'a>,
     pub scoreboard: &'a mut ScoreboardValues,
     pub rink: &'a mut Rink,
     pub config: &'a mut ServerConfiguration,
+    pub pucks: &'a mut [Option<Puck>],
+    pub replay: &'a mut HQMTickHistory,
 }
 
 /// Handle to server.
@@ -104,25 +106,47 @@ impl<'a> From<&'a mut HQMServer> for ServerMut<'a> {
 impl<'a> ServerMut<'a> {
     pub fn as_mut_parts(&mut self) -> ServerMutParts {
         ServerMutParts {
-            state: ServerStateMut {
-                state: &mut self.server.state,
+            players: ServerPlayersMut {
+                state: &mut self.server.state.players,
             },
-            scoreboard: &mut self.server.scoreboard,
+            scoreboard: &mut self.server.state.scoreboard,
             rink: &mut self.server.rink,
             config: &mut self.server.config,
+            pucks: self.server.state.pucks.as_mut_slice(),
+            replay: &mut self.server.state.replay,
         }
     }
-    /// Gets an immutable reference to player and puck state.
-    pub fn state(&self) -> ServerState {
-        ServerState {
-            state: &self.server.state,
+    /// Gets an immutable reference to player state.
+    pub fn players(&self) -> ServerPlayers {
+        ServerPlayers {
+            state: &self.server.state.players,
         }
     }
 
-    /// Gets a mutable reference to player and puck state.
-    pub fn state_mut(&mut self) -> ServerStateMut {
-        ServerStateMut {
-            state: &mut self.server.state,
+    /// Gets a mutable reference to player state.
+    pub fn players_mut(&mut self) -> ServerPlayersMut {
+        ServerPlayersMut {
+            state: &mut self.server.state.players,
+        }
+    }
+
+    pub fn pucks(&self) -> &[Option<Puck>] {
+        self.server.state.pucks.as_slice()
+    }
+
+    pub fn pucks_mut(&mut self) -> &mut [Option<Puck>] {
+        self.server.state.pucks.as_mut_slice()
+    }
+
+    pub fn replay(&self) -> ServerReplay {
+        ServerReplay {
+            replay: &self.server.state.replay,
+        }
+    }
+
+    pub fn replay_mut(&mut self) -> ServerReplayMut {
+        ServerReplayMut {
+            replay: &mut self.server.state.replay,
         }
     }
 
@@ -139,11 +163,11 @@ impl<'a> ServerMut<'a> {
     }
 
     pub fn scoreboard(&self) -> &ScoreboardValues {
-        &self.server.scoreboard
+        &self.server.state.scoreboard
     }
 
     pub fn scoreboard_mut(&mut self) -> &mut ScoreboardValues {
-        &mut self.server.scoreboard
+        &mut self.server.state.scoreboard
     }
 
     pub fn set_history_length(&mut self, v: usize) {
@@ -173,53 +197,41 @@ impl<'a> From<&'a HQMServer> for Server<'a> {
 
 impl<'a> Server<'a> {
     /// Gets an immutable reference to player and puck state.
-    pub fn state(&self) -> ServerState {
-        ServerState {
-            state: &self.server.state,
+    pub fn players(&self) -> ServerPlayers {
+        ServerPlayers {
+            state: &self.server.state.players,
         }
     }
     pub fn rink(&self) -> &Rink {
         &self.server.rink
     }
     pub fn scoreboard(&self) -> &ScoreboardValues {
-        &self.server.scoreboard
+        &self.server.state.scoreboard
     }
 
     pub fn config(&self) -> &ServerConfiguration {
         &self.server.config
     }
-}
 
-/// A struct containing the individual parts of a [ServerStateMut].
-///
-/// This is useful if you want to mutably borrow several properties at once without getting in trouble with the borrow checker.
-#[non_exhaustive]
-pub struct ServerStateMutParts<'a> {
-    pub players: ServerPlayerListMut<'a>,
-    pub pucks: &'a mut [Option<Puck>],
-}
+    pub fn pucks(&self) -> &[Option<Puck>] {
+        self.server.state.pucks.as_slice()
+    }
 
-/// Mutable handle to puck and player state.
-#[derive(ReborrowTraits)]
-#[Const(ServerState)]
-pub struct ServerStateMut<'a> {
-    #[reborrow]
-    state: &'a mut HQMServerState,
-}
-
-impl<'a> ServerStateMut<'a> {
-    pub fn as_mut_parts(&mut self) -> ServerStateMutParts {
-        ServerStateMutParts {
-            players: ServerPlayerListMut {
-                players: &mut self.state.players,
-            },
-            pucks: &mut self.state.pucks,
+    pub fn replay(&self) -> ServerReplay {
+        ServerReplay {
+            replay: &self.server.state.replay,
         }
     }
-    pub fn game_step(&self) -> u32 {
-        self.state.game_step
-    }
+}
 
+#[derive(ReborrowTraits)]
+#[Const(ServerReplay)]
+pub struct ServerReplayMut<'a> {
+    #[reborrow]
+    replay: &'a mut HQMTickHistory,
+}
+
+impl<'a> ServerReplayMut<'a> {
     /// Adds a replay to the replay queue.
     pub fn add_replay_to_queue(
         &mut self,
@@ -227,34 +239,43 @@ impl<'a> ServerStateMut<'a> {
         end_step: u32,
         force_view: Option<PlayerId>,
     ) {
-        self.state
+        self.replay
             .add_replay_to_queue(start_step, end_step, force_view)
     }
 
     pub fn is_in_replay(&self) -> bool {
-        self.state.is_in_replay()
+        self.replay.is_in_replay()
     }
 
-    pub fn players(&self) -> ServerPlayerList {
-        ServerPlayerList {
-            players: &self.state.players,
-        }
+    pub fn game_step(&self) -> u32 {
+        self.replay.game_step
+    }
+}
+
+#[derive(ReborrowCopyTraits)]
+pub struct ServerReplay<'a> {
+    replay: &'a HQMTickHistory,
+}
+
+impl<'a> ServerReplay<'a> {
+    pub fn is_in_replay(&self) -> bool {
+        self.replay.is_in_replay()
     }
 
-    pub fn players_mut(&mut self) -> ServerPlayerListMut {
-        ServerPlayerListMut {
-            players: &mut self.state.players,
-        }
+    pub fn game_step(&self) -> u32 {
+        self.replay.game_step
     }
+}
 
-    pub fn pucks(&self) -> &[Option<Puck>] {
-        &self.state.pucks
-    }
+/// Mutable handle to player state.
+#[derive(ReborrowTraits)]
+#[Const(ServerPlayers)]
+pub struct ServerPlayersMut<'a> {
+    #[reborrow]
+    state: &'a mut HQMServerPlayersAndMessages,
+}
 
-    pub fn pucks_mut(&mut self) -> &mut [Option<Puck>] {
-        &mut self.state.pucks
-    }
-
+impl<'a> ServerPlayersMut<'a> {
     pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
         self.state.add_server_chat_message(message);
     }
@@ -305,29 +326,6 @@ impl<'a> ServerStateMut<'a> {
         self.state.move_to_spectator(player_id)
     }
 
-    pub fn spawn_puck(&mut self, puck: Puck) -> Option<usize> {
-        if let Some(object_index) = self.state.pucks.iter().position(|x| x.is_none()) {
-            self.state.pucks[object_index] = Some(puck);
-            Some(object_index)
-        } else {
-            None
-        }
-    }
-
-    pub fn remove_all_pucks(&mut self) {
-        for x in self.state.pucks.iter_mut() {
-            *x = None;
-        }
-    }
-
-    pub fn get_puck(&self, index: usize) -> Option<&Puck> {
-        self.state.get_puck(index)
-    }
-
-    pub fn get_puck_mut(&mut self, index: usize) -> Option<&mut Puck> {
-        self.state.get_puck_mut(index)
-    }
-
     pub fn add_bot(&mut self, player_name: &str) -> Option<PlayerId> {
         self.state.add_bot(player_name)
     }
@@ -338,7 +336,6 @@ impl<'a> ServerStateMut<'a> {
 
     pub fn remove_bots(&mut self) {
         let p: Vec<_> = self
-            .players()
             .iter()
             .filter_map(|x| {
                 if x.player_type() == ServerPlayerType::Bot {
@@ -352,89 +349,58 @@ impl<'a> ServerStateMut<'a> {
             self.state.remove_player(player_id, true);
         }
     }
-}
 
-/// Immutable handle to puck and player state.
-#[derive(ReborrowCopyTraits)]
-pub struct ServerState<'a> {
-    state: &'a HQMServerState,
-}
-
-impl<'a> ServerState<'a> {
-    pub fn game_step(&self) -> u32 {
-        self.state.game_step
-    }
-
-    pub fn is_in_replay(&self) -> bool {
-        self.state.is_in_replay()
-    }
-    pub fn players(&self) -> ServerPlayerList {
-        ServerPlayerList {
-            players: &self.state.players,
-        }
-    }
-    pub fn pucks(&self) -> &[Option<Puck>] {
-        &self.state.pucks
-    }
-
-    pub fn get_puck(&self, index: usize) -> Option<&Puck> {
-        self.state.get_puck(index)
-    }
-}
-
-/// Mutable list of players in the server.
-#[derive(ReborrowTraits)]
-#[Const(ServerPlayerList)]
-pub struct ServerPlayerListMut<'a> {
-    players: &'a mut [ServerStatePlayerItem],
-}
-
-impl<'a> ServerPlayerListMut<'a> {
-    /// Returns an iterator over the players in the server.
     pub fn iter(&self) -> impl Iterator<Item = ServerPlayer> {
-        self.players
+        self.state
+            .players
             .iter_players()
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns a iterator over the players in the server, that also allows changing the player objects.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = ServerPlayerMut> {
-        self.players
+        self.state
+            .players
             .iter_players_mut()
             .map(|(id, player)| ServerPlayerMut { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get_by_index(&self, index: PlayerIndex) -> Option<ServerPlayer> {
-        self.players
+        self.state
+            .players
             .get_player_by_index(index)
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get(&self, id: PlayerId) -> Option<ServerPlayer> {
-        self.players
+        self.state
+            .players
             .get_player(id)
             .map(|player| ServerPlayer { id, player })
     }
 
     /// Returns a mutable handle to a player in the server.
     pub fn get_by_index_mut(&mut self, index: PlayerIndex) -> Option<ServerPlayerMut> {
-        self.players
+        self.state
+            .players
             .get_player_mut_by_index(index)
             .map(|(id, player)| ServerPlayerMut { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get_mut(&mut self, id: PlayerId) -> Option<ServerPlayerMut> {
-        self.players
+        self.state
+            .players
             .get_player_mut(id)
             .map(|player| ServerPlayerMut { id, player })
     }
 
     /// Returns a player object if the player is admin, otherwise sends a message telling the user to log in first.
     pub fn check_admin_or_deny(&mut self, player_id: PlayerId) -> Option<ServerPlayer> {
-        self.players
+        self.state
+            .players
             .check_admin_or_deny(player_id)
             .map(|player| ServerPlayer {
                 id: player_id,
@@ -459,30 +425,33 @@ impl<'a> ServerPlayerListMut<'a> {
     }
 }
 
-/// Immutable list of players in the server.
+/// Immutable handle to player state.
 #[derive(ReborrowCopyTraits)]
-pub struct ServerPlayerList<'a> {
-    players: &'a [ServerStatePlayerItem],
+pub struct ServerPlayers<'a> {
+    state: &'a HQMServerPlayersAndMessages,
 }
 
-impl<'a> ServerPlayerList<'a> {
+impl<'a> ServerPlayers<'a> {
     /// Returns a iterator over the players in the server.
     pub fn iter(&self) -> impl Iterator<Item = ServerPlayer> {
-        self.players
+        self.state
+            .players
             .iter_players()
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get_by_index(&self, index: PlayerIndex) -> Option<ServerPlayer> {
-        self.players
+        self.state
+            .players
             .get_player_by_index(index)
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get(&self, id: PlayerId) -> Option<ServerPlayer> {
-        self.players
+        self.state
+            .players
             .get_player(id)
             .map(|player| ServerPlayer { id, player })
     }
@@ -624,4 +593,39 @@ pub enum ExitReason {
     Disconnected,
     Timeout,
     AdminKicked,
+}
+
+pub trait PuckExt {
+    fn spawn_puck(&mut self, puck: Puck) -> Option<usize>;
+
+    fn remove_all_pucks(&mut self);
+
+    fn get_puck(&self, index: usize) -> Option<&Puck>;
+
+    fn get_puck_mut(&mut self, index: usize) -> Option<&mut Puck>;
+}
+
+impl PuckExt for [Option<Puck>] {
+    fn spawn_puck(&mut self, puck: Puck) -> Option<usize> {
+        if let Some(object_index) = self.iter().position(|x| x.is_none()) {
+            self[object_index] = Some(puck);
+            Some(object_index)
+        } else {
+            None
+        }
+    }
+
+    fn remove_all_pucks(&mut self) {
+        for x in self.iter_mut() {
+            *x = None;
+        }
+    }
+
+    fn get_puck(&self, index: usize) -> Option<&Puck> {
+        self.get(index).map(|x| x.as_ref()).flatten()
+    }
+
+    fn get_puck_mut(&mut self, index: usize) -> Option<&mut Puck> {
+        self.get_mut(index).map(|x| x.as_mut()).flatten()
+    }
 }

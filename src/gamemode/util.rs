@@ -1,5 +1,5 @@
 use crate::game::{PlayerId, Rink, Team};
-use crate::gamemode::ServerStateMut;
+use crate::gamemode::ServerPlayersMut;
 use nalgebra::{Point3, Rotation3};
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
@@ -12,7 +12,7 @@ pub fn add_players<
     FSpectate: FnMut(PlayerId) -> (),
     FJoin: FnMut(PlayerId, Team) -> (),
 >(
-    mut server: ServerStateMut,
+    mut server: ServerPlayersMut,
     team_max: usize,
     team_switch_timer: &mut HashMap<PlayerId, u32>,
     show_extra_messages: Option<&HashSet<PlayerId>>,
@@ -25,7 +25,7 @@ pub fn add_players<
     let mut spectating_players = SmallVec::<[_; 32]>::new();
     let mut joining_red = SmallVec::<[_; 32]>::new();
     let mut joining_blue = SmallVec::<[_; 32]>::new();
-    for player in server.players().iter() {
+    for player in server.iter() {
         let player_id = player.id;
         let input = player.input();
         let team = player.team();

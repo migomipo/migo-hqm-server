@@ -32,11 +32,11 @@ impl StandardMatchGameMode {
 
     fn update_players(&mut self, mut server: ServerMut) {
         let spawn_point = self.spawn_point;
-        let ServerMutParts { state, rink, .. } = server.as_mut_parts();
+        let ServerMutParts { players, rink, .. } = server.as_mut_parts();
         let rink = &*rink;
 
         let (red_player_count, blue_player_count) = add_players(
-            state,
+            players,
             self.team_max,
             &mut self.team_switch_timer,
             Some(&self.show_extra_messages),
@@ -61,17 +61,13 @@ impl StandardMatchGameMode {
         admin_player_id: PlayerId,
         force_player_index: PlayerIndex,
     ) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(admin_player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(admin_player_id) {
             let admin_player_name = player.name();
 
-            if let Some(force_player) = server.state().players().get_by_index(force_player_index) {
+            if let Some(force_player) = server.players().get_by_index(force_player_index) {
                 let force_player_id = force_player.id;
                 let force_player_name = force_player.name();
-                if server.state_mut().move_to_spectator(force_player_id) {
+                if server.players_mut().move_to_spectator(force_player_id) {
                     let msg = format!(
                         "{} forced off ice by {}",
                         force_player_name, admin_player_name
@@ -80,7 +76,7 @@ impl StandardMatchGameMode {
                         "{} ({}) forced {} ({}) off ice",
                         admin_player_name, admin_player_id, force_player_name, force_player_id
                     );
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                     self.team_switch_timer.insert(force_player_id, 500);
                 }
             }
@@ -88,11 +84,7 @@ impl StandardMatchGameMode {
     }
 
     pub(crate) fn set_team_size(&mut self, mut server: ServerMut, player_id: PlayerId, size: &str) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             if let Ok(new_num) = size.parse::<usize>() {
                 if new_num > 0 && new_num <= 15 {
                     self.team_max = new_num;
@@ -101,7 +93,7 @@ impl StandardMatchGameMode {
                     info!("{} ({}) set team size to {}", name, player_id, new_num);
                     let msg = format!("Team size set to {} by {}", new_num, name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
             }
         }
@@ -295,14 +287,14 @@ impl GameMode for StandardMatchGameMode {
             "chatextend" => {
                 if arg.eq_ignore_ascii_case("true") || arg.eq_ignore_ascii_case("on") {
                     if self.show_extra_messages.insert(player_id) {
-                        server.state_mut().add_directed_server_chat_message(
+                        server.players_mut().add_directed_server_chat_message(
                             "Team change messages activated",
                             player_id,
                         );
                     }
                 } else if arg.eq_ignore_ascii_case("false") || arg.eq_ignore_ascii_case("off") {
                     if self.show_extra_messages.remove(&player_id) {
-                        server.state_mut().add_directed_server_chat_message(
+                        server.players_mut().add_directed_server_chat_message(
                             "Team change messages de-activated",
                             player_id,
                         );

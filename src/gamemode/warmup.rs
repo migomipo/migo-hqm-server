@@ -1,7 +1,7 @@
 use crate::game::Puck;
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::gamemode::util::{add_players, get_spawnpoint, SpawnPoint};
-use crate::gamemode::{GameMode, InitialGameValues, ServerMut, ServerMutParts};
+use crate::gamemode::{GameMode, InitialGameValues, PuckExt, ServerMut, ServerMutParts};
 use nalgebra::{Point3, Rotation3};
 use std::collections::HashMap;
 
@@ -21,10 +21,10 @@ impl PermanentWarmup {
     }
     fn update_players(&mut self, mut server: ServerMut) {
         let spawn_point = self.spawn_point;
-        let ServerMutParts { state, rink, .. } = server.as_mut_parts();
+        let ServerMutParts { players, rink, .. } = server.as_mut_parts();
         let rink = &*rink;
         add_players(
-            state,
+            players,
             usize::MAX,
             &mut self.team_switch_timer,
             None,
@@ -72,7 +72,7 @@ impl GameMode for PermanentWarmup {
         for i in 0..warmup_pucks {
             let pos = Point3::new(puck_line_start + 0.8 * (i as f32), 1.5, length / 2.0);
             let rot = Rotation3::identity();
-            server.state_mut().spawn_puck(Puck::new(pos, rot));
+            server.pucks_mut().spawn_puck(Puck::new(pos, rot));
         }
     }
 

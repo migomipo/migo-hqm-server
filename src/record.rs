@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
-pub trait ReplaySaving {
-    fn save_replay_data(
+pub trait RecordingSaveMethod {
+    fn save_recording_data(
         &mut self,
         config: &ServerConfiguration,
         replay_data: Bytes,
@@ -14,18 +14,18 @@ pub trait ReplaySaving {
     );
 }
 
-pub struct FileReplaySaving {
+pub struct RecordingSaveToFile {
     directory: PathBuf,
 }
 
-impl FileReplaySaving {
+impl RecordingSaveToFile {
     pub fn new(directory: PathBuf) -> Self {
         Self { directory }
     }
 }
 
-impl ReplaySaving for FileReplaySaving {
-    fn save_replay_data(
+impl RecordingSaveMethod for RecordingSaveToFile {
+    fn save_recording_data(
         &mut self,
         config: &ServerConfiguration,
         replay_data: Bytes,
@@ -54,12 +54,12 @@ impl ReplaySaving for FileReplaySaving {
     }
 }
 
-pub struct HttpEndpointReplaySaving {
+pub struct RecordingSendToHttpEndpoint {
     url: String,
     client: reqwest::Client,
 }
 
-impl HttpEndpointReplaySaving {
+impl RecordingSendToHttpEndpoint {
     pub fn new(url: String) -> Self {
         Self {
             url,
@@ -68,8 +68,8 @@ impl HttpEndpointReplaySaving {
     }
 }
 
-impl ReplaySaving for HttpEndpointReplaySaving {
-    fn save_replay_data(
+impl RecordingSaveMethod for RecordingSendToHttpEndpoint {
+    fn save_recording_data(
         &mut self,
         config: &ServerConfiguration,
         replay_data: Bytes,

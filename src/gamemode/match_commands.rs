@@ -10,27 +10,19 @@ use tracing::info;
 
 impl Match {
     pub fn reset_game(&mut self, mut server: ServerMut, player_id: PlayerId) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
             info!("{} ({}) reset game", name, player_id);
             let msg = format!("Game reset by {}", name);
 
             server.new_game(self.get_initial_game_values());
 
-            server.state_mut().add_server_chat_message(msg);
+            server.players_mut().add_server_chat_message(msg);
         }
     }
 
     pub fn start_game(&mut self, mut server: ServerMut, player_id: PlayerId) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
             let values = server.scoreboard_mut();
             if values.period == 0 && values.time > 1 {
@@ -39,17 +31,13 @@ impl Match {
                 self.paused = false;
                 values.time = 1;
 
-                server.state_mut().add_server_chat_message(msg);
+                server.players_mut().add_server_chat_message(msg);
             }
         }
     }
 
     pub fn pause(&mut self, mut server: ServerMut, player_id: PlayerId) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             self.paused = true;
             if self.pause_timer > 0 && self.pause_timer < self.config.time_break {
                 // If we're currently in a break, with very little time left,
@@ -59,31 +47,23 @@ impl Match {
             let name = player.name();
             info!("{} ({}) paused game", name, player_id);
             let msg = format!("Game paused by {}", name);
-            server.state_mut().add_server_chat_message(msg);
+            server.players_mut().add_server_chat_message(msg);
         }
     }
 
     pub fn unpause(&mut self, mut server: ServerMut, player_id: PlayerId) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             self.paused = false;
             let name = player.name();
             info!("{} ({}) resumed game", name, player_id);
             let msg = format!("Game resumed by {}", name);
 
-            server.state_mut().add_server_chat_message(msg);
+            server.players_mut().add_server_chat_message(msg);
         }
     }
 
     pub fn set_clock(&mut self, mut server: ServerMut, input_time: u32, player_id: PlayerId) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
             server.scoreboard_mut().time = input_time;
 
@@ -97,7 +77,7 @@ impl Match {
                 input_minutes, input_seconds, input_centis, name, player_id
             );
             let msg = format!("Clock set by {}", name);
-            server.state_mut().add_server_chat_message(msg);
+            server.players_mut().add_server_chat_message(msg);
             self.update_game_over(server);
         }
     }
@@ -109,11 +89,7 @@ impl Match {
         input_score: u32,
         player_id: PlayerId,
     ) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
             match input_team {
                 Team::Red => {
@@ -124,7 +100,7 @@ impl Match {
                         name, player_id, input_score
                     );
                     let msg = format!("Red score changed by {}", name);
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 Team::Blue => {
                     server.scoreboard_mut().blue_score = input_score;
@@ -134,7 +110,7 @@ impl Match {
                         name, player_id, input_score
                     );
                     let msg = format!("Blue score changed by {}", name);
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
             }
             self.update_game_over(server);
@@ -142,17 +118,13 @@ impl Match {
     }
 
     pub fn set_period(&mut self, mut server: ServerMut, input_period: u32, player_id: PlayerId) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
             server.scoreboard_mut().period = input_period;
 
             info!("{} ({}) set period to {}", name, player_id, input_period);
             let msg = format!("Period set by {}", name);
-            server.state_mut().add_server_chat_message(msg);
+            server.players_mut().add_server_chat_message(msg);
             self.update_game_over(server);
         }
     }
@@ -163,11 +135,7 @@ impl Match {
         input_period: u32,
         player_id: PlayerId,
     ) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             self.config.periods = input_period;
             let name = player.name();
 
@@ -176,17 +144,13 @@ impl Match {
                 name, player_id, input_period
             );
             let msg = format!("Number of periods set to {} by {}", input_period, name);
-            server.state_mut().add_server_chat_message(msg);
+            server.players_mut().add_server_chat_message(msg);
             self.update_game_over(server);
         }
     }
 
     pub fn set_icing_rule(&mut self, mut server: ServerMut, player_id: PlayerId, rule: &str) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
 
             match rule {
@@ -195,21 +159,21 @@ impl Match {
                     info!("{} ({}) enabled touch icing", name, player_id);
                     let msg = format!("Touch icing enabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 "notouch" => {
                     self.config.icing = IcingConfiguration::NoTouch;
                     info!("{} ({}) enabled no-touch icing", name, player_id);
                     let msg = format!("No-touch icing enabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 "off" => {
                     self.config.icing = IcingConfiguration::Off;
                     info!("{} ({}) disabled icing", name, player_id);
                     let msg = format!("Icing disabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 _ => {}
             }
@@ -217,11 +181,7 @@ impl Match {
     }
 
     pub fn set_offside_line(&mut self, mut server: ServerMut, player_id: PlayerId, rule: &str) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
 
             match rule {
@@ -230,14 +190,14 @@ impl Match {
                     info!("{} ({}) set blue line as offside line", name, player_id);
                     let msg = format!("Blue line set as offside line by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 "center" => {
                     self.config.offside_line = OffsideLineConfiguration::Center;
                     info!("{} ({}) set center line as offside line", name, player_id);
                     let msg = format!("Center line set as offside line by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 _ => {}
             }
@@ -245,11 +205,7 @@ impl Match {
     }
 
     pub fn set_twoline_pass(&mut self, mut server: ServerMut, player_id: PlayerId, rule: &str) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             match rule {
                 "off" => {
                     self.config.twoline_pass = TwoLinePassConfiguration::Off;
@@ -257,7 +213,7 @@ impl Match {
                     info!("{} ({}) disabled two-line pass rule", name, player_id);
                     let msg = format!("Two-line pass rule disabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 "on" => {
                     self.config.twoline_pass = TwoLinePassConfiguration::On;
@@ -269,7 +225,7 @@ impl Match {
                     );
                     let msg = format!("Regular two-line pass rule enabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 "forward" => {
                     self.config.twoline_pass = TwoLinePassConfiguration::Forward;
@@ -281,7 +237,7 @@ impl Match {
                     );
                     let msg = format!("Forward two-line pass rule enabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 "double" | "both" => {
                     self.config.twoline_pass = TwoLinePassConfiguration::Double;
@@ -293,7 +249,7 @@ impl Match {
                     );
                     let msg = format!("Regular and forward two-line pass rule enabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 "blue" | "three" | "threeline" => {
                     self.config.twoline_pass = TwoLinePassConfiguration::ThreeLine;
@@ -302,7 +258,7 @@ impl Match {
                     info!("{} ({}) enabled three-line pass rule", name, player_id);
                     let msg = format!("Three-line pass rule enabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 _ => {}
             }
@@ -310,11 +266,7 @@ impl Match {
     }
 
     pub fn set_offside_rule(&mut self, mut server: ServerMut, player_id: PlayerId, rule: &str) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             match rule {
                 "on" | "delayed" => {
                     self.config.offside = OffsideConfiguration::Delayed;
@@ -322,7 +274,7 @@ impl Match {
                     info!("{} ({}) enabled offside", name, player_id);
                     let msg = format!("Offside enabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 "imm" | "immediate" => {
                     self.config.offside = OffsideConfiguration::Immediate;
@@ -331,7 +283,7 @@ impl Match {
                     info!("{} ({}) enabled immediate offside", name, player_id);
                     let msg = format!("Immediate offside enabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 "off" => {
                     self.config.offside = OffsideConfiguration::Off;
@@ -340,7 +292,7 @@ impl Match {
                     info!("{} ({}) disabled offside", name, player_id);
                     let msg = format!("Offside disabled by {}", name);
 
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 _ => {}
             }
@@ -348,25 +300,21 @@ impl Match {
     }
 
     pub fn set_goal_replay(&mut self, mut server: ServerMut, player_id: PlayerId, setting: &str) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             match setting {
                 "on" => {
                     self.config.goal_replay = true;
 
                     let name = player.name();
                     let msg = format!("Goal replays enabled by {}", name);
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 "off" => {
                     self.config.goal_replay = false;
 
                     let name = player.name();
                     let msg = format!("Goal replays disabled by {}", name);
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
                 _ => {}
             }
@@ -374,11 +322,7 @@ impl Match {
     }
 
     pub fn set_first_to_rule(&mut self, mut server: ServerMut, player_id: PlayerId, num: &str) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let num = if num == "off" {
                 Some(0)
             } else {
@@ -394,22 +338,18 @@ impl Match {
                         name, player_id, new_num
                     );
                     let msg = format!("First-to-goals rule set to {} goals by {}", new_num, name);
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 } else {
                     info!("{} ({}) disabled first-to-goals rule", name, player_id);
                     let msg = format!("First-to-goals rule disabled by {}", name);
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
             }
         }
     }
 
     pub fn set_mercy_rule(&mut self, mut server: ServerMut, player_id: PlayerId, num: &str) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let num = if num == "off" {
                 Some(0)
             } else {
@@ -425,11 +365,11 @@ impl Match {
                         name, player_id, new_num
                     );
                     let msg = format!("Mercy rule set to {} goals by {}", new_num, name);
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 } else {
                     info!("{} ({}) disabled mercy rule", name, player_id);
                     let msg = format!("Mercy rule disabled by {}", name);
-                    server.state_mut().add_server_chat_message(msg);
+                    server.players_mut().add_server_chat_message(msg);
                 }
             }
         }
@@ -437,18 +377,14 @@ impl Match {
 
     pub fn faceoff(&mut self, mut server: ServerMut, player_id: PlayerId) {
         if !server.scoreboard().game_over {
-            if let Some(player) = server
-                .state_mut()
-                .players_mut()
-                .check_admin_or_deny(player_id)
-            {
+            if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
                 self.pause_timer = 5 * 100;
                 self.paused = false; // Unpause if it's paused as well
 
                 let name = player.name();
                 let msg = format!("Faceoff initiated by {}", name);
                 info!("{} ({}) initiated faceoff", name, player_id);
-                server.state_mut().add_server_chat_message(msg);
+                server.players_mut().add_server_chat_message(msg);
             }
         }
     }
@@ -464,14 +400,14 @@ impl Match {
             .into_iter()
             .find(|x| x.eq_ignore_ascii_case(input_position.as_str()))
         {
-            if let Some(player) = server.state().players().get(player_id) {
+            if let Some(player) = server.players().get(player_id) {
                 let name = player.name();
 
                 info!("{} ({}) set position {}", name, player_id, position);
                 let msg = format!("{} position {}", name, position);
 
                 self.preferred_positions.insert(player_id, position);
-                server.state_mut().add_server_chat_message(msg);
+                server.players_mut().add_server_chat_message(msg);
             }
         }
     }
@@ -497,7 +433,7 @@ impl Match {
 
         let msg = format!("{}{}, {}", offside_str, offside_line_str, icing_str);
         server
-            .state_mut()
+            .players_mut()
             .add_directed_server_chat_message(msg, receiver_id);
         let twoline_str = match self.config.twoline_pass {
             TwoLinePassConfiguration::Off => "",
@@ -508,30 +444,26 @@ impl Match {
         };
         if !twoline_str.is_empty() {
             server
-                .state_mut()
+                .players_mut()
                 .add_directed_server_chat_message(twoline_str, receiver_id);
         }
 
         if self.config.mercy > 0 {
             let msg = format!("Mercy rule when team leads by {} goals", self.config.mercy);
             server
-                .state_mut()
+                .players_mut()
                 .add_directed_server_chat_message(msg, receiver_id);
         }
         if self.config.first_to > 0 {
             let msg = format!("Game ends when team scores {} goals", self.config.first_to);
             server
-                .state_mut()
+                .players_mut()
                 .add_directed_server_chat_message(msg, receiver_id);
         }
     }
 
     pub fn set_spawn_offset(&mut self, mut server: ServerMut, player_id: PlayerId, rule: f32) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             self.config.spawn_point_offset = rule;
 
             let name = player.name();
@@ -540,7 +472,7 @@ impl Match {
                 "{} ({}) changed spawn point offset parameter to {}",
                 name, player_id, rule
             );
-            server.state_mut().add_server_chat_message(msg);
+            server.players_mut().add_server_chat_message(msg);
         }
     }
 
@@ -550,11 +482,7 @@ impl Match {
         player_id: PlayerId,
         rule: f32,
     ) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             self.config.spawn_player_altitude = rule;
             let name = player.name();
 
@@ -563,7 +491,7 @@ impl Match {
                 "{} ({}) changed spawn player altitude parameter to {}",
                 name, player_id, rule
             );
-            server.state_mut().add_server_chat_message(msg);
+            server.players_mut().add_server_chat_message(msg);
         }
     }
 
@@ -573,11 +501,7 @@ impl Match {
         player_id: PlayerId,
         rule: f32,
     ) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             self.config.spawn_puck_altitude = rule;
             let name = player.name();
 
@@ -586,7 +510,7 @@ impl Match {
                 "{} ({}) changed spawn puck altitude parameter to {}",
                 name, player_id, rule
             );
-            server.state_mut().add_server_chat_message(msg);
+            server.players_mut().add_server_chat_message(msg);
         }
     }
 
@@ -596,11 +520,7 @@ impl Match {
         player_id: PlayerId,
         setting: &str,
     ) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
+        if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
             let v = match setting {
                 "on" | "true" => Some(true),
@@ -615,7 +535,7 @@ impl Match {
                     "{} ({}) changed spawn stick position keeping parameter to {}",
                     name, player_id, v
                 );
-                server.state_mut().add_server_chat_message(msg);
+                server.players_mut().add_server_chat_message(msg);
             }
         }
     }

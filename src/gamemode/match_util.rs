@@ -1,9 +1,9 @@
 use crate::game::{PlayerId, Puck, Rink, RinkLine, RulesState, ScoreboardValues, Team};
-use crate::gamemode::InitialGameValues;
+use crate::gamemode::{InitialGameValues, PuckExt, ServerPlayers};
 
 use crate::game::PhysicsEvent;
 use crate::game::RinkSideOfLine::{BlueSide, RedSide};
-use crate::gamemode::{Server, ServerMut, ServerPlayer, ServerPlayerList};
+use crate::gamemode::{Server, ServerMut, ServerPlayer};
 
 use arraydeque::{ArrayDeque, Wrapping};
 use nalgebra::{Point3, Rotation3, Vector3};
@@ -148,9 +148,9 @@ impl Match {
     }
 
     fn do_faceoff(&mut self, mut server: ServerMut) {
-        let positions = get_faceoff_positions(server.state().players(), &self.preferred_positions);
+        let positions = get_faceoff_positions(server.players(), &self.preferred_positions);
 
-        server.state_mut().remove_all_pucks();
+        server.pucks_mut().remove_all_pucks();
         self.puck_touches.clear();
 
         let next_faceoff_spot = get_faceoff_spot(
@@ -164,7 +164,7 @@ impl Match {
             next_faceoff_spot.center_position + &(self.config.spawn_puck_altitude * Vector3::y());
 
         server
-            .state_mut()
+            .pucks_mut()
             .spawn_puck(Puck::new(puck_pos, Rotation3::identity()));
 
         self.started_as_goalie.clear();
@@ -173,7 +173,7 @@ impl Match {
                 Team::Red => next_faceoff_spot.red_player_positions[faceoff_position].clone(),
                 Team::Blue => next_faceoff_spot.blue_player_positions[faceoff_position].clone(),
             };
-            server.state_mut().spawn_skater(
+            server.players_mut().spawn_skater(
                 player_index,
                 team,
                 player_position,
@@ -197,7 +197,7 @@ impl Match {
         self.twoline_pass_status = TwoLinePassStatus::No;
         self.pass = None;
 
-        self.faceoff_game_step = server.state().game_step();
+        self.faceoff_game_step = server.replay().game_step();
     }
 
     pub(crate) fn update_game_over(&mut self, mut server: ServerMut) {
@@ -250,7 +250,7 @@ impl Match {
             puck_speed_across_line,
             puck_speed_from_stick,
             last_touch,
-        ) = if let Some(this_puck) = server.state().get_puck(puck_index) {
+        ) = if let Some(this_puck) = server.pucks().get_puck(puck_index) {
             let mut goal_scorer_index = None;
             let mut assist_index = None;
             let mut goal_scorer_first_touch = 0;
@@ -300,7 +300,7 @@ impl Match {
         };
 
         server
-            .state_mut()
+            .players_mut()
             .add_goal_message(team, goal_scorer_index, assist_index);
 
         fn convert(puck_speed: f32, use_mph: bool) -> (f32, &'static str) {
@@ -331,7 +331,7 @@ impl Match {
         };
         let s = format!("{}{}", str1, str2);
 
-        server.state_mut().add_server_chat_message(s);
+        server.players_mut().add_server_chat_message(s);
 
         let values = server.scoreboard();
         if values.time < 1000 {
@@ -340,7 +340,7 @@ impl Match {
             let centi = time % 100;
 
             let s = format!("{}.{:02} seconds left", seconds, centi);
-            server.state_mut().add_server_chat_message(s);
+            server.players_mut().add_server_chat_message(s);
         }
 
         self.pause_timer = time_break;
@@ -348,7 +348,7 @@ impl Match {
 
         self.update_game_over(server.rb_mut());
 
-        let gamestep = server.state().game_step();
+        let gamestep = server.replay().game_step();
 
         if self.config.goal_replay {
             let force_view = goal_scorer_index.or(last_touch);
@@ -376,7 +376,7 @@ impl Match {
         for event in events {
             if let PhysicsEvent::PuckEnteredNet { .. } = event {
                 let time = server
-                    .state()
+                    .replay()
                     .game_step()
                     .saturating_sub(self.step_where_period_ended);
                 if time <= 300 && !self.too_late_printed_this_period {
@@ -385,16 +385,16 @@ impl Match {
                     self.too_late_printed_this_period = true;
                     let s = format!("{}.{:02} seconds too late!", seconds, centi);
 
-                    server.state_mut().add_server_chat_message(s);
+                    server.players_mut().add_server_chat_message(s);
                 }
             }
         }
     }
 
     fn handle_puck_touch(&mut self, mut server: ServerMut, player_id: PlayerId, puck_index: usize) {
-        if let Some(player) = server.state().players().get(player_id) {
+        if let Some(player) = server.players().get(player_id) {
             if let Some(touching_team) = player.team() {
-                if let Some(puck) = server.state().get_puck(puck_index) {
+                if let Some(puck) = server.pucks().get_puck(puck_index) {
                     add_touch(
                         puck,
                         self.puck_touches.entry(puck_index),
@@ -433,7 +433,7 @@ impl Match {
                         } else {
                             self.twoline_pass_status = TwoLinePassStatus::No;
                             server
-                                .state_mut()
+                                .players_mut()
                                 .add_server_chat_message("Two-line pass waved off");
                         }
                     }
@@ -443,7 +443,7 @@ impl Match {
                         } else {
                             self.icing_status = IcingStatus::No;
                             server
-                                .state_mut()
+                                .players_mut()
                                 .add_server_chat_message("Icing waved off");
                         }
                     }
@@ -484,7 +484,9 @@ impl Match {
                 match self.config.icing {
                     IcingConfiguration::Touch => {
                         self.icing_status = IcingStatus::Warning(team, side);
-                        server.state_mut().add_server_chat_message("Icing warning");
+                        server
+                            .players_mut()
+                            .add_server_chat_message("Icing warning");
                     }
                     IcingConfiguration::NoTouch => {
                         self.call_icing(server, team, side);
@@ -512,7 +514,7 @@ impl Match {
                         self.offside_status =
                             OffsideStatus::Warning(team, side, transition, player);
                         server
-                            .state_mut()
+                            .players_mut()
                             .add_server_chat_message("Offside warning");
                     }
                     OffsideConfiguration::Immediate => {
@@ -539,7 +541,7 @@ impl Match {
         if let OffsideStatus::Warning(warning_team, _, _, _) = self.offside_status {
             if warning_team != team {
                 server
-                    .state_mut()
+                    .players_mut()
                     .add_server_chat_message("Offside waved off");
             }
         }
@@ -607,7 +609,7 @@ impl Match {
             &server.rink().center_line
         };
         let mut players_past_line = vec![];
-        for player in server.state().players().iter() {
+        for player in server.players().iter() {
             if player.id == pass_player {
                 continue;
             }
@@ -619,7 +621,7 @@ impl Match {
             self.twoline_pass_status =
                 TwoLinePassStatus::Warning(team, side, from, players_past_line);
             server
-                .state_mut()
+                .players_mut()
                 .add_server_chat_message("Two-line pass warning");
         }
     }
@@ -631,7 +633,7 @@ impl Match {
             if let OffsideStatus::Warning(t, _, _, _) = self.offside_status {
                 if team.get_other_team() == t {
                     server
-                        .state_mut()
+                        .players_mut()
                         .add_server_chat_message("Offside waved off");
                 }
             }
@@ -652,7 +654,7 @@ impl Match {
             if team != warning_team {
                 self.twoline_pass_status = TwoLinePassStatus::No;
                 server
-                    .state_mut()
+                    .players_mut()
                     .add_server_chat_message("Two-line pass waved off");
             }
         }
@@ -739,7 +741,7 @@ impl Match {
         self.next_faceoff_spot = faceoff_spot;
         self.pause_timer = time_break;
         self.offside_status = OffsideStatus::Offside(team);
-        server.state_mut().add_server_chat_message("Offside");
+        server.players_mut().add_server_chat_message("Offside");
     }
 
     fn call_twoline_pass(
@@ -762,7 +764,9 @@ impl Match {
         self.next_faceoff_spot = faceoff_spot;
         self.pause_timer = time_break;
         self.twoline_pass_status = TwoLinePassStatus::Offside(team);
-        server.state_mut().add_server_chat_message("Two-line pass");
+        server
+            .players_mut()
+            .add_server_chat_message("Two-line pass");
     }
 
     fn call_icing(&mut self, mut server: ServerMut, team: Team, side: RinkSide) {
@@ -771,7 +775,7 @@ impl Match {
         self.next_faceoff_spot = RinkFaceoffSpot::DefensiveZone(team, side);
         self.pause_timer = time_break;
         self.icing_status = IcingStatus::Icing(team);
-        server.state_mut().add_server_chat_message("Icing");
+        server.players_mut().add_server_chat_message("Icing");
     }
 
     pub fn after_tick(
@@ -797,7 +801,7 @@ impl Match {
                 if !has_players_in_offensive_zone(server.rb(), team, None) {
                     self.offside_status = OffsideStatus::InOffensiveZone(team);
                     server
-                        .state_mut()
+                        .players_mut()
                         .add_server_chat_message("Offside waved off");
                 }
             }
@@ -828,11 +832,11 @@ impl Match {
         self.update_clock(server.rb_mut());
 
         if let Some((start_replay, end_replay, force_view)) = self.start_next_replay {
-            if end_replay <= server.state().game_step() {
+            if end_replay <= server.replay().game_step() {
                 server
-                    .state_mut()
+                    .replay_mut()
                     .add_replay_to_queue(start_replay, end_replay, force_view);
-                server.state_mut().add_server_chat_message("Goal replay");
+                server.players_mut().add_server_chat_message("Goal replay");
                 self.start_next_replay = None;
             }
         }
@@ -865,7 +869,7 @@ impl Match {
                     values.period += 1;
                     self.pause_timer = intermission_time;
                     self.is_pause_goal = false;
-                    self.step_where_period_ended = server.state().game_step();
+                    self.step_where_period_ended = server.replay().game_step();
                     self.too_late_printed_this_period = false;
                     self.next_faceoff_spot = RinkFaceoffSpot::Center;
                     self.update_game_over(server.rb_mut());
@@ -921,7 +925,7 @@ impl Match {
                 length / 2.0,
             );
             let rot = Rotation3::identity();
-            server.state_mut().spawn_puck(Puck::new(pos, rot));
+            server.pucks_mut().spawn_puck(Puck::new(pos, rot));
         }
     }
 }
@@ -1040,7 +1044,7 @@ fn add_touch(
 }
 
 fn get_faceoff_positions(
-    players: ServerPlayerList,
+    players: ServerPlayers,
     preferred_positions: &HashMap<PlayerId, &'static str>,
 ) -> HashMap<PlayerId, (Team, &'static str)> {
     let mut res = HashMap::new();
@@ -1093,7 +1097,7 @@ fn has_players_in_offensive_zone(
         Team::Blue => &server.rink().red_zone_blue_line,
     };
 
-    for player in server.state().players().iter() {
+    for player in server.players().iter() {
         if Some(player.id) == ignore_player {
             continue;
         }

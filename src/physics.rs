@@ -33,7 +33,7 @@ impl HQMServer {
         let mut players: ArrayVec<(PlayerId, &mut SkaterObject, &mut PlayerInput), 32> =
             ArrayVec::new();
         let mut pucks: ArrayVec<(usize, &mut Puck, Point3<f32>), 32> = ArrayVec::new();
-        for (i, p) in self.state.players.iter_players_mut() {
+        for (i, p) in self.state.players.players.iter_players_mut() {
             if let Some((_, skater, _)) = &mut p.object {
                 players.push((i, skater, &mut p.input));
             }
