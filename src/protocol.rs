@@ -380,7 +380,7 @@ impl<'a> HQMMessageWriter<'a> {
         }
     }
 
-    pub fn replay_fix(&mut self) {
+    pub fn recording_fix(&mut self) {
         if self.bit_pos == 0 {
             self.buf.put_u8(0);
         }

@@ -224,7 +224,7 @@ pub(crate) struct HQMServerPlayersAndMessages {
     pub(crate) players: Vec<ServerStatePlayerItem>,
 
     persistent_messages: Vec<Rc<HQMMessage>>,
-    replay_messages: Vec<Rc<HQMMessage>>,
+    recording_messages: Vec<Rc<HQMMessage>>,
 
     puck_slots: usize,
 }
@@ -239,13 +239,13 @@ impl HQMServerPlayersAndMessages {
         Self {
             players,
             persistent_messages: vec![],
-            replay_messages: vec![],
+            recording_messages: vec![],
             puck_slots,
         }
     }
 
     fn new_game(&mut self, puck_slots: usize) {
-        self.replay_messages.clear();
+        self.recording_messages.clear();
         self.persistent_messages.clear();
         self.puck_slots = puck_slots;
 
@@ -259,8 +259,8 @@ impl HQMServerPlayersAndMessages {
             }
         }
 
-        for (message, persistent, replay) in messages {
-            self.add_global_message(message, persistent, replay);
+        for (message, persistent, recording) in messages {
+            self.add_global_message(message, persistent, recording);
         }
     }
 
@@ -339,10 +339,10 @@ impl HQMServerPlayersAndMessages {
         };
         self.add_global_message(message, true, true);
     }
-    fn add_global_message(&mut self, message: HQMMessage, persistent: bool, replay: bool) {
+    fn add_global_message(&mut self, message: HQMMessage, persistent: bool, recording: bool) {
         let rc = Rc::new(message);
-        if replay {
-            self.replay_messages.push(rc.clone());
+        if recording {
+            self.recording_messages.push(rc.clone());
         }
         if persistent {
             self.persistent_messages.push(rc.clone());
@@ -530,7 +530,7 @@ impl HQMServerPlayersAndMessages {
         }
     }
 
-    pub fn remove_player(&mut self, player_id: PlayerId, on_replay: bool) -> bool {
+    pub fn remove_player(&mut self, player_id: PlayerId, on_recording: bool) -> bool {
         if let Some(_) = self.players.get_player(player_id) {
             let update = HQMMessage::PlayerUpdate {
                 player_index: player_id.index,
@@ -540,7 +540,7 @@ impl HQMServerPlayersAndMessages {
             self.players[player_id.index.0].0 += 1;
             self.players[player_id.index.0].1 = None;
 
-            self.add_global_message(update, true, on_replay);
+            self.add_global_message(update, true, on_recording);
 
             true
         } else {
@@ -696,7 +696,7 @@ impl HQMServer {
         config: ServerConfiguration,
         physics_config: PhysicsConfiguration,
         ban: Box<dyn BanCheck>,
-        replay: Box<dyn RecordingSaveMethod>,
+        save_recording: Box<dyn RecordingSaveMethod>,
     ) -> Self {
         let server = HQMServer {
             state: HQMServerState::new(initial_values.puck_slots, initial_values.values),
@@ -709,7 +709,7 @@ impl HQMServer {
 
             has_current_game_been_active: false,
             ban,
-            save_recording: replay,
+            save_recording,
 
             history_length: 0,
             start_time: Default::default(),
@@ -978,7 +978,7 @@ impl HQMServer {
             "clearbans" => {
                 self.clear_bans(player_id);
             }
-            "replay" | "record" => self.set_replay(player_id, arg),
+            "replay" | "record" => self.set_recording(player_id, arg),
             "lefty" => {
                 self.set_hand(SkaterHand::Left, player_id);
             }
@@ -1300,8 +1300,8 @@ impl HQMServer {
         res
     }
 
-    pub fn remove_player(&mut self, player_id: PlayerId, on_replay: bool) -> bool {
-        let res = self.state.players.remove_player(player_id, on_replay);
+    pub fn remove_player(&mut self, player_id: PlayerId, on_recording: bool) -> bool {
+        let res = self.state.players.remove_player(player_id, on_recording);
         if res {
             let admin_found = self
                 .state
@@ -1343,10 +1343,10 @@ impl HQMServer {
         self.state.saved_packets.push_front(packets);
         self.state.packet = self.state.packet.wrapping_add(1);
 
-        if self.config.replays_enabled != ReplayRecording::Off
+        if self.config.recording_enabled != ReplayRecording::Off
             && behaviour.include_tick_in_replay((&*self).into())
         {
-            self.write_replay();
+            self.write_recording_tick();
         }
     }
 
@@ -1453,34 +1453,34 @@ impl HQMServer {
         }
     }
 
-    fn save_replay(&mut self, old_replay_data: &[u8]) {
-        let size = old_replay_data.len();
-        let mut replay_data = BytesMut::with_capacity(size + 8);
-        replay_data.put_u32_le(0u32);
-        replay_data.put_u32_le(size as u32);
-        replay_data.put_slice(old_replay_data);
-        let replay_data = replay_data.freeze();
+    fn save_recording(&mut self, old_recording_data: &[u8]) {
+        let size = old_recording_data.len();
+        let mut recording_data = BytesMut::with_capacity(size + 8);
+        recording_data.put_u32_le(0u32);
+        recording_data.put_u32_le(size as u32);
+        recording_data.put_slice(old_recording_data);
+        let recording_data = recording_data.freeze();
         self.save_recording
-            .save_recording_data(&self.config, replay_data, self.start_time);
+            .save_recording_data(&self.config, recording_data, self.start_time);
     }
     pub fn new_game(&mut self, v: InitialGameValues) {
         self.game_id += 1;
 
         self.has_current_game_been_active = false;
 
-        let old_replay_data = std::mem::replace(&mut self.state.recording_data, BytesMut::new());
+        let old_recording_data = std::mem::replace(&mut self.state.recording_data, BytesMut::new());
 
-        if self.config.replays_enabled == ReplayRecording::On && !old_replay_data.is_empty() {
-            self.save_replay(&old_replay_data);
+        if self.config.recording_enabled == ReplayRecording::On && !old_recording_data.is_empty() {
+            self.save_recording(&old_recording_data);
         }
 
         self.state.new_game(v.puck_slots, v.values);
     }
 
-    fn write_replay(&mut self) {
-        let replay_messages_to_send =
-            &self.state.players.replay_messages[self.state.recording_msg_pos..];
-        let remaining_messages = replay_messages_to_send.len();
+    fn write_recording_tick(&mut self) {
+        let messages_to_write =
+            &self.state.players.recording_messages[self.state.recording_msg_pos..];
+        let remaining_messages = messages_to_write.len();
         self.state.recording_data.reserve(
             9 // Header, time, score, period, etc.
             + 8 // Position metadata
@@ -1518,11 +1518,11 @@ impl HQMServer {
         writer.write_bits(16, remaining_messages as u32);
         writer.write_bits(16, self.state.recording_msg_pos as u32);
 
-        for message in replay_messages_to_send {
+        for message in messages_to_write {
             write_message(&mut writer, Rc::as_ref(message));
         }
-        self.state.recording_msg_pos = self.state.players.replay_messages.len();
-        writer.replay_fix();
+        self.state.recording_msg_pos = self.state.players.recording_messages.len();
+        writer.recording_fix();
     }
 }
 
@@ -1830,14 +1830,14 @@ pub async fn run_server<B: GameMode>(
     config: ServerConfiguration,
     physics_config: PhysicsConfiguration,
     ban: Box<dyn BanCheck>,
-    replay: Box<dyn RecordingSaveMethod>,
+    recording: Box<dyn RecordingSaveMethod>,
     mut behaviour: B,
 ) -> std::io::Result<()> {
     let initial_values = behaviour.get_initial_game_values();
 
     let reqwest_client = reqwest::Client::new();
 
-    let mut server = HQMServer::new(initial_values, config, physics_config, ban, replay);
+    let mut server = HQMServer::new(initial_values, config, physics_config, ban, recording);
     info!("Server started");
 
     behaviour.init((&mut server).into());

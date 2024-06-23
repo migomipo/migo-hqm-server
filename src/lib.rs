@@ -24,7 +24,7 @@ pub struct ServerConfiguration {
     pub password: Option<String>,
     pub player_max: usize,
 
-    pub replays_enabled: ReplayRecording,
+    pub recording_enabled: ReplayRecording,
     pub server_name: String,
     pub server_service: Option<String>,
 }

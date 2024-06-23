@@ -140,7 +140,7 @@ async fn main() -> anyhow::Result<()> {
             welcome: welcome_str,
             password: server_password,
             player_max: server_player_max,
-            replays_enabled,
+            recording_enabled: replays_enabled,
             server_name,
             server_service,
         };

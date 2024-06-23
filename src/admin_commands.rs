@@ -451,7 +451,7 @@ impl HQMServer {
         }
     }
 
-    pub fn set_replay(&mut self, admin_player_id: PlayerId, rule: &str) {
+    pub fn set_recording(&mut self, admin_player_id: PlayerId, rule: &str) {
         if let Some(player) = self
             .state
             .players
@@ -460,7 +460,7 @@ impl HQMServer {
         {
             match rule {
                 "on" => {
-                    self.config.replays_enabled = ReplayRecording::On;
+                    self.config.recording_enabled = ReplayRecording::On;
 
                     info!(
                         "{} ({}) enabled replays",
@@ -471,7 +471,7 @@ impl HQMServer {
                     self.state.players.add_server_chat_message(msg);
                 }
                 "off" => {
-                    self.config.replays_enabled = ReplayRecording::Off;
+                    self.config.recording_enabled = ReplayRecording::Off;
 
                     info!(
                         "{} ({}) disabled replay recording",
@@ -482,7 +482,7 @@ impl HQMServer {
                     self.state.players.add_server_chat_message(msg);
                 }
                 "standby" => {
-                    self.config.replays_enabled = ReplayRecording::Standby;
+                    self.config.recording_enabled = ReplayRecording::Standby;
 
                     info!(
                         "{} ({}) enabled standby replay recording",
