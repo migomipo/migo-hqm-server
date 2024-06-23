@@ -84,7 +84,7 @@ pub struct ServerMutParts<'a> {
     pub rink: &'a mut Rink,
     pub config: &'a mut ServerConfiguration,
     pub pucks: &'a mut [Option<Puck>],
-    pub replay: &'a mut HQMTickHistory,
+    pub replay: ServerReplayMut<'a>,
 }
 
 /// Handle to server.
@@ -113,7 +113,9 @@ impl<'a> ServerMut<'a> {
             rink: &mut self.server.rink,
             config: &mut self.server.config,
             pucks: self.server.state.pucks.as_mut_slice(),
-            replay: &mut self.server.state.replay,
+            replay: ServerReplayMut {
+                replay: &mut self.server.state.replay,
+            },
         }
     }
     /// Gets an immutable reference to player state.
