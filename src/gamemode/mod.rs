@@ -8,7 +8,7 @@ use crate::server::{
 };
 use crate::ServerConfiguration;
 use nalgebra::{Point3, Rotation3};
-use reborrow::{ReborrowCopyTraits, ReborrowTraits};
+use reborrow::{Reborrow, ReborrowCopyTraits, ReborrowTraits};
 use std::borrow::Cow;
 use std::cmp::PartialEq;
 use std::rc::Rc;
@@ -412,18 +412,8 @@ impl<'a> ServerPlayersMut<'a> {
 
     /// Convenience method to count the number of players currently in the red or blue team.
     pub fn count_team_members(&self) -> (usize, usize) {
-        let mut red_player_count = 0usize;
-        let mut blue_player_count = 0usize;
-        for player in self.iter() {
-            if let Some(team) = player.team() {
-                if team == Team::Red {
-                    red_player_count += 1;
-                } else if team == Team::Blue {
-                    blue_player_count += 1;
-                }
-            }
-        }
-        (red_player_count, blue_player_count)
+        let a = self.rb();
+        a.count_team_members()
     }
 }
 
