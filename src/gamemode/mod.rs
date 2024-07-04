@@ -172,10 +172,6 @@ impl<'a> ServerMut<'a> {
         &mut self.server.state.scoreboard
     }
 
-    pub fn set_history_length(&mut self, v: usize) {
-        self.server.history_length = v;
-    }
-
     pub fn config(&self) -> &ServerConfiguration {
         &self.server.config
     }
@@ -247,6 +243,10 @@ impl<'a> ServerReplayMut<'a> {
 
     pub fn is_in_replay(&self) -> bool {
         self.replay.is_in_replay()
+    }
+
+    pub fn set_history_length(&mut self, history_length: usize) {
+        self.replay.history_length = history_length;
     }
 
     pub fn game_step(&self) -> u32 {

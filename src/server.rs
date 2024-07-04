@@ -553,6 +553,8 @@ pub struct HQMTickHistory {
     pub(crate) game_step: u32,
     replay_queue: VecDeque<(Option<PlayerId>, ReplayTick)>,
     saved_history: VecDeque<ReplayTick>,
+
+    pub(crate) history_length: usize,
 }
 
 impl HQMTickHistory {
@@ -561,6 +563,7 @@ impl HQMTickHistory {
             game_step: u32::MAX,
             replay_queue: Default::default(),
             saved_history: Default::default(),
+            history_length: 0,
         }
     }
 
@@ -686,8 +689,6 @@ pub(crate) struct HQMServer {
 
     pub(crate) ban: Box<dyn BanCheck>,
     pub(crate) save_recording: Box<dyn RecordingSaveMethod>,
-
-    pub history_length: usize,
 }
 
 impl HQMServer {
@@ -711,7 +712,6 @@ impl HQMServer {
             ban,
             save_recording,
 
-            history_length: 0,
             start_time: Default::default(),
             rink: Rink::new(30.0, 61.0, 8.5),
         };
@@ -1326,7 +1326,7 @@ impl HQMServer {
 
         behaviour.after_tick(self.into(), &events);
 
-        if self.history_length > 0 {
+        if self.state.replay.history_length > 0 {
             let new_replay_tick = ReplayTick {
                 game_step: self.state.replay.game_step,
                 packets: packets.clone(),
@@ -1334,7 +1334,7 @@ impl HQMServer {
             self.state
                 .replay
                 .saved_history
-                .truncate(self.history_length - 1);
+                .truncate(self.state.replay.history_length - 1);
             self.state.replay.saved_history.push_front(new_replay_tick);
         } else {
             self.state.replay.saved_history.clear();

@@ -102,7 +102,7 @@ impl StandardMatchGameMode {
 
 impl GameMode for StandardMatchGameMode {
     fn init(&mut self, mut server: ServerMut) {
-        server.set_history_length(1000)
+        server.replay_mut().set_history_length(1000)
     }
 
     fn before_tick(&mut self, server: ServerMut) {
