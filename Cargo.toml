@@ -18,17 +18,17 @@ tracing-appender = "0.2"
 chrono = "0.4"
 arrayvec = "0.7.4"
 smallvec = { version = "1.11", features = ["union", "const_generics"]}
-systemctl = "0.3.1"
+systemctl = "0.4"
 futures = "0.3"
 async-stream = { version = "0.3.5", features = [] }
 itertools = "0.13.0"
 parking_lot = "0.12.2"
 tokio-stream = "0.1.15"
-notify-debouncer-full = "0.3.1"
+notify-debouncer-full = "0.4"
 reborrow = { version="0.5.5", features=["derive"] }
 anyhow = "1"
 arraydeque = "0.5"
-cached = "0.53"
+cached = "0.54"
 
 [build-dependencies]
 vergen-git2 = { version = "1.0.0-beta.2", features = [] }

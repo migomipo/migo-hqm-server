@@ -3,7 +3,6 @@ use crate::server::{HQMServer, MuteStatus, PlayerListExt, ServerPlayerData};
 use crate::game::{PlayerId, PlayerIndex};
 use crate::gamemode::{ExitReason, GameMode};
 use crate::ReplayRecording;
-use systemctl::restart;
 use tracing::info;
 
 impl HQMServer {
@@ -215,7 +214,8 @@ impl HQMServer {
             if let Some(server_service) = self.config.server_service.as_deref() {
                 let msg = format!("{} started server restart", player.player_name);
                 self.state.players.add_server_chat_message(msg);
-                if let Err(_) = restart(server_service) {
+                let ctl = systemctl::SystemCtl::default();
+                if let Err(_) = ctl.restart(server_service) {
                     self.state
                         .players
                         .add_directed_server_chat_message("Restart failed", admin_player_id);

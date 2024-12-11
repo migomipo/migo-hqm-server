@@ -1,6 +1,6 @@
 use cached::{Cached, TimedCache};
 use itertools::Itertools;
-use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{
     new_debouncer, DebounceEventHandler, DebounceEventResult, Debouncer, FileIdMap,
 };
@@ -108,7 +108,7 @@ impl FileBanCheck {
                 }
             }
         }
-        let watcher = new_debouncer(
+        let mut watcher = new_debouncer(
             Duration::from_secs(1),
             None,
             BanFileEventHandler {
@@ -116,13 +116,8 @@ impl FileBanCheck {
                 ban_list: ban_list.clone(),
                 handle,
             },
-        )
-        .and_then(|mut watcher| {
-            watcher
-                .watcher()
-                .watch(&path, RecursiveMode::NonRecursive)?;
-            Ok(watcher)
-        })?;
+        )?;
+        watcher.watch(&path, RecursiveMode::NonRecursive)?;
         Ok(Self {
             ban_list,
             file: path,
