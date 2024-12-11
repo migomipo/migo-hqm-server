@@ -49,6 +49,10 @@ jobs:
             os: ubuntu-latest
           - target: riscv64gc-unknown-linux-gnu
             os: ubuntu-latest
+          - target: loongarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: loongarch64-unknown-linux-musl
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Cache cargo & target directories
