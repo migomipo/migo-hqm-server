@@ -2,7 +2,7 @@ use cached::{Cached, TimedCache};
 use itertools::Itertools;
 use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{
-    new_debouncer, DebounceEventHandler, DebounceEventResult, Debouncer, FileIdMap,
+    new_debouncer, DebounceEventHandler, DebounceEventResult, Debouncer, RecommendedCache,
 };
 use parking_lot::Mutex;
 use std::collections::HashSet;
@@ -78,7 +78,7 @@ impl BanCheck for InMemoryBanCheck {
 pub struct FileBanCheck {
     file: PathBuf,
     ban_list: Arc<Mutex<HashSet<IpAddr>>>,
-    watcher: Debouncer<RecommendedWatcher, FileIdMap>,
+    watcher: Debouncer<RecommendedWatcher, RecommendedCache>,
 }
 
 impl FileBanCheck {
