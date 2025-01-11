@@ -24,7 +24,7 @@ async-stream = { version = "0.3.5", features = [] }
 itertools = "0.13.0"
 parking_lot = "0.12.2"
 tokio-stream = "0.1.15"
-notify-debouncer-full = "0.4"
+notify-debouncer-full = "0.5"
 reborrow = { version="0.5.5", features=["derive"] }
 anyhow = "1"
 arraydeque = "0.5"
