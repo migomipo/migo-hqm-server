@@ -3,8 +3,8 @@ use crate::game::Team;
 use crate::gamemode::ServerMut;
 
 use crate::gamemode::match_util::{
-    IcingConfiguration, Match, OffsideConfiguration, OffsideLineConfiguration,
-    TwoLinePassConfiguration, ALLOWED_POSITIONS,
+    ALLOWED_POSITIONS, IcingConfiguration, Match, OffsideConfiguration, OffsideLineConfiguration,
+    TwoLinePassConfiguration,
 };
 use tracing::info;
 

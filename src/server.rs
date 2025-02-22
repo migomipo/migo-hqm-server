@@ -28,8 +28,8 @@ use crate::game::{
     ScoreboardValues, SkaterHand, SkaterObject, Team,
 };
 use crate::protocol::{
-    write_message, write_objects, HQMClientToServerMessage, HQMMessageCodec, HQMMessageWriter,
-    ObjectPacket,
+    HQMClientToServerMessage, HQMMessageCodec, HQMMessageWriter, ObjectPacket, write_message,
+    write_objects,
 };
 use crate::record::RecordingSaveMethod;
 use crate::{ReplayRecording, ServerConfiguration};
@@ -146,11 +146,11 @@ impl PlayerListExt for [ServerStatePlayerItem] {
         &self,
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &HQMServerPlayer)> {
-        self.get(player_index.0).and_then(|(gen, x)| match x {
+        self.get(player_index.0).and_then(|(c, x)| match x {
             Some(p) => Some((
                 PlayerId {
                     index: player_index,
-                    gen: *gen,
+                    counter: *c,
                 },
                 p,
             )),
@@ -159,8 +159,8 @@ impl PlayerListExt for [ServerStatePlayerItem] {
     }
 
     fn get_player(&self, player_id: PlayerId) -> Option<&HQMServerPlayer> {
-        self.get(player_id.index.0).and_then(|(gen, x)| match x {
-            Some(p) if *gen == player_id.gen => Some(p),
+        self.get(player_id.index.0).and_then(|(c, x)| match x {
+            Some(p) if *c == player_id.counter => Some(p),
             _ => None,
         })
     }
@@ -169,11 +169,11 @@ impl PlayerListExt for [ServerStatePlayerItem] {
         &mut self,
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &mut HQMServerPlayer)> {
-        self.get_mut(player_index.0).and_then(|(gen, x)| match x {
+        self.get_mut(player_index.0).and_then(|(c, x)| match x {
             Some(p) => Some((
                 PlayerId {
                     index: player_index,
-                    gen: *gen,
+                    counter: *c,
                 },
                 p,
             )),
@@ -182,21 +182,20 @@ impl PlayerListExt for [ServerStatePlayerItem] {
     }
 
     fn get_player_mut(&mut self, player_id: PlayerId) -> Option<&mut HQMServerPlayer> {
-        self.get_mut(player_id.index.0)
-            .and_then(|(gen, x)| match x {
-                Some(p) if *gen == player_id.gen => Some(p),
-                _ => None,
-            })
+        self.get_mut(player_id.index.0).and_then(|(c, x)| match x {
+            Some(p) if *c == player_id.counter => Some(p),
+            _ => None,
+        })
     }
 
     fn iter_players(&self) -> impl Iterator<Item = (PlayerId, &HQMServerPlayer)> {
         self.iter()
             .enumerate()
-            .filter_map(|(player_index, (gen, player))| match player {
+            .filter_map(|(player_index, (c, player))| match player {
                 Some(p) => Some((
                     PlayerId {
                         index: PlayerIndex(player_index),
-                        gen: *gen,
+                        counter: *c,
                     },
                     p,
                 )),
@@ -207,11 +206,11 @@ impl PlayerListExt for [ServerStatePlayerItem] {
     fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerId, &mut HQMServerPlayer)> {
         self.iter_mut()
             .enumerate()
-            .filter_map(|(player_index, (gen, player))| match player {
+            .filter_map(|(player_index, (c, player))| match player {
                 Some(p) => Some((
                     PlayerId {
                         index: PlayerIndex(player_index),
-                        gen: *gen,
+                        counter: *c,
                     },
                     p,
                 )),
@@ -498,7 +497,7 @@ impl HQMServerPlayersAndMessages {
                 self.players[player_index.0].1 = Some(new_player);
                 let player_id = PlayerId {
                     index: player_index,
-                    gen: self.players[player_index.0].0,
+                    counter: self.players[player_index.0].0,
                 };
 
                 self.add_global_message(update, true, true);
@@ -519,7 +518,7 @@ impl HQMServerPlayersAndMessages {
                 self.players[player_index.0].1 = Some(new_player);
                 let player_id = PlayerId {
                     index: player_index,
-                    gen: self.players[player_index.0].0,
+                    counter: self.players[player_index.0].0,
                 };
 
                 self.add_global_message(update, true, true);

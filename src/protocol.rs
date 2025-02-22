@@ -3,7 +3,7 @@ use crate::server::{HQMClientVersion, HQMMessage};
 use arraydeque::{ArrayDeque, Wrapping};
 use bytes::{BufMut, BytesMut};
 use nalgebra::storage::Storage;
-use nalgebra::{Matrix3, Vector2, Vector3, U1, U3};
+use nalgebra::{Matrix3, U1, U3, Vector2, Vector3};
 use std::cmp::min;
 use std::io::Error;
 use std::string::FromUtf8Error;

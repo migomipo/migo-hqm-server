@@ -1,6 +1,6 @@
 use crate::game::Puck;
 use crate::game::{PhysicsEvent, PlayerId};
-use crate::gamemode::util::{add_players, get_spawnpoint, SpawnPoint};
+use crate::gamemode::util::{SpawnPoint, add_players, get_spawnpoint};
 use crate::gamemode::{GameMode, InitialGameValues, PuckExt, ServerMut, ServerMutParts};
 use nalgebra::{Point3, Rotation3};
 use std::collections::HashMap;

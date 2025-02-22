@@ -1,5 +1,5 @@
 use crate::protocol;
-use nalgebra::{point, Matrix3, Point3, Rotation3, Unit, Vector2, Vector3};
+use nalgebra::{Matrix3, Point3, Rotation3, Unit, Vector2, Vector3, point};
 
 use crate::game::RinkSideOfLine::{BlueSide, On, RedSide};
 use crate::protocol::{PuckPacket, SkaterPacket};
@@ -257,7 +257,7 @@ impl Rink {
 
         let blue_line_distance_neutral_zone_edge = 22.86;
         let blue_line_distance_mid = blue_line_distance_neutral_zone_edge - line_width / 2.0; // IIHF rule 17v and 17vi
-                                                                                              // IIHF specifies distance between end boards and edge closest to the neutral zone, but my code specifies middle of line
+        // IIHF specifies distance between end boards and edge closest to the neutral zone, but my code specifies middle of line
 
         let center_x = width / 2.0;
 
@@ -647,7 +647,7 @@ and then reconnects will get a different Id.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct PlayerId {
     pub(crate) index: PlayerIndex,
-    pub(crate) gen: u32,
+    pub(crate) counter: u32,
 }
 
 impl std::fmt::Display for PlayerIndex {
@@ -666,7 +666,7 @@ impl std::str::FromStr for PlayerIndex {
 
 impl std::fmt::Display for PlayerId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}", self.index.0, self.gen)
+        write!(f, "{}.{}", self.index.0, self.counter)
     }
 }
 

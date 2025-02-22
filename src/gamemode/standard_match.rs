@@ -5,10 +5,10 @@ use std::collections::{HashMap, HashSet};
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::game::{PlayerIndex, Team};
 pub use crate::gamemode::match_util::{
-    IcingConfiguration, Match, MatchConfiguration, OffsideConfiguration, OffsideLineConfiguration,
-    TwoLinePassConfiguration, ALLOWED_POSITIONS,
+    ALLOWED_POSITIONS, IcingConfiguration, Match, MatchConfiguration, OffsideConfiguration,
+    OffsideLineConfiguration, TwoLinePassConfiguration,
 };
-use crate::gamemode::util::{add_players, get_spawnpoint, SpawnPoint};
+use crate::gamemode::util::{SpawnPoint, add_players, get_spawnpoint};
 use crate::gamemode::{ExitReason, GameMode, InitialGameValues, Server, ServerMut, ServerMutParts};
 
 pub struct StandardMatchGameMode {

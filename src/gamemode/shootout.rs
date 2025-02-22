@@ -7,7 +7,7 @@ use tracing::info;
 
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::game::{PlayerIndex, Puck, ScoreboardValues, Team};
-use crate::gamemode::util::{add_players, get_spawnpoint, SpawnPoint};
+use crate::gamemode::util::{SpawnPoint, add_players, get_spawnpoint};
 use crate::gamemode::{
     ExitReason, GameMode, InitialGameValues, PuckExt, Server, ServerMut, ServerMutParts,
 };

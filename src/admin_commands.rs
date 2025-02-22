@@ -1,8 +1,8 @@
 use crate::server::{HQMServer, MuteStatus, PlayerListExt, ServerPlayerData};
 
+use crate::ReplayRecording;
 use crate::game::{PlayerId, PlayerIndex};
 use crate::gamemode::{ExitReason, GameMode};
-use crate::ReplayRecording;
 use tracing::info;
 
 impl HQMServer {

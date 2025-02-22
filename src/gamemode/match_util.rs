@@ -8,8 +8,8 @@ use crate::gamemode::{Server, ServerMut, ServerPlayer};
 use arraydeque::{ArrayDeque, Wrapping};
 use nalgebra::{Point3, Rotation3, Vector3};
 use reborrow::{Reborrow, ReborrowMut};
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::f32::consts::PI;
 
 pub const ALLOWED_POSITIONS: [&str; 18] = [
@@ -1403,11 +1403,11 @@ mod tests {
         let g = "G";
         let i0 = PlayerId {
             index: PlayerIndex(0),
-            gen: 0,
+            counter: 0,
         };
         let i1 = PlayerId {
             index: PlayerIndex(1),
-            gen: 0,
+            counter: 0,
         };
 
         let mut res1 = HashMap::new();

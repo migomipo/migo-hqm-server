@@ -6,7 +6,7 @@ use crate::game::{
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::server::{HQMServer, PlayerListExt};
 use arrayvec::ArrayVec;
-use nalgebra::{vector, Point3, Rotation3, Unit, Vector2, Vector3};
+use nalgebra::{Point3, Rotation3, Unit, Vector2, Vector3, vector};
 use smallvec::SmallVec;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
 use std::iter::FromIterator;
@@ -17,11 +17,7 @@ enum Collision {
 }
 
 fn replace_nan(v: f32, d: f32) -> f32 {
-    if v.is_nan() {
-        d
-    } else {
-        v
-    }
+    if v.is_nan() { d } else { v }
 }
 
 type PhysicsEventList = SmallVec<[PhysicsEvent; 16]>;
@@ -59,7 +55,7 @@ impl HQMServer {
 
         for i in 0..players.len() {
             let (a, b) = players.split_at_mut(i + 1);
-            let (_, ref mut p1, _) = &mut a[i];
+            let (_, p1, _) = &mut a[i];
 
             for (j, (_, p2, _)) in ((i + 1)..).zip(b.iter_mut()) {
                 for (ib, p1_collision_ball) in p1.collision_balls.iter().enumerate() {
@@ -362,7 +358,7 @@ fn update_player(
             };
             let max_acceleration = if player.body.linear_velocity.dot(&skate_direction) < 0.0 {
                 physics_config.player_deceleration // If we're accelerating against the current direction of movement
-                                                   // we're decelerating and can do so faster
+            // we're decelerating and can do so faster
             } else {
                 physics_config.player_acceleration
             };

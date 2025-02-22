@@ -2,7 +2,7 @@ use cached::{Cached, TimedCache};
 use itertools::Itertools;
 use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{
-    new_debouncer, DebounceEventHandler, DebounceEventResult, Debouncer, RecommendedCache,
+    DebounceEventHandler, DebounceEventResult, Debouncer, RecommendedCache, new_debouncer,
 };
 use parking_lot::Mutex;
 use std::collections::HashSet;

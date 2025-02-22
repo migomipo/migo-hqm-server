@@ -1,3 +1,4 @@
+use crate::ServerConfiguration;
 use crate::game::{
     PhysicsEvent, PlayerId, PlayerIndex, PlayerInput, Puck, Rink, ScoreboardValues, SkaterObject,
     Team,
@@ -6,7 +7,6 @@ use crate::server::{
     HQMServer, HQMServerPlayer, HQMServerPlayersAndMessages, HQMTickHistory, PlayerListExt,
     ServerPlayerData,
 };
-use crate::ServerConfiguration;
 use nalgebra::{Point3, Rotation3};
 use reborrow::{Reborrow, ReborrowCopyTraits, ReborrowTraits};
 use std::borrow::Cow;
