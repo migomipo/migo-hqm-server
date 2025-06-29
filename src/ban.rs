@@ -49,6 +49,12 @@ pub struct InMemoryBanCheck {
     bans: HashSet<IpAddr>,
 }
 
+impl Default for InMemoryBanCheck {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryBanCheck {
     pub fn new() -> Self {
         Self {
@@ -94,7 +100,7 @@ impl FileBanCheck {
 
         impl DebounceEventHandler for BanFileEventHandler {
             fn handle_event(&mut self, event: DebounceEventResult) {
-                if let Ok(_) = event {
+                if event.is_ok() {
                     let ban_list = self.ban_list.clone();
                     let path = self.path.clone();
                     self.handle.spawn(async move {
@@ -140,7 +146,7 @@ impl BanCheck for FileBanCheck {
         let s = {
             let mut ban_list = self.ban_list.lock();
             ban_list.insert(ip_addr);
-            ban_list.iter().map(|x| format!("{}\n", x)).join("")
+            ban_list.iter().map(|x| format!("{x}\n")).join("")
         };
         let path = self.file.clone();
 
@@ -151,7 +157,7 @@ impl BanCheck for FileBanCheck {
         let s = {
             let mut ban_list = self.ban_list.lock();
             ban_list.clear();
-            ban_list.iter().map(|x| format!("{}\n", x)).join("")
+            ban_list.iter().map(|x| format!("{x}\n")).join("")
         };
         let path = self.file.clone();
 
@@ -176,8 +182,8 @@ async fn write_ban_file(path: &Path, s: &str) -> Result<(), tokio::io::Error> {
 async fn read_ban_file(path: &Path) -> Result<HashSet<IpAddr>, tokio::io::Error> {
     let mut f = tokio::fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
-        .write(true)
         .open(path)
         .await?;
     let mut s = String::new();

@@ -31,7 +31,7 @@ arraydeque = "0.5"
 cached = "0.54"
 
 [build-dependencies]
-vergen-git2 = { version = "1.0.0-beta.2", features = [] }
+vergen-git2 = { version = "1.0.7", features = [] }
 anyhow = "1"
 
 [profile.dev]

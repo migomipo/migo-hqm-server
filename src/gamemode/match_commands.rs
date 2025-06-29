@@ -13,7 +13,7 @@ impl Match {
         if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
             info!("{} ({}) reset game", name, player_id);
-            let msg = format!("Game reset by {}", name);
+            let msg = format!("Game reset by {name}");
 
             server.new_game(self.get_initial_game_values());
 
@@ -27,7 +27,7 @@ impl Match {
             let values = server.scoreboard_mut();
             if values.period == 0 && values.time > 1 {
                 info!("{} ({}) started game", name, player_id);
-                let msg = format!("Game started by {}", name);
+                let msg = format!("Game started by {name}");
                 self.paused = false;
                 values.time = 1;
 
@@ -46,7 +46,7 @@ impl Match {
             }
             let name = player.name();
             info!("{} ({}) paused game", name, player_id);
-            let msg = format!("Game paused by {}", name);
+            let msg = format!("Game paused by {name}");
             server.players_mut().add_server_chat_message(msg);
         }
     }
@@ -56,7 +56,7 @@ impl Match {
             self.paused = false;
             let name = player.name();
             info!("{} ({}) resumed game", name, player_id);
-            let msg = format!("Game resumed by {}", name);
+            let msg = format!("Game resumed by {name}");
 
             server.players_mut().add_server_chat_message(msg);
         }
@@ -76,7 +76,7 @@ impl Match {
                 "Clock set to {}:{:02}.{:02} by {} ({})",
                 input_minutes, input_seconds, input_centis, name, player_id
             );
-            let msg = format!("Clock set by {}", name);
+            let msg = format!("Clock set by {name}");
             server.players_mut().add_server_chat_message(msg);
             self.update_game_over(server);
         }
@@ -99,7 +99,7 @@ impl Match {
                         "{} ({}) changed red score to {}",
                         name, player_id, input_score
                     );
-                    let msg = format!("Red score changed by {}", name);
+                    let msg = format!("Red score changed by {name}");
                     server.players_mut().add_server_chat_message(msg);
                 }
                 Team::Blue => {
@@ -109,7 +109,7 @@ impl Match {
                         "{} ({}) changed blue score to {}",
                         name, player_id, input_score
                     );
-                    let msg = format!("Blue score changed by {}", name);
+                    let msg = format!("Blue score changed by {name}");
                     server.players_mut().add_server_chat_message(msg);
                 }
             }
@@ -123,7 +123,7 @@ impl Match {
             server.scoreboard_mut().period = input_period;
 
             info!("{} ({}) set period to {}", name, player_id, input_period);
-            let msg = format!("Period set by {}", name);
+            let msg = format!("Period set by {name}");
             server.players_mut().add_server_chat_message(msg);
             self.update_game_over(server);
         }
@@ -143,7 +143,7 @@ impl Match {
                 "{} ({}) set number of periods to {}",
                 name, player_id, input_period
             );
-            let msg = format!("Number of periods set to {} by {}", input_period, name);
+            let msg = format!("Number of periods set to {input_period} by {name}");
             server.players_mut().add_server_chat_message(msg);
             self.update_game_over(server);
         }
@@ -157,21 +157,21 @@ impl Match {
                 "on" | "touch" => {
                     self.config.icing = IcingConfiguration::Touch;
                     info!("{} ({}) enabled touch icing", name, player_id);
-                    let msg = format!("Touch icing enabled by {}", name);
+                    let msg = format!("Touch icing enabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
                 "notouch" => {
                     self.config.icing = IcingConfiguration::NoTouch;
                     info!("{} ({}) enabled no-touch icing", name, player_id);
-                    let msg = format!("No-touch icing enabled by {}", name);
+                    let msg = format!("No-touch icing enabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
                 "off" => {
                     self.config.icing = IcingConfiguration::Off;
                     info!("{} ({}) disabled icing", name, player_id);
-                    let msg = format!("Icing disabled by {}", name);
+                    let msg = format!("Icing disabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -188,14 +188,14 @@ impl Match {
                 "blue" => {
                     self.config.offside_line = OffsideLineConfiguration::OffensiveBlue;
                     info!("{} ({}) set blue line as offside line", name, player_id);
-                    let msg = format!("Blue line set as offside line by {}", name);
+                    let msg = format!("Blue line set as offside line by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
                 "center" => {
                     self.config.offside_line = OffsideLineConfiguration::Center;
                     info!("{} ({}) set center line as offside line", name, player_id);
-                    let msg = format!("Center line set as offside line by {}", name);
+                    let msg = format!("Center line set as offside line by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -211,7 +211,7 @@ impl Match {
                     self.config.twoline_pass = TwoLinePassConfiguration::Off;
                     let name = player.name();
                     info!("{} ({}) disabled two-line pass rule", name, player_id);
-                    let msg = format!("Two-line pass rule disabled by {}", name);
+                    let msg = format!("Two-line pass rule disabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -223,7 +223,7 @@ impl Match {
                         "{} ({}) enabled regular two-line pass rule",
                         name, player_id
                     );
-                    let msg = format!("Regular two-line pass rule enabled by {}", name);
+                    let msg = format!("Regular two-line pass rule enabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -235,7 +235,7 @@ impl Match {
                         "{} ({}) enabled forward two-line pass rule",
                         name, player_id
                     );
-                    let msg = format!("Forward two-line pass rule enabled by {}", name);
+                    let msg = format!("Forward two-line pass rule enabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -247,7 +247,7 @@ impl Match {
                         "{} ({}) enabled regular and forward two-line pass rule",
                         name, player_id
                     );
-                    let msg = format!("Regular and forward two-line pass rule enabled by {}", name);
+                    let msg = format!("Regular and forward two-line pass rule enabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -256,7 +256,7 @@ impl Match {
                     let name = player.name();
 
                     info!("{} ({}) enabled three-line pass rule", name, player_id);
-                    let msg = format!("Three-line pass rule enabled by {}", name);
+                    let msg = format!("Three-line pass rule enabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -272,7 +272,7 @@ impl Match {
                     self.config.offside = OffsideConfiguration::Delayed;
                     let name = player.name();
                     info!("{} ({}) enabled offside", name, player_id);
-                    let msg = format!("Offside enabled by {}", name);
+                    let msg = format!("Offside enabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -281,7 +281,7 @@ impl Match {
 
                     let name = player.name();
                     info!("{} ({}) enabled immediate offside", name, player_id);
-                    let msg = format!("Immediate offside enabled by {}", name);
+                    let msg = format!("Immediate offside enabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -290,7 +290,7 @@ impl Match {
 
                     let name = player.name();
                     info!("{} ({}) disabled offside", name, player_id);
-                    let msg = format!("Offside disabled by {}", name);
+                    let msg = format!("Offside disabled by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -306,14 +306,14 @@ impl Match {
                     self.config.goal_replay = true;
 
                     let name = player.name();
-                    let msg = format!("Goal replays enabled by {}", name);
+                    let msg = format!("Goal replays enabled by {name}");
                     server.players_mut().add_server_chat_message(msg);
                 }
                 "off" => {
                     self.config.goal_replay = false;
 
                     let name = player.name();
-                    let msg = format!("Goal replays disabled by {}", name);
+                    let msg = format!("Goal replays disabled by {name}");
                     server.players_mut().add_server_chat_message(msg);
                 }
                 _ => {}
@@ -337,11 +337,11 @@ impl Match {
                         "{} ({}) set first-to-goals rule to {} goals",
                         name, player_id, new_num
                     );
-                    let msg = format!("First-to-goals rule set to {} goals by {}", new_num, name);
+                    let msg = format!("First-to-goals rule set to {new_num} goals by {name}");
                     server.players_mut().add_server_chat_message(msg);
                 } else {
                     info!("{} ({}) disabled first-to-goals rule", name, player_id);
-                    let msg = format!("First-to-goals rule disabled by {}", name);
+                    let msg = format!("First-to-goals rule disabled by {name}");
                     server.players_mut().add_server_chat_message(msg);
                 }
             }
@@ -364,11 +364,11 @@ impl Match {
                         "{} ({}) set mercy rule to {} goals",
                         name, player_id, new_num
                     );
-                    let msg = format!("Mercy rule set to {} goals by {}", new_num, name);
+                    let msg = format!("Mercy rule set to {new_num} goals by {name}");
                     server.players_mut().add_server_chat_message(msg);
                 } else {
                     info!("{} ({}) disabled mercy rule", name, player_id);
-                    let msg = format!("Mercy rule disabled by {}", name);
+                    let msg = format!("Mercy rule disabled by {name}");
                     server.players_mut().add_server_chat_message(msg);
                 }
             }
@@ -382,7 +382,7 @@ impl Match {
                 self.paused = false; // Unpause if it's paused as well
 
                 let name = player.name();
-                let msg = format!("Faceoff initiated by {}", name);
+                let msg = format!("Faceoff initiated by {name}");
                 info!("{} ({}) initiated faceoff", name, player_id);
                 server.players_mut().add_server_chat_message(msg);
             }
@@ -404,7 +404,7 @@ impl Match {
                 let name = player.name();
 
                 info!("{} ({}) set position {}", name, player_id, position);
-                let msg = format!("{} position {}", name, position);
+                let msg = format!("{name} position {position}");
 
                 self.preferred_positions.insert(player_id, position);
                 server.players_mut().add_server_chat_message(msg);
@@ -431,7 +431,7 @@ impl Match {
             IcingConfiguration::NoTouch => "No-touch icing enabled",
         };
 
-        let msg = format!("{}{}, {}", offside_str, offside_line_str, icing_str);
+        let msg = format!("{offside_str}{offside_line_str}, {icing_str}");
         server
             .players_mut()
             .add_directed_server_chat_message(msg, receiver_id);
@@ -467,7 +467,7 @@ impl Match {
             self.config.spawn_point_offset = rule;
 
             let name = player.name();
-            let msg = format!("Spawn point offset changed by {} to {}", name, rule);
+            let msg = format!("Spawn point offset changed by {name} to {rule}");
             info!(
                 "{} ({}) changed spawn point offset parameter to {}",
                 name, player_id, rule
@@ -486,7 +486,7 @@ impl Match {
             self.config.spawn_player_altitude = rule;
             let name = player.name();
 
-            let msg = format!("Spawn player altitude changed by {} to {}", name, rule);
+            let msg = format!("Spawn player altitude changed by {name} to {rule}");
             info!(
                 "{} ({}) changed spawn player altitude parameter to {}",
                 name, player_id, rule
@@ -505,7 +505,7 @@ impl Match {
             self.config.spawn_puck_altitude = rule;
             let name = player.name();
 
-            let msg = format!("Spawn puck altitude changed by {} to {}", name, rule);
+            let msg = format!("Spawn puck altitude changed by {name} to {rule}");
             info!(
                 "{} ({}) changed spawn puck altitude parameter to {}",
                 name, player_id, rule
@@ -530,7 +530,7 @@ impl Match {
             if let Some(v) = v {
                 self.config.spawn_keep_stick_position = v;
 
-                let msg = format!("Spawn stick position keeping changed by {} to {}", name, v);
+                let msg = format!("Spawn stick position keeping changed by {name} to {v}");
                 info!(
                     "{} ({}) changed spawn stick position keeping parameter to {}",
                     name, player_id, v

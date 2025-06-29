@@ -154,14 +154,14 @@ impl Match {
         self.puck_touches.clear();
 
         let next_faceoff_spot = get_faceoff_spot(
-            &server.rink(),
+            server.rink(),
             self.next_faceoff_spot,
             self.config.spawn_point_offset,
             self.config.spawn_player_altitude,
         );
 
         let puck_pos =
-            next_faceoff_spot.center_position + &(self.config.spawn_puck_altitude * Vector3::y());
+            next_faceoff_spot.center_position + (self.config.spawn_puck_altitude * Vector3::y());
 
         server
             .pucks_mut()
@@ -170,8 +170,8 @@ impl Match {
         self.started_as_goalie.clear();
         for (player_index, (team, faceoff_position)) in positions {
             let (player_position, player_rotation) = match team {
-                Team::Red => next_faceoff_spot.red_player_positions[faceoff_position].clone(),
-                Team::Blue => next_faceoff_spot.blue_player_positions[faceoff_position].clone(),
+                Team::Red => next_faceoff_spot.red_player_positions[faceoff_position],
+                Team::Blue => next_faceoff_spot.blue_player_positions[faceoff_position],
             };
             server.players_mut().spawn_skater(
                 player_index,
@@ -215,13 +215,7 @@ impl Match {
                 || blue_score.saturating_sub(red_score) >= self.config.mercy)
         {
             true
-        } else if self.config.first_to > 0
-            && (red_score >= self.config.first_to || blue_score >= self.config.first_to)
-        {
-            true
-        } else {
-            false
-        };
+        } else { self.config.first_to > 0 && (red_score >= self.config.first_to || blue_score >= self.config.first_to) };
         if values.game_over && !old_game_over {
             self.pause_timer = self.pause_timer.max(time_gameover);
         } else if !values.game_over && old_game_over {
@@ -267,22 +261,20 @@ impl Match {
                             goal_scorer_first_touch = touch.first_time;
                             puck_speed_from_stick = Some(touch.puck_speed);
                         }
-                    } else {
-                        if touch.team == team {
-                            if Some(touch.player_id) == goal_scorer_index {
-                                goal_scorer_first_touch = touch.first_time;
-                            } else {
-                                // This is the first player on the scoring team that touched it apart from the goal scorer
-                                // If more than 10 seconds passed between the goal scorer's first touch
-                                // and this last touch, it doesn't count as an assist
+                    } else if touch.team == team {
+                        if Some(touch.player_id) == goal_scorer_index {
+                            goal_scorer_first_touch = touch.first_time;
+                        } else {
+                            // This is the first player on the scoring team that touched it apart from the goal scorer
+                            // If more than 10 seconds passed between the goal scorer's first touch
+                            // and this last touch, it doesn't count as an assist
 
-                                let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
+                            let diff = touch.last_time.saturating_sub(goal_scorer_first_touch);
 
-                                if diff <= 1000 {
-                                    assist_index = Some(touch.player_id)
-                                }
-                                break;
+                            if diff <= 1000 {
+                                assist_index = Some(touch.player_id)
                             }
+                            break;
                         }
                     }
                 }
@@ -315,21 +307,19 @@ impl Match {
             convert(puck_speed_across_line, self.config.use_mph);
 
         let str1 = format!(
-            "Goal scored, {:.1} {} across line",
-            puck_speed_across_line_converted, puck_speed_unit
+            "Goal scored, {puck_speed_across_line_converted:.1} {puck_speed_unit} across line"
         );
 
         let str2 = if let Some(puck_speed_from_stick) = puck_speed_from_stick {
             let (puck_speed_converted, puck_speed_unit) =
                 convert(puck_speed_from_stick, self.config.use_mph);
             format!(
-                ", {:.1} {} from stick",
-                puck_speed_converted, puck_speed_unit
+                ", {puck_speed_converted:.1} {puck_speed_unit} from stick"
             )
         } else {
             "".to_owned()
         };
-        let s = format!("{}{}", str1, str2);
+        let s = format!("{str1}{str2}");
 
         server.players_mut().add_server_chat_message(s);
 
@@ -339,7 +329,7 @@ impl Match {
             let seconds = time / 100;
             let centi = time % 100;
 
-            let s = format!("{}.{:02} seconds left", seconds, centi);
+            let s = format!("{seconds}.{centi:02} seconds left");
             server.players_mut().add_server_chat_message(s);
         }
 
@@ -383,7 +373,7 @@ impl Match {
                     let seconds = time / 100;
                     let centi = time % 100;
                     self.too_late_printed_this_period = true;
-                    let s = format!("{}.{:02} seconds too late!", seconds, centi);
+                    let s = format!("{seconds}.{centi:02} seconds too late!");
 
                     server.players_mut().add_server_chat_message(s);
                 }
@@ -1016,10 +1006,10 @@ fn add_touch(
     team: Team,
     time: u32,
 ) {
-    let puck_pos = puck.body.pos.clone();
+    let puck_pos = puck.body.pos;
     let puck_speed = puck.body.linear_velocity.norm();
 
-    let touches = entry.or_insert_with(|| ArrayDeque::new());
+    let touches = entry.or_default();
     let most_recent_touch = touches.front_mut();
 
     match most_recent_touch {
@@ -1056,7 +1046,7 @@ fn get_faceoff_positions(
 
         let team = player.team();
 
-        let preferred_position = preferred_positions.get(&player_id).map(|x| *x);
+        let preferred_position = preferred_positions.get(&player_id).copied();
 
         if team == Some(Team::Red) {
             red_players.push((player_id, preferred_position));
@@ -1075,7 +1065,7 @@ fn is_past_line(player: ServerPlayer, team: Team, line: &RinkLine) -> bool {
     if let Some((skater_team, skater)) = player.skater() {
         if skater_team == team {
             let feet_pos =
-                &skater.body.pos - (&skater.body.rot * Vector3::y().scale(skater.height));
+                skater.body.pos - (skater.body.rot * Vector3::y().scale(skater.height));
             if (team == Team::Red && line.side_of_line(&feet_pos, 0.0) == BlueSide)
                 || (team == Team::Blue && line.side_of_line(&feet_pos, 0.0) == RedSide)
             {
@@ -1323,12 +1313,12 @@ fn get_faceoff_spot(
                 ),
             ];
             for (s, offset) in offsets {
-                let pos = center_position + rot * &offset;
+                let pos = center_position + rot * offset;
 
-                player_positions.insert(s, (pos, rot.clone()));
+                player_positions.insert(s, (pos, *rot));
             }
 
-            player_positions.insert("G", (goalie_pos.clone(), rot.clone()));
+            player_positions.insert("G", (*goalie_pos, *rot));
 
             player_positions
         }

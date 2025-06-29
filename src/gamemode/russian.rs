@@ -92,11 +92,11 @@ impl RussianGameMode {
 
                 let remaining_attempts = self.attempts;
                 let msg = if remaining_attempts >= 2 {
-                    format!("{} attempts left for {}", remaining_attempts, team)
+                    format!("{remaining_attempts} attempts left for {team}")
                 } else if remaining_attempts == 1 {
-                    format!("Last attempt for {}", team)
+                    format!("Last attempt for {team}")
                 } else {
-                    format!("Tie-breaker round for {}", team)
+                    format!("Tie-breaker round for {team}")
                 };
                 server.players_mut().add_server_chat_message(msg);
             }
@@ -109,11 +109,11 @@ impl RussianGameMode {
                     }
                     let remaining_attempts = self.attempts.saturating_sub(*round);
                     let msg = if remaining_attempts >= 2 {
-                        format!("{} attempts left for {}", remaining_attempts, team)
+                        format!("{remaining_attempts} attempts left for {team}")
                     } else if remaining_attempts == 1 {
-                        format!("Last attempt for {}", team)
+                        format!("Last attempt for {team}")
                     } else {
-                        format!("Tie-breaker round for {}", team)
+                        format!("Tie-breaker round for {team}")
                     };
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -154,14 +154,14 @@ impl RussianGameMode {
             let pos = Point3::new(0.5, 2.0, z);
             server
                 .players_mut()
-                .spawn_skater(player_id, Team::Red, pos, rot.clone(), false);
+                .spawn_skater(player_id, Team::Red, pos, rot, false);
         }
         for (index, player_id) in blue_players.into_iter().enumerate() {
             let z = (length / 2.0) - (12.0 + index as f32);
             let pos = Point3::new(0.5, 2.0, z);
             server
                 .players_mut()
-                .spawn_skater(player_id, Team::Blue, pos, rot.clone(), false);
+                .spawn_skater(player_id, Team::Blue, pos, rot, false);
         }
     }
 
@@ -191,7 +191,7 @@ impl RussianGameMode {
         if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
             info!("{} ({}) reset game", name, player_id);
-            let msg = format!("Game reset by {}", name);
+            let msg = format!("Game reset by {name}");
 
             server.new_game(self.get_initial_game_values());
 
@@ -213,8 +213,7 @@ impl RussianGameMode {
                 let force_player_name = force_player.name();
                 if server.players_mut().move_to_spectator(force_player_id) {
                     let msg = format!(
-                        "{} forced off ice by {}",
-                        force_player_name, admin_player_name
+                        "{force_player_name} forced off ice by {admin_player_name}"
                     );
                     info!(
                         "{} ({}) forced {} ({}) off ice",
@@ -261,7 +260,7 @@ impl GameMode for RussianGameMode {
                     for collision_ball in skater.collision_balls.iter_mut() {
                         let pos = &collision_ball.pos;
                         let radius = collision_ball.radius;
-                        let overlap = (&p - pos).dot(&normal) + radius;
+                        let overlap = (p - pos).dot(&normal) + radius;
                         if overlap > 0.0 {
                             let mut new = normal.scale(overlap * 0.03125)
                                 - collision_ball.velocity.scale(0.25);
@@ -360,12 +359,9 @@ impl GameMode for RussianGameMode {
                 values.time = values.time.saturating_sub(1);
                 if values.time == 0 {
                     self.check_ending(values);
-                    match self.status {
-                        RussianStatus::Game { in_zone, .. } => {
-                            let other_team = in_zone.get_other_team();
-                            self.place_puck_for_team(server, other_team);
-                        }
-                        _ => {}
+                    if let RussianStatus::Game { in_zone, .. } = self.status {
+                        let other_team = in_zone.get_other_team();
+                        self.place_puck_for_team(server, other_team);
                     }
                 }
             }

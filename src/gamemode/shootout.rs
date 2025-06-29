@@ -63,11 +63,11 @@ impl ShootoutGameMode {
 
         let remaining_attempts = self.attempts.saturating_sub(round);
         let msg = if remaining_attempts >= 2 {
-            format!("{} attempts left for {}", remaining_attempts, team)
+            format!("{remaining_attempts} attempts left for {team}")
         } else if remaining_attempts == 1 {
-            format!("Last attempt for {}", team)
+            format!("Last attempt for {team}")
         } else {
-            format!("Tie-breaker round for {}", team)
+            format!("Tie-breaker round for {team}")
         };
         server.players_mut().add_server_chat_message(msg);
 
@@ -117,42 +117,34 @@ impl ShootoutGameMode {
             };
         let center_pos = Point3::new(width / 2.0, 1.5, length / 2.0);
         for (index, player_index) in attacking_players.into_iter().enumerate() {
-            let mut pos = center_pos + &attacking_rot * Vector3::new(0.0, 0.0, 3.0);
+            let mut pos = center_pos + attacking_rot * Vector3::new(0.0, 0.0, 3.0);
             if index > 0 {
                 let dist = ((index / 2) + 1) as f32;
 
-                let side = if index % 2 == 0 {
-                    Vector3::new(-1.5 * dist, 0.0, 0.0)
-                } else {
-                    Vector3::new(-1.5 * dist, 0.0, 0.0)
-                };
-                pos += &attacking_rot * side;
+                let side = Vector3::new(-1.5 * dist, 0.0, 0.0);
+                pos += attacking_rot * side;
             }
             server.players_mut().spawn_skater(
                 player_index,
                 team,
                 pos,
-                attacking_rot.clone(),
+                attacking_rot,
                 false,
             );
         }
         for (index, player_index) in defending_players.into_iter().enumerate() {
-            let mut pos = goalie_pos.clone();
+            let mut pos = goalie_pos;
             if index > 0 {
                 let dist = ((index / 2) + 1) as f32;
 
-                let side = if index % 2 == 0 {
-                    Vector3::new(-1.5 * dist, 0.0, 0.0)
-                } else {
-                    Vector3::new(-1.5 * dist, 0.0, 0.0)
-                };
-                pos += &defending_rot * side;
+                let side = Vector3::new(-1.5 * dist, 0.0, 0.0);
+                pos += defending_rot * side;
             }
             server.players_mut().spawn_skater(
                 player_index,
                 defending_team,
                 pos,
-                defending_rot.clone(),
+                defending_rot,
                 false,
             );
         }
@@ -245,7 +237,7 @@ impl ShootoutGameMode {
         if let Some(player) = server.players_mut().check_admin_or_deny(player_id) {
             let name = player.name();
             info!("{} ({}) reset game", name, player_id);
-            let msg = format!("Game reset by {}", name);
+            let msg = format!("Game reset by {name}");
 
             server.new_game(self.get_initial_game_values());
 
@@ -267,8 +259,7 @@ impl ShootoutGameMode {
                 let force_player_id = force_player.id;
                 if server.players_mut().move_to_spectator(force_player_id) {
                     let msg = format!(
-                        "{} forced off ice by {}",
-                        force_player_name, admin_player_name
+                        "{force_player_name} forced off ice by {admin_player_name}"
                     );
                     info!(
                         "{} ({}) forced {} ({}) off ice",
@@ -297,7 +288,7 @@ impl ShootoutGameMode {
                         "{} ({}) changed red score to {}",
                         name, player_id, input_score
                     );
-                    let msg = format!("Red score changed by {}", name);
+                    let msg = format!("Red score changed by {name}");
                     server.players_mut().add_server_chat_message(msg);
                 }
                 Team::Blue => {
@@ -307,7 +298,7 @@ impl ShootoutGameMode {
                         "{} ({}) changed blue score to {}",
                         name, player_id, input_score
                     );
-                    let msg = format!("Blue score changed by {}", name);
+                    let msg = format!("Blue score changed by {name}");
                     server.players_mut().add_server_chat_message(msg);
                 }
             }
@@ -341,8 +332,7 @@ impl ShootoutGameMode {
                     name, player_id, input_round, name
                 );
                 let msg = format!(
-                    "Round changed to {} for {} by {}",
-                    input_round, input_team, name
+                    "Round changed to {input_round} for {input_team} by {name}"
                 );
                 server.players_mut().add_server_chat_message(msg);
             }
@@ -376,8 +366,7 @@ impl ShootoutGameMode {
                 name, player_id, input_round, input_team
             );
             let msg = format!(
-                "Round changed to {} for {} by {}",
-                input_round, input_team, name
+                "Round changed to {input_round} for {input_team} by {name}"
             );
             server.players_mut().add_server_chat_message(msg);
             self.update_gameover(server.rb_mut());
@@ -394,7 +383,7 @@ impl ShootoutGameMode {
             let name = player.name();
 
             info!("{} ({}) paused game", name, player_id);
-            let msg = format!("Game paused by {}", name);
+            let msg = format!("Game paused by {name}");
             server.players_mut().add_server_chat_message(msg);
         }
     }
@@ -411,7 +400,7 @@ impl ShootoutGameMode {
             }
             let name = player.name();
             info!("{} ({}) resumed game", name, player_id);
-            let msg = format!("Game resumed by {}", name);
+            let msg = format!("Game resumed by {name}");
 
             server.players_mut().add_server_chat_message(msg);
         }
@@ -469,11 +458,9 @@ impl GameMode for ShootoutGameMode {
                                 if let ShootoutAttemptState::NoMoreAttack { .. } = *state {
                                     self.end_attempt(server.rb_mut(), false);
                                 }
-                            } else {
-                                if let ShootoutAttemptState::Attack { progress } = *state {
-                                    *state = ShootoutAttemptState::NoMoreAttack {
-                                        final_progress: progress,
-                                    }
+                            } else if let ShootoutAttemptState::Attack { progress } = *state {
+                                *state = ShootoutAttemptState::NoMoreAttack {
+                                    final_progress: progress,
                                 }
                             }
                         }
@@ -532,37 +519,35 @@ impl GameMode for ShootoutGameMode {
                         if values.time == 0 {
                             values.time = 1; // A hack to avoid "Intermission" or "Game starting"
                             self.end_attempt(server, false);
-                        } else {
-                            if let Some(puck) = server.pucks().get_puck(0) {
-                                let puck_pos = &puck.body.pos;
-                                let center_pos = Point3::new(
-                                    server.rink().width / 2.0,
-                                    0.0,
-                                    server.rink().length / 2.0,
-                                );
-                                let pos_diff = puck_pos - center_pos;
-                                let normal = match *team {
-                                    Team::Red => -Vector3::z(),
-                                    Team::Blue => Vector3::z(),
-                                };
-                                let progress = pos_diff.dot(&normal);
-                                if let ShootoutAttemptState::Attack {
-                                    progress: current_progress,
-                                } = state
-                                {
-                                    if progress > *current_progress {
-                                        *current_progress = progress;
-                                    } else if progress - *current_progress < -0.5 {
-                                        // Too far back
-                                        self.end_attempt(server, false);
-                                    }
-                                } else if let ShootoutAttemptState::NoMoreAttack {
-                                    final_progress,
-                                } = *state
-                                {
-                                    if progress - final_progress < -5.0 {
-                                        self.end_attempt(server, false);
-                                    }
+                        } else if let Some(puck) = server.pucks().get_puck(0) {
+                            let puck_pos = &puck.body.pos;
+                            let center_pos = Point3::new(
+                                server.rink().width / 2.0,
+                                0.0,
+                                server.rink().length / 2.0,
+                            );
+                            let pos_diff = puck_pos - center_pos;
+                            let normal = match *team {
+                                Team::Red => -Vector3::z(),
+                                Team::Blue => Vector3::z(),
+                            };
+                            let progress = pos_diff.dot(&normal);
+                            if let ShootoutAttemptState::Attack {
+                                progress: current_progress,
+                            } = state
+                            {
+                                if progress > *current_progress {
+                                    *current_progress = progress;
+                                } else if progress - *current_progress < -0.5 {
+                                    // Too far back
+                                    self.end_attempt(server, false);
+                                }
+                            } else if let ShootoutAttemptState::NoMoreAttack {
+                                final_progress,
+                            } = *state
+                            {
+                                if progress - final_progress < -5.0 {
+                                    self.end_attempt(server, false);
                                 }
                             }
                         }

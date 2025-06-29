@@ -134,61 +134,61 @@ impl RinkNet {
             back_lower_left,
             back_lower_right,
         ) = (
-            &pos + &rot * Vector3::new(-front_half_width, height, 0.0),
-            &pos + &rot * Vector3::new(front_half_width, height, 0.0),
-            &pos + &rot * Vector3::new(-front_half_width, 0.0, 0.0),
-            &pos + &rot * Vector3::new(front_half_width, 0.0, 0.0),
-            &pos + &rot * Vector3::new(-back_half_width, height, -upper_depth),
-            &pos + &rot * Vector3::new(back_half_width, height, -upper_depth),
-            &pos + &rot * Vector3::new(-back_half_width, 0.0, -lower_depth),
-            &pos + &rot * Vector3::new(back_half_width, 0.0, -lower_depth),
+            pos + rot * Vector3::new(-front_half_width, height, 0.0),
+            pos + rot * Vector3::new(front_half_width, height, 0.0),
+            pos + rot * Vector3::new(-front_half_width, 0.0, 0.0),
+            pos + rot * Vector3::new(front_half_width, 0.0, 0.0),
+            pos + rot * Vector3::new(-back_half_width, height, -upper_depth),
+            pos + rot * Vector3::new(back_half_width, height, -upper_depth),
+            pos + rot * Vector3::new(-back_half_width, 0.0, -lower_depth),
+            pos + rot * Vector3::new(back_half_width, 0.0, -lower_depth),
         );
 
         RinkNet {
             posts: vec![
-                (front_lower_right.clone(), front_upper_right.clone(), 0.1875),
-                (front_lower_left.clone(), front_upper_left.clone(), 0.1875),
-                (front_upper_right.clone(), front_upper_left.clone(), 0.125),
-                (front_lower_left.clone(), back_lower_left.clone(), 0.125),
-                (front_lower_right.clone(), back_lower_right.clone(), 0.125),
-                (front_upper_left.clone(), back_upper_left.clone(), 0.125),
-                (back_upper_right.clone(), front_upper_right.clone(), 0.125),
-                (back_lower_left.clone(), back_upper_left.clone(), 0.125),
-                (back_lower_right.clone(), back_upper_right.clone(), 0.125),
-                (back_lower_left.clone(), back_lower_right.clone(), 0.125),
-                (back_upper_left.clone(), back_upper_right.clone(), 0.125),
+                (front_lower_right, front_upper_right, 0.1875),
+                (front_lower_left, front_upper_left, 0.1875),
+                (front_upper_right, front_upper_left, 0.125),
+                (front_lower_left, back_lower_left, 0.125),
+                (front_lower_right, back_lower_right, 0.125),
+                (front_upper_left, back_upper_left, 0.125),
+                (back_upper_right, front_upper_right, 0.125),
+                (back_lower_left, back_upper_left, 0.125),
+                (back_lower_right, back_upper_right, 0.125),
+                (back_lower_left, back_lower_right, 0.125),
+                (back_upper_left, back_upper_right, 0.125),
             ],
             surfaces: vec![
                 (
-                    back_upper_left.clone(),
-                    back_upper_right.clone(),
-                    back_lower_right.clone(),
-                    back_lower_left.clone(),
+                    back_upper_left,
+                    back_upper_right,
+                    back_lower_right,
+                    back_lower_left,
                 ),
                 (
-                    front_upper_left.clone(),
-                    back_upper_left.clone(),
-                    back_lower_left.clone(),
-                    front_lower_left.clone(),
+                    front_upper_left,
+                    back_upper_left,
+                    back_lower_left,
+                    front_lower_left,
                 ),
                 (
                     front_upper_right,
-                    front_lower_right.clone(),
-                    back_lower_right.clone(),
-                    back_upper_right.clone(),
+                    front_lower_right,
+                    back_lower_right,
+                    back_upper_right,
                 ),
                 (
-                    front_upper_left.clone(),
-                    front_upper_right.clone(),
-                    back_upper_right.clone(),
-                    back_upper_left.clone(),
+                    front_upper_left,
+                    front_upper_right,
+                    back_upper_right,
+                    back_upper_left,
                 ),
             ],
-            left_post: front_lower_left.clone(),
-            right_post: front_lower_right.clone(),
+            left_post: front_lower_left,
+            right_post: front_lower_right,
             normal: rot * Vector3::z(),
-            left_post_inside: &rot * Vector3::x(),
-            right_post_inside: &rot * -Vector3::x(),
+            left_post_inside: rot * Vector3::x(),
+            right_post_inside: rot * -Vector3::x(),
         }
     }
 }
@@ -220,11 +220,11 @@ impl Rink {
     pub(crate) fn new(width: f32, length: f32, corner_radius: f32) -> Self {
         let zero = Point3::new(0.0, 0.0, 0.0);
         let planes = vec![
-            (zero.clone(), Vector3::y_axis()),
+            (zero, Vector3::y_axis()),
             (Point3::new(0.0, 0.0, length), -Vector3::z_axis()),
-            (zero.clone(), Vector3::z_axis()),
+            (zero, Vector3::z_axis()),
             (Point3::new(width, 0.0, 0.0), -Vector3::x_axis()),
-            (zero.clone(), Vector3::x_axis()),
+            (zero, Vector3::x_axis()),
         ];
         let r = corner_radius;
         let wr = width - corner_radius;
@@ -343,13 +343,13 @@ impl SkaterObject {
         let collision_balls = SkaterObject::get_collision_balls(&pos, &rot, &linear_velocity, 1.0);
         SkaterObject {
             body: PhysicsBody {
-                pos: pos.clone(),
+                pos,
                 linear_velocity,
                 rot,
                 angular_velocity: Vector3::new(0.0, 0.0, 0.0),
                 rot_mul: Vector3::new(2.75, 6.16, 2.35),
             },
-            stick_pos: pos.clone(),
+            stick_pos: pos,
             stick_velocity: Vector3::new(0.0, 0.0, 0.0),
             stick_rot: Rotation3::identity(),
             head_rot: 0.0,
@@ -377,61 +377,60 @@ impl SkaterObject {
         linear_velocity: &Vector3<f32>,
         mass: f32,
     ) -> Vec<SkaterCollisionBall> {
-        let mut collision_balls = Vec::with_capacity(6);
-        collision_balls.push(SkaterCollisionBall::from_skater(
+        vec![
+        SkaterCollisionBall::from_skater(
             Vector3::new(0.0, 0.0, 0.0),
             pos,
             rot,
             linear_velocity,
             0.225,
             mass,
-        ));
-        collision_balls.push(SkaterCollisionBall::from_skater(
+        ),
+        SkaterCollisionBall::from_skater(
             Vector3::new(0.25, 0.3125, 0.0),
             pos,
             rot,
             linear_velocity,
             0.25,
             mass,
-        ));
-        collision_balls.push(SkaterCollisionBall::from_skater(
+        ),
+        SkaterCollisionBall::from_skater(
             Vector3::new(-0.25, 0.3125, 0.0),
             pos,
             rot,
             linear_velocity,
             0.25,
             mass,
-        ));
-        collision_balls.push(SkaterCollisionBall::from_skater(
+        ),
+        SkaterCollisionBall::from_skater(
             Vector3::new(-0.1875, -0.1875, 0.0),
             pos,
             rot,
             linear_velocity,
             0.1875,
             mass,
-        ));
-        collision_balls.push(SkaterCollisionBall::from_skater(
+        ),
+        SkaterCollisionBall::from_skater(
             Vector3::new(0.1875, -0.1875, 0.0),
             pos,
             rot,
             linear_velocity,
             0.1875,
             mass,
-        ));
-        collision_balls.push(SkaterCollisionBall::from_skater(
+        ),
+        SkaterCollisionBall::from_skater(
             Vector3::new(0.0, 0.5, 0.0),
             pos,
-            &rot,
+            rot,
             linear_velocity,
             0.1875,
             mass,
-        ));
-        collision_balls
+        )]
     }
 
     pub(crate) fn get_packet(&self) -> SkaterPacket {
-        let rot = protocol::convert_matrix_to_network(31, &self.body.rot.matrix());
-        let stick_rot = protocol::convert_matrix_to_network(25, &self.stick_rot.matrix());
+        let rot = protocol::convert_matrix_to_network(31, self.body.rot.matrix());
+        let stick_rot = protocol::convert_matrix_to_network(25, self.stick_rot.matrix());
 
         SkaterPacket {
             pos: (
@@ -470,7 +469,7 @@ impl SkaterCollisionBall {
         radius: f32,
         mass: f32,
     ) -> Self {
-        let pos = skater_pos + skater_rot * &offset;
+        let pos = skater_pos + skater_rot * offset;
         SkaterCollisionBall {
             offset,
             pos,
@@ -569,12 +568,12 @@ impl Puck {
                 rot_mul: Vector3::new(223.5, 128.0, 223.5),
             },
             radius: 0.125,
-            height: 0.0412500016391,
+            height: 0.041_25,
         }
     }
 
     pub(crate) fn get_packet(&self) -> PuckPacket {
-        let rot = protocol::convert_matrix_to_network(31, &self.body.rot.matrix());
+        let rot = protocol::convert_matrix_to_network(31, self.body.rot.matrix());
         PuckPacket {
             pos: (
                 get_position(17, 1024.0 * self.body.pos.x),
@@ -595,7 +594,7 @@ impl Puck {
                     (j as f32) * self.height,
                     sin * self.radius,
                 );
-                let point2 = &self.body.rot * point;
+                let point2 = self.body.rot * point;
                 let index = i * 3 + 1 - j;
                 res[index as usize] = self.body.pos + point2;
             }

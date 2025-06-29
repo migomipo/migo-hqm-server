@@ -15,7 +15,7 @@ const UYN: Vector3<f32> = Vector3::new(0.0, -1.0, 0.0);
 const UZP: Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
 const UZN: Vector3<f32> = Vector3::new(0.0, 0.0, -1.0);
 
-const TABLE: [[&'static Vector3<f32>; 3]; 8] = [
+const TABLE: [[&Vector3<f32>; 3]; 8] = [
     [&UYP, &UXP, &UZP],
     [&UYP, &UZP, &UXN],
     [&UYP, &UZN, &UXP],
@@ -56,7 +56,7 @@ impl HQMMessageCodec {
         &self,
         src: &[u8],
     ) -> Result<HQMClientToServerMessage, HQMClientToServerMessageDecoderError> {
-        let mut parser = HQMMessageReader::new(&src);
+        let mut parser = HQMMessageReader::new(src);
         let mut header = [0; 4];
         parser.read_bytes_aligned(&mut header);
         if header != GAME_HEADER {
@@ -141,7 +141,7 @@ impl HQMMessageCodec {
                 let mut bytes = [0; 256];
 
                 parser.read_bytes_aligned(&mut bytes[0..byte_num]);
-                let msg = String::from_utf8((&mut bytes[0..byte_num]).to_vec())?;
+                let msg = String::from_utf8(bytes[0..byte_num].to_vec())?;
                 Some((rep, msg))
             } else {
                 None
@@ -183,7 +183,7 @@ fn get_player_name(bytes: &[u8]) -> Result<String, FromUtf8Error> {
 
     let bytes = match first_null {
         Some(x) => &bytes[0..x],
-        None => &bytes[..],
+        None => bytes,
     }
     .to_vec();
     let name = String::from_utf8(bytes)?;
@@ -212,9 +212,9 @@ pub fn convert_matrix_from_network(b: u8, v1: u32, v2: u32) -> Matrix3<f32> {
 fn convert_rot_column_from_network(b: u8, v: u32) -> Vector3<f32> {
     let start = v & 7;
 
-    let mut temp1 = TABLE[start as usize][0].clone();
-    let mut temp2 = TABLE[start as usize][1].clone();
-    let mut temp3 = TABLE[start as usize][2].clone();
+    let mut temp1 = *TABLE[start as usize][0];
+    let mut temp2 = *TABLE[start as usize][1];
+    let mut temp3 = *TABLE[start as usize][2];
     let mut pos = 3;
     while pos < b {
         let step = (v >> pos) & 3;
@@ -262,20 +262,20 @@ fn convert_rot_column_to_network<S: Storage<f32, U3, U1>>(
     if v[1] < 0.0 {
         res |= 4
     }
-    let mut temp1 = TABLE[res as usize][0].clone();
-    let mut temp2 = TABLE[res as usize][1].clone();
-    let mut temp3 = TABLE[res as usize][2].clone();
+    let mut temp1 = *TABLE[res as usize][0];
+    let mut temp2 = *TABLE[res as usize][1];
+    let mut temp3 = *TABLE[res as usize][2];
     for i in (3..b).step_by(2) {
         let temp4 = (temp1 + temp2).normalize();
         let temp5 = (temp2 + temp3).normalize();
         let temp6 = (temp1 + temp3).normalize();
 
         let a1 = (temp4 - temp6).cross(&(v - temp6));
-        if a1.dot(&v) < 0.0 {
+        if a1.dot(v) < 0.0 {
             let a2 = (temp5 - temp4).cross(&(v - temp4));
-            if a2.dot(&v) < 0.0 {
+            if a2.dot(v) < 0.0 {
                 let a3 = (temp6 - temp5).cross(&(v - temp5));
-                if a3.dot(&v) < 0.0 {
+                if a3.dot(v) < 0.0 {
                     res |= 3 << i;
                     temp1 = temp4;
                     temp2 = temp5;
@@ -338,13 +338,13 @@ impl<'a> HQMMessageWriter<'a> {
             Some(old_v) => (v as i32) - (old_v as i32),
             None => i32::MAX,
         };
-        if diff >= -(2 ^ 2) && diff <= 2 ^ 2 - 1 {
+        if (-(2 ^ 2)..=2 ^ (2 - 1)).contains(&diff) {
             self.write_bits(2, 0);
             self.write_bits(3, diff as u32);
-        } else if diff >= -(2 ^ 5) && diff <= 2 ^ 5 - 1 {
+        } else if (-(2 ^ 5)..=2 ^ (5 - 1)).contains(&diff) {
             self.write_bits(2, 1);
             self.write_bits(6, diff as u32);
-        } else if diff >= -(2 ^ 11) && diff <= 2 ^ 11 - 1 {
+        } else if (-(2 ^ 11)..=2 ^ (11 - 1)).contains(&diff) {
             self.write_bits(2, 2);
             self.write_bits(12, diff as u32);
         } else {
@@ -414,8 +414,8 @@ impl<'a> HQMMessageReader<'a> {
     pub fn read_byte_aligned(&mut self) -> u8 {
         self.align();
         let res = self.safe_get_byte(self.pos);
-        self.pos = self.pos + 1;
-        return res;
+        self.pos += 1;
+        res
     }
 
     pub fn read_bytes_aligned(&mut self, out: &mut [u8]) {
@@ -425,15 +425,15 @@ impl<'a> HQMMessageReader<'a> {
         for i in 0..n {
             out[i] = self.safe_get_byte(self.pos + i)
         }
-        self.pos = self.pos + n;
+        self.pos += n;
     }
 
     pub fn read_u16_aligned(&mut self) -> u16 {
         self.align();
         let b1: u16 = self.safe_get_byte(self.pos).into();
         let b2: u16 = self.safe_get_byte(self.pos + 1).into();
-        self.pos = self.pos + 2;
-        return b1 | b2 << 8;
+        self.pos += 2;
+        b1 | b2 << 8
     }
 
     pub fn read_u32_aligned(&mut self) -> u32 {
@@ -442,13 +442,13 @@ impl<'a> HQMMessageReader<'a> {
         let b2: u32 = self.safe_get_byte(self.pos + 1).into();
         let b3: u32 = self.safe_get_byte(self.pos + 2).into();
         let b4: u32 = self.safe_get_byte(self.pos + 3).into();
-        self.pos = self.pos + 4;
-        return b1 | b2 << 8 | b3 << 16 | b4 << 24;
+        self.pos += 4;
+        b1 | b2 << 8 | b3 << 16 | b4 << 24
     }
 
     pub fn read_f32_aligned(&mut self) -> f32 {
         let i = self.read_u32_aligned();
-        return f32::from_bits(i);
+        f32::from_bits(i)
     }
 
     #[allow(dead_code)]
@@ -503,7 +503,7 @@ impl<'a> HQMMessageReader<'a> {
             };
             let a = byte & mask;
             let a: u32 = a.into();
-            res = res | (a << p);
+            res |= a << p;
 
             self.bit_pos += bits;
             if self.bit_pos == 8 {
@@ -512,7 +512,7 @@ impl<'a> HQMMessageReader<'a> {
             }
             p += bits;
         }
-        return res;
+        res
     }
 
     pub fn align(&mut self) {
@@ -578,8 +578,8 @@ pub(crate) fn write_message(writer: &mut HQMMessageWriter, message: &HQMMessage)
             let size = min(63, message_bytes.len());
             writer.write_bits(6, size as u32);
 
-            for i in 0..size {
-                writer.write_bits(7, message_bytes[i] as u32);
+            for b in message_bytes.iter().take(size).copied() {
+                writer.write_bits(7, b as u32);
             }
         }
         HQMMessage::Goal {

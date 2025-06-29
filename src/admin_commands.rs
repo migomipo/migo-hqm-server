@@ -215,7 +215,7 @@ impl HQMServer {
                 let msg = format!("{} started server restart", player.player_name);
                 self.state.players.add_server_chat_message(msg);
                 let ctl = systemctl::SystemCtl::default();
-                if let Err(_) = ctl.restart(server_service) {
+                if ctl.restart(server_service).is_err() {
                     self.state
                         .players
                         .add_directed_server_chat_message("Restart failed", admin_player_id);
@@ -267,7 +267,7 @@ impl HQMServer {
             } else if kick_player_name.ends_with("%") {
                 Matching::EndsWith(&kick_player_name[0..kick_player_name.len() - 1])
             } else {
-                Matching::Equals(&kick_player_name)
+                Matching::Equals(kick_player_name)
             };
 
             let kick_player_list: Vec<_> = self
@@ -302,56 +302,54 @@ impl HQMServer {
                                 "{} ({}) banned {} ({})",
                                 admin_player_name, admin_player_id, player_name, player_id
                             );
-                            let msg = format!("{} banned by {}", player_name, admin_player_name);
+                            let msg = format!("{player_name} banned by {admin_player_name}");
                             self.state.players.add_server_chat_message(msg);
                         } else {
                             info!(
                                 "{} ({}) kicked {} ({})",
                                 admin_player_name, admin_player_id, player_name, player_id
                             );
-                            let msg = format!("{} kicked by {}", player_name, admin_player_name);
+                            let msg = format!("{player_name} kicked by {admin_player_name}");
                             self.state.players.add_server_chat_message(msg);
                         }
+                    } else if ban_player {
+                        self.state.players.add_directed_server_chat_message(
+                            "You cannot ban yourself",
+                            admin_player_id,
+                        );
                     } else {
-                        if ban_player {
-                            self.state.players.add_directed_server_chat_message(
-                                "You cannot ban yourself",
-                                admin_player_id,
-                            );
-                        } else {
-                            self.state.players.add_directed_server_chat_message(
-                                "You cannot kick yourself",
-                                admin_player_id,
-                            );
-                        }
+                        self.state.players.add_directed_server_chat_message(
+                            "You cannot kick yourself",
+                            admin_player_id,
+                        );
                     }
                 }
             } else {
                 match matching {
                     Matching::Equals(_) => {
                         // full string
-                        let msg = format!("No player names match {}", kick_player_name);
+                        let msg = format!("No player names match {kick_player_name}");
                         self.state
                             .players
                             .add_directed_server_chat_message(msg, admin_player_id);
                     }
                     Matching::StartsWith(_) => {
                         // begins with%
-                        let msg = format!("No player names begin with {}", kick_player_name);
+                        let msg = format!("No player names begin with {kick_player_name}");
                         self.state
                             .players
                             .add_directed_server_chat_message(msg, admin_player_id);
                     }
                     Matching::EndsWith(_) => {
                         // %ends with
-                        let msg = format!("No player names end with {}", kick_player_name);
+                        let msg = format!("No player names end with {kick_player_name}");
                         self.state
                             .players
                             .add_directed_server_chat_message(msg, admin_player_id);
                     }
                     Matching::Contains(_) => {
                         // %contains%
-                        let msg = format!("No player names contain {}", kick_player_name);
+                        let msg = format!("No player names contain {kick_player_name}");
                         self.state
                             .players
                             .add_directed_server_chat_message(msg, admin_player_id);
@@ -385,7 +383,7 @@ impl HQMServer {
                 {
                     if let ServerPlayerData::NetworkPlayer { data } = &kick_player.data {
                         let kick_player_name = kick_player.player_name.clone();
-                        let kick_ip = data.addr.ip().clone();
+                        let kick_ip = data.addr.ip();
                         behaviour.before_player_exit(
                             self.into(),
                             kick_player_id,
@@ -404,7 +402,7 @@ impl HQMServer {
                                 kick_player_id
                             );
                             let msg =
-                                format!("{} banned by {}", kick_player_name, admin_player_name);
+                                format!("{kick_player_name} banned by {admin_player_name}");
                             self.state.players.add_server_chat_message(msg);
                         } else {
                             info!(
@@ -415,23 +413,21 @@ impl HQMServer {
                                 kick_player_id
                             );
                             let msg =
-                                format!("{} kicked by {}", kick_player_name, admin_player_name);
+                                format!("{kick_player_name} kicked by {admin_player_name}");
                             self.state.players.add_server_chat_message(msg);
                         }
                     }
                 }
+            } else if ban_player {
+                self.state.players.add_directed_server_chat_message(
+                    "You cannot ban yourself",
+                    admin_player_id,
+                );
             } else {
-                if ban_player {
-                    self.state.players.add_directed_server_chat_message(
-                        "You cannot ban yourself",
-                        admin_player_id,
-                    );
-                } else {
-                    self.state.players.add_directed_server_chat_message(
-                        "You cannot kick yourself",
-                        admin_player_id,
-                    );
-                }
+                self.state.players.add_directed_server_chat_message(
+                    "You cannot kick yourself",
+                    admin_player_id,
+                );
             }
         }
     }

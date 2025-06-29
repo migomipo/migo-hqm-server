@@ -614,10 +614,10 @@ impl PuckExt for [Option<Puck>] {
     }
 
     fn get_puck(&self, index: usize) -> Option<&Puck> {
-        self.get(index).map(|x| x.as_ref()).flatten()
+        self.get(index).and_then(|x| x.as_ref())
     }
 
     fn get_puck_mut(&mut self, index: usize) -> Option<&mut Puck> {
-        self.get_mut(index).map(|x| x.as_mut()).flatten()
+        self.get_mut(index).and_then(|x| x.as_mut())
     }
 }

@@ -9,8 +9,8 @@ use tracing::info;
 
 pub fn add_players<
     F1: Fn(Team, usize) -> (Point3<f32>, Rotation3<f32>),
-    FSpectate: FnMut(PlayerId) -> (),
-    FJoin: FnMut(PlayerId, Team) -> (),
+    FSpectate: FnMut(PlayerId),
+    FJoin: FnMut(PlayerId, Team),
 >(
     mut server: ServerPlayersMut,
     team_max: usize,
@@ -41,15 +41,13 @@ pub fn add_players<
             } else {
                 blue_player_count += 1;
             }
-        } else {
-            if (input.join_red() || input.join_blue())
-                && team_switch_timer.get(&player_id).map_or(true, |x| *x == 0)
-            {
-                if input.join_red() {
-                    joining_red.push((player_id, player.name()));
-                } else if input.join_blue() {
-                    joining_blue.push((player_id, player.name()));
-                }
+        } else if (input.join_red() || input.join_blue())
+            && team_switch_timer.get(&player_id).is_none_or(|x| *x == 0)
+        {
+            if input.join_red() {
+                joining_red.push((player_id, player.name()));
+            } else if input.join_blue() {
+                joining_blue.push((player_id, player.name()));
             }
         }
     }
@@ -58,7 +56,7 @@ pub fn add_players<
         server.move_to_spectator(player_id);
         on_spectate(player_id);
         if let Some(show_extra_messages) = show_extra_messages {
-            let s = format!("{} is spectating", player_name);
+            let s = format!("{player_name} is spectating");
             for i in show_extra_messages.iter() {
                 server.add_directed_server_chat_message(s.clone(), *i);
             }
@@ -81,7 +79,7 @@ pub fn add_players<
                     *player_count += 1;
                     on_join(player_id, team);
                     if let Some(show_extra_messages) = show_extra_messages {
-                        let s = format!("{} is playing for Red", player_name);
+                        let s = format!("{player_name} is playing for Red");
                         for msg_player_id in show_extra_messages.iter() {
                             server.add_directed_server_chat_message(s.clone(), *msg_player_id);
                         }

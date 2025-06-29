@@ -19,8 +19,6 @@ use migo_hqm_server::record::{
     RecordingSaveMethod, RecordingSaveToFile, RecordingSendToHttpEndpoint,
 };
 use migo_hqm_server::{ReplayRecording, ServerConfiguration};
-use tracing_appender;
-use tracing_subscriber;
 
 enum HQMServerMode {
     Match,
@@ -96,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
 
         let log_name = server_section
             .get("log_name")
-            .map_or(format!("{}.log", server_name), |x| String::from(x));
+            .map_or(format!("{server_name}.log"), String::from);
 
         let welcome = server_section.get("welcome").unwrap_or("");
 
@@ -399,7 +397,7 @@ async fn main() -> anyhow::Result<()> {
             }
         };
     } else {
-        println!("Could not open configuration file {}!", config_path);
+        println!("Could not open configuration file {config_path}!");
     };
     Ok(())
 }

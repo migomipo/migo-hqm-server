@@ -69,8 +69,7 @@ impl StandardMatchGameMode {
                 let force_player_name = force_player.name();
                 if server.players_mut().move_to_spectator(force_player_id) {
                     let msg = format!(
-                        "{} forced off ice by {}",
-                        force_player_name, admin_player_name
+                        "{force_player_name} forced off ice by {admin_player_name}"
                     );
                     info!(
                         "{} ({}) forced {} ({}) off ice",
@@ -91,7 +90,7 @@ impl StandardMatchGameMode {
                     let name = player.name();
 
                     info!("{} ({}) set team size to {}", name, player_id, new_num);
-                    let msg = format!("Team size set to {} by {}", new_num, name);
+                    let msg = format!("Team size set to {new_num} by {name}");
 
                     server.players_mut().add_server_chat_message(msg);
                 }
@@ -292,14 +291,13 @@ impl GameMode for StandardMatchGameMode {
                             player_id,
                         );
                     }
-                } else if arg.eq_ignore_ascii_case("false") || arg.eq_ignore_ascii_case("off") {
-                    if self.show_extra_messages.remove(&player_id) {
+                } else if (arg.eq_ignore_ascii_case("false") || arg.eq_ignore_ascii_case("off"))
+                    && self.show_extra_messages.remove(&player_id) {
                         server.players_mut().add_directed_server_chat_message(
                             "Team change messages de-activated",
                             player_id,
                         );
                     }
-                }
             }
             _ => {}
         };
