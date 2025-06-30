@@ -338,13 +338,14 @@ impl<'a> HQMMessageWriter<'a> {
             Some(old_v) => (v as i32) - (old_v as i32),
             None => i32::MAX,
         };
-        if (-(2 ^ 2)..=2 ^ (2 - 1)).contains(&diff) {
+
+        if (-2i32.pow(2)..=2i32.pow(2) - 1).contains(&diff) {
             self.write_bits(2, 0);
             self.write_bits(3, diff as u32);
-        } else if (-(2 ^ 5)..=2 ^ (5 - 1)).contains(&diff) {
+        } else if (-2i32.pow(5)..=2i32.pow(5) - 1).contains(&diff) {
             self.write_bits(2, 1);
             self.write_bits(6, diff as u32);
-        } else if (-(2 ^ 11)..=2 ^ (11 - 1)).contains(&diff) {
+        } else if (-2i32.pow(11)..=2i32.pow(11) - 1).contains(&diff) {
             self.write_bits(2, 2);
             self.write_bits(12, diff as u32);
         } else {

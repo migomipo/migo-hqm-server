@@ -378,54 +378,55 @@ impl SkaterObject {
         mass: f32,
     ) -> Vec<SkaterCollisionBall> {
         vec![
-        SkaterCollisionBall::from_skater(
-            Vector3::new(0.0, 0.0, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.225,
-            mass,
-        ),
-        SkaterCollisionBall::from_skater(
-            Vector3::new(0.25, 0.3125, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.25,
-            mass,
-        ),
-        SkaterCollisionBall::from_skater(
-            Vector3::new(-0.25, 0.3125, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.25,
-            mass,
-        ),
-        SkaterCollisionBall::from_skater(
-            Vector3::new(-0.1875, -0.1875, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.1875,
-            mass,
-        ),
-        SkaterCollisionBall::from_skater(
-            Vector3::new(0.1875, -0.1875, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.1875,
-            mass,
-        ),
-        SkaterCollisionBall::from_skater(
-            Vector3::new(0.0, 0.5, 0.0),
-            pos,
-            rot,
-            linear_velocity,
-            0.1875,
-            mass,
-        )]
+            SkaterCollisionBall::from_skater(
+                Vector3::new(0.0, 0.0, 0.0),
+                pos,
+                rot,
+                linear_velocity,
+                0.225,
+                mass,
+            ),
+            SkaterCollisionBall::from_skater(
+                Vector3::new(0.25, 0.3125, 0.0),
+                pos,
+                rot,
+                linear_velocity,
+                0.25,
+                mass,
+            ),
+            SkaterCollisionBall::from_skater(
+                Vector3::new(-0.25, 0.3125, 0.0),
+                pos,
+                rot,
+                linear_velocity,
+                0.25,
+                mass,
+            ),
+            SkaterCollisionBall::from_skater(
+                Vector3::new(-0.1875, -0.1875, 0.0),
+                pos,
+                rot,
+                linear_velocity,
+                0.1875,
+                mass,
+            ),
+            SkaterCollisionBall::from_skater(
+                Vector3::new(0.1875, -0.1875, 0.0),
+                pos,
+                rot,
+                linear_velocity,
+                0.1875,
+                mass,
+            ),
+            SkaterCollisionBall::from_skater(
+                Vector3::new(0.0, 0.5, 0.0),
+                pos,
+                rot,
+                linear_velocity,
+                0.1875,
+                mass,
+            ),
+        ]
     }
 
     pub(crate) fn get_packet(&self) -> SkaterPacket {

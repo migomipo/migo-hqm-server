@@ -146,13 +146,17 @@ impl PlayerListExt for [ServerStatePlayerItem] {
         &self,
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &HQMServerPlayer)> {
-        self.get(player_index.0).and_then(|(c, x)| x.as_ref().map(|p| (
-                PlayerId {
-                    index: player_index,
-                    counter: *c,
-                },
-                p,
-            )))
+        self.get(player_index.0).and_then(|(c, x)| {
+            x.as_ref().map(|p| {
+                (
+                    PlayerId {
+                        index: player_index,
+                        counter: *c,
+                    },
+                    p,
+                )
+            })
+        })
     }
 
     fn get_player(&self, player_id: PlayerId) -> Option<&HQMServerPlayer> {
@@ -166,13 +170,17 @@ impl PlayerListExt for [ServerStatePlayerItem] {
         &mut self,
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &mut HQMServerPlayer)> {
-        self.get_mut(player_index.0).and_then(|(c, x)| x.as_mut().map(|p| (
-                PlayerId {
-                    index: player_index,
-                    counter: *c,
-                },
-                p,
-            )))
+        self.get_mut(player_index.0).and_then(|(c, x)| {
+            x.as_mut().map(|p| {
+                (
+                    PlayerId {
+                        index: player_index,
+                        counter: *c,
+                    },
+                    p,
+                )
+            })
+        })
     }
 
     fn get_player_mut(&mut self, player_id: PlayerId) -> Option<&mut HQMServerPlayer> {
@@ -185,25 +193,33 @@ impl PlayerListExt for [ServerStatePlayerItem] {
     fn iter_players(&self) -> impl Iterator<Item = (PlayerId, &HQMServerPlayer)> {
         self.iter()
             .enumerate()
-            .filter_map(|(player_index, (c, player))| player.as_ref().map(|p| (
-                    PlayerId {
-                        index: PlayerIndex(player_index),
-                        counter: *c,
-                    },
-                    p,
-                )))
+            .filter_map(|(player_index, (c, player))| {
+                player.as_ref().map(|p| {
+                    (
+                        PlayerId {
+                            index: PlayerIndex(player_index),
+                            counter: *c,
+                        },
+                        p,
+                    )
+                })
+            })
     }
 
     fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerId, &mut HQMServerPlayer)> {
         self.iter_mut()
             .enumerate()
-            .filter_map(|(player_index, (c, player))| player.as_mut().map(|p| (
-                    PlayerId {
-                        index: PlayerIndex(player_index),
-                        counter: *c,
-                    },
-                    p,
-                )))
+            .filter_map(|(player_index, (c, player))| {
+                player.as_mut().map(|p| {
+                    (
+                        PlayerId {
+                            index: PlayerIndex(player_index),
+                            counter: *c,
+                        },
+                        p,
+                    )
+                })
+            })
     }
 }
 
@@ -583,7 +599,6 @@ impl HQMTickHistory {
     }
 
     fn check_replay(&mut self) -> Option<(Option<PlayerId>, ReplayTick)> {
-        
         self.replay_queue.pop_front()
     }
 }
@@ -680,7 +695,6 @@ impl HQMServer {
         ban: Box<dyn BanCheck>,
         save_recording: Box<dyn RecordingSaveMethod>,
     ) -> Self {
-        
         HQMServer {
             state: HQMServerState::new(initial_values.puck_slots, initial_values.values),
             allow_join: true,
@@ -1714,8 +1728,9 @@ impl HQMServerPlayer {
 
     fn add_message(&mut self, message: Rc<HQMMessage>) {
         if let ServerPlayerData::NetworkPlayer {
-                data: NetworkPlayerData { messages, .. },
-            } = &mut self.data {
+            data: NetworkPlayerData { messages, .. },
+        } = &mut self.data
+        {
             messages.push(message);
         }
     }

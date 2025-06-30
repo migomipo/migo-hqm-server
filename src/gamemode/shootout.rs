@@ -124,13 +124,9 @@ impl ShootoutGameMode {
                 let side = Vector3::new(-1.5 * dist, 0.0, 0.0);
                 pos += attacking_rot * side;
             }
-            server.players_mut().spawn_skater(
-                player_index,
-                team,
-                pos,
-                attacking_rot,
-                false,
-            );
+            server
+                .players_mut()
+                .spawn_skater(player_index, team, pos, attacking_rot, false);
         }
         for (index, player_index) in defending_players.into_iter().enumerate() {
             let mut pos = goalie_pos;
@@ -258,9 +254,7 @@ impl ShootoutGameMode {
                 let force_player_name = force_player.name();
                 let force_player_id = force_player.id;
                 if server.players_mut().move_to_spectator(force_player_id) {
-                    let msg = format!(
-                        "{force_player_name} forced off ice by {admin_player_name}"
-                    );
+                    let msg = format!("{force_player_name} forced off ice by {admin_player_name}");
                     info!(
                         "{} ({}) forced {} ({}) off ice",
                         admin_player_name, admin_player_id, force_player_name, force_player_index
@@ -331,9 +325,7 @@ impl ShootoutGameMode {
                     "{} ({}) changed round to {} for {}",
                     name, player_id, input_round, name
                 );
-                let msg = format!(
-                    "Round changed to {input_round} for {input_team} by {name}"
-                );
+                let msg = format!("Round changed to {input_round} for {input_team} by {name}");
                 server.players_mut().add_server_chat_message(msg);
             }
             self.update_gameover(server);
@@ -365,9 +357,7 @@ impl ShootoutGameMode {
                 "{} ({}) changed round to {} for {}",
                 name, player_id, input_round, input_team
             );
-            let msg = format!(
-                "Round changed to {input_round} for {input_team} by {name}"
-            );
+            let msg = format!("Round changed to {input_round} for {input_team} by {name}");
             server.players_mut().add_server_chat_message(msg);
             self.update_gameover(server.rb_mut());
             self.paused = false;
@@ -542,9 +532,8 @@ impl GameMode for ShootoutGameMode {
                                     // Too far back
                                     self.end_attempt(server, false);
                                 }
-                            } else if let ShootoutAttemptState::NoMoreAttack {
-                                final_progress,
-                            } = *state
+                            } else if let ShootoutAttemptState::NoMoreAttack { final_progress } =
+                                *state
                             {
                                 if progress - final_progress < -5.0 {
                                     self.end_attempt(server, false);

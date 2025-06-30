@@ -401,8 +401,7 @@ impl HQMServer {
                                 kick_player_name,
                                 kick_player_id
                             );
-                            let msg =
-                                format!("{kick_player_name} banned by {admin_player_name}");
+                            let msg = format!("{kick_player_name} banned by {admin_player_name}");
                             self.state.players.add_server_chat_message(msg);
                         } else {
                             info!(
@@ -412,22 +411,19 @@ impl HQMServer {
                                 kick_player_name,
                                 kick_player_id
                             );
-                            let msg =
-                                format!("{kick_player_name} kicked by {admin_player_name}");
+                            let msg = format!("{kick_player_name} kicked by {admin_player_name}");
                             self.state.players.add_server_chat_message(msg);
                         }
                     }
                 }
             } else if ban_player {
-                self.state.players.add_directed_server_chat_message(
-                    "You cannot ban yourself",
-                    admin_player_id,
-                );
+                self.state
+                    .players
+                    .add_directed_server_chat_message("You cannot ban yourself", admin_player_id);
             } else {
-                self.state.players.add_directed_server_chat_message(
-                    "You cannot kick yourself",
-                    admin_player_id,
-                );
+                self.state
+                    .players
+                    .add_directed_server_chat_message("You cannot kick yourself", admin_player_id);
             }
         }
     }

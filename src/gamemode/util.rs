@@ -29,9 +29,10 @@ pub fn add_players<
         let player_id = player.id;
         let input = player.input();
         let team = player.team();
-        team_switch_timer
-            .get_mut(&player_id)
-            .map(|x| *x = x.saturating_sub(1));
+        if let Some(x) = team_switch_timer
+            .get_mut(&player_id) {
+            *x = x.saturating_sub(1)
+        }
         if let Some(team) = team {
             if input.spectate() {
                 team_switch_timer.insert(player_id, 500);

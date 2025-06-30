@@ -690,24 +690,25 @@ fn puck_detection(
         events: &mut PhysicsEventList,
     ) {
         if (net.left_post - puck_pos).dot(&net.normal) >= 0.0
-            && (net.left_post - old_puck_pos).dot(&net.normal) < 0.0 {
-                if (net.left_post - puck_pos).dot(&net.left_post_inside) < 0.0
-                    && (net.right_post - puck_pos).dot(&net.right_post_inside) < 0.0
-                    && puck_pos.y < 1.0
-                {
-                    let event = PhysicsEvent::PuckEnteredNet {
-                        team,
-                        puck: puck_index,
-                    };
-                    events.push(event);
-                } else {
-                    let event = PhysicsEvent::PuckPassedGoalLine {
-                        team,
-                        puck: puck_index,
-                    };
-                    events.push(event);
-                }
+            && (net.left_post - old_puck_pos).dot(&net.normal) < 0.0
+        {
+            if (net.left_post - puck_pos).dot(&net.left_post_inside) < 0.0
+                && (net.right_post - puck_pos).dot(&net.right_post_inside) < 0.0
+                && puck_pos.y < 1.0
+            {
+                let event = PhysicsEvent::PuckEnteredNet {
+                    team,
+                    puck: puck_index,
+                };
+                events.push(event);
+            } else {
+                let event = PhysicsEvent::PuckPassedGoalLine {
+                    team,
+                    puck: puck_index,
+                };
+                events.push(event);
             }
+        }
     }
 
     check_lines(
@@ -887,7 +888,6 @@ fn get_stick_surfaces(
     let ppp =
         player.stick_pos + player.stick_rot * vector![0.5, 0.5, 0.5].component_mul(&stick_size);
 
-    
     [
         (nnp, pnp, pnn, nnn),
         (npp, ppp, pnp, nnp),
@@ -928,18 +928,16 @@ fn collision_between_sphere_and_net(
 
         if overlap > 0.0 && overlap < radius {
             let overlap_pos = pos + (radius - overlap) * *normal;
-            if inside_surface(&overlap_pos, surface, &normal)
-                && overlap > max_overlap {
-                    max_overlap = overlap;
-                    res = Some((overlap_pos, overlap, normal));
-                }
+            if inside_surface(&overlap_pos, surface, &normal) && overlap > max_overlap {
+                max_overlap = overlap;
+                res = Some((overlap_pos, overlap, normal));
+            }
         } else if overlap2 > 0.0 && overlap2 < radius {
             let overlap_pos = pos + (radius - overlap) * *normal;
-            if inside_surface(&overlap_pos, surface, &normal)
-                && overlap2 > max_overlap {
-                    max_overlap = overlap2;
-                    res = Some((overlap_pos, overlap2, -normal));
-                }
+            if inside_surface(&overlap_pos, surface, &normal) && overlap2 > max_overlap {
+                max_overlap = overlap2;
+                res = Some((overlap_pos, overlap2, -normal));
+            }
         }
     }
 

@@ -215,7 +215,10 @@ impl Match {
                 || blue_score.saturating_sub(red_score) >= self.config.mercy)
         {
             true
-        } else { self.config.first_to > 0 && (red_score >= self.config.first_to || blue_score >= self.config.first_to) };
+        } else {
+            self.config.first_to > 0
+                && (red_score >= self.config.first_to || blue_score >= self.config.first_to)
+        };
         if values.game_over && !old_game_over {
             self.pause_timer = self.pause_timer.max(time_gameover);
         } else if !values.game_over && old_game_over {
@@ -313,9 +316,7 @@ impl Match {
         let str2 = if let Some(puck_speed_from_stick) = puck_speed_from_stick {
             let (puck_speed_converted, puck_speed_unit) =
                 convert(puck_speed_from_stick, self.config.use_mph);
-            format!(
-                ", {puck_speed_converted:.1} {puck_speed_unit} from stick"
-            )
+            format!(", {puck_speed_converted:.1} {puck_speed_unit} from stick")
         } else {
             "".to_owned()
         };
@@ -885,7 +886,10 @@ impl Match {
     }
 
     pub fn get_initial_game_values(&mut self) -> InitialGameValues {
-        let mut values = ScoreboardValues::default();
+        let mut values = ScoreboardValues {
+            time: self.config.time_warmup * 100,
+            ..ScoreboardValues::default()
+        };
 
         values.time = self.config.time_warmup * 100;
         InitialGameValues {
@@ -1064,8 +1068,7 @@ fn get_faceoff_positions(
 fn is_past_line(player: ServerPlayer, team: Team, line: &RinkLine) -> bool {
     if let Some((skater_team, skater)) = player.skater() {
         if skater_team == team {
-            let feet_pos =
-                skater.body.pos - (skater.body.rot * Vector3::y().scale(skater.height));
+            let feet_pos = skater.body.pos - (skater.body.rot * Vector3::y().scale(skater.height));
             if (team == Team::Red && line.side_of_line(&feet_pos, 0.0) == BlueSide)
                 || (team == Team::Blue && line.side_of_line(&feet_pos, 0.0) == RedSide)
             {
