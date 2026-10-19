@@ -15,7 +15,6 @@ impl HQMServer {
         if let Some(admin_player) = self
             .state
             .player_message_state
-            .players
             .check_admin_or_deny(admin_player_id)
         {
             let admin_player_name = admin_player.player_name.clone();
@@ -45,7 +44,6 @@ impl HQMServer {
         if let Some(admin_player) = self
             .state
             .player_message_state
-            .players
             .check_admin_or_deny(admin_player_id)
         {
             let admin_player_name = admin_player.player_name.clone();
@@ -86,7 +84,6 @@ impl HQMServer {
         if let Some(admin_player) = self
             .state
             .player_message_state
-            .players
             .check_admin_or_deny(admin_player_id)
         {
             let admin_player_name = admin_player.player_name.clone();
@@ -128,7 +125,6 @@ impl HQMServer {
         if let Some(player) = self
             .state
             .player_message_state
-            .players
             .check_admin_or_deny(admin_player_id)
         {
             self.is_muted = true;
@@ -143,7 +139,6 @@ impl HQMServer {
         if let Some(player) = self
             .state
             .player_message_state
-            .players
             .check_admin_or_deny(admin_player_id)
         {
             self.is_muted = false;
@@ -190,7 +185,6 @@ impl HQMServer {
         if let Some(player) = self
             .state
             .player_message_state
-            .players
             .check_admin_or_deny(admin_player_id)
         {
             if let Some(server_service) = self.config.server_service.as_deref() {
@@ -216,7 +210,6 @@ impl HQMServer {
         if let Some(player) = self
             .state
             .player_message_state
-            .players
             .check_admin_or_deny(admin_player_id)
         {
             let admin_player_name = player.player_name.clone();
@@ -355,7 +348,6 @@ impl HQMServer {
         if let Some(player) = self
             .state
             .player_message_state
-            .players
             .check_admin_or_deny(admin_player_id)
         {
             let admin_player_name = player.player_name.clone();
@@ -418,7 +410,6 @@ impl HQMServer {
         if let Some(player) = self
             .state
             .player_message_state
-            .players
             .check_admin_or_deny(admin_player_id)
         {
             self.ban.clear_all_bans();
@@ -433,7 +424,6 @@ impl HQMServer {
         if let Some(player) = self
             .state
             .player_message_state
-            .players
             .check_admin_or_deny(admin_player_id)
         {
             match rule {

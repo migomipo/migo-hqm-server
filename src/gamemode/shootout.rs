@@ -349,7 +349,6 @@ impl AttackState {
         if end.goal_scored {
             server
                 .state_mut()
-                .players_mut()
                 .add_goal_message(game_state.team, None, None);
         } else {
             server.add_server_chat_message("Miss");

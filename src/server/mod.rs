@@ -1091,6 +1091,7 @@ impl HQMServer {
         behaviour: &mut B,
     ) {
         let tick_output = tokio::task::block_in_place(|| self.advance_tick(behaviour));
+        self.state.player_message_state.flush_messages();
         if let Some(tick_output) = tick_output {
             send_updates(
                 self.game_id,

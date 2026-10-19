@@ -45,19 +45,6 @@ pub(crate) trait PlayerListExt {
 
     fn iter_players_mut(&mut self) -> impl Iterator<Item = (PlayerId, &mut ServerPlayer)>;
 
-    fn check_admin_or_deny(&mut self, player_id: PlayerId) -> Option<&ServerPlayer> {
-        if let Some(player) = self.get_player_mut(player_id) {
-            if player.is_admin {
-                Some(player)
-            } else {
-                player.add_directed_server_chat_message("Please log in before using that command");
-                None
-            }
-        } else {
-            None
-        }
-    }
-
     fn find_player_by_addr(&self, addr: SocketAddr) -> Option<(PlayerId, &ServerPlayer)> {
         self.iter_players().find(|(_, x)| {
             if let ServerPlayerData::NetworkPlayer { data } = &x.data {
@@ -232,25 +219,131 @@ pub(crate) enum MessageRecording {
     Include,
 }
 
-pub(crate) struct ServerPlayersAndMessages {
-    pub(crate) players: PlayerSlots,
+#[derive(Clone, Copy)]
+enum MessageRecipients {
+    All,
+    Player(PlayerId),
+}
 
+/// Messages waiting to be delivered to the players' message queues, along with the message
+/// lists for late joiners and recordings.
+///
+/// Messages are queued here instead of being added to each player's queue directly, so that
+/// sending a message does not require mutable access to the player list. The queue is delivered
+/// with [ServerPlayersAndMessages::flush_messages] before anything reads the players' message
+/// queues or depends on which players a message was sent to, so clients receive the same
+/// messages in the same order as if they had been delivered immediately.
+pub(crate) struct ServerMessages {
+    pending: Vec<(MessageRecipients, Rc<HQMMessage>)>,
     persistent_messages: Vec<Rc<HQMMessage>>,
     recording_messages: Vec<Rc<HQMMessage>>,
+}
+
+impl ServerMessages {
+    fn new() -> Self {
+        Self {
+            pending: vec![],
+            persistent_messages: vec![],
+            recording_messages: vec![],
+        }
+    }
+
+    pub(crate) fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
+        let chat = HQMMessage::Chat {
+            player_index: None,
+            message: message.into(),
+        };
+        self.broadcast_message(chat, MessageRetention::Transient, MessageRecording::Include);
+    }
+
+    pub(crate) fn add_directed_chat_message(
+        &mut self,
+        message: impl Into<Cow<'static, str>>,
+        receiver_id: PlayerId,
+        sender_index: Option<PlayerIndex>,
+    ) {
+        let chat = HQMMessage::Chat {
+            player_index: sender_index,
+            message: message.into(),
+        };
+        self.pending
+            .push((MessageRecipients::Player(receiver_id), Rc::new(chat)));
+    }
+
+    pub(crate) fn add_directed_server_chat_message(
+        &mut self,
+        message: impl Into<Cow<'static, str>>,
+        receiver_id: PlayerId,
+    ) {
+        self.add_directed_chat_message(message, receiver_id, None);
+    }
+
+    pub(crate) fn broadcast_message(
+        &mut self,
+        message: HQMMessage,
+        retention: MessageRetention,
+        recording: MessageRecording,
+    ) {
+        let rc = Rc::new(message);
+        if matches!(recording, MessageRecording::Include) {
+            self.recording_messages.push(rc.clone());
+        }
+        if matches!(retention, MessageRetention::ForLateJoiners) {
+            self.persistent_messages.push(rc.clone());
+        }
+        self.pending.push((MessageRecipients::All, rc));
+    }
+}
+
+pub(crate) struct ServerPlayersAndMessages {
+    pub(crate) players: PlayerSlots,
+    pub(crate) messages: ServerMessages,
 }
 
 impl ServerPlayersAndMessages {
     pub(crate) fn new() -> Self {
         Self {
             players: PlayerSlots::new(),
-            persistent_messages: vec![],
-            recording_messages: vec![],
+            messages: ServerMessages::new(),
+        }
+    }
+
+    /// Delivers all queued messages to the players' message queues.
+    pub(crate) fn flush_messages(&mut self) {
+        for (recipients, message) in self.messages.pending.drain(..) {
+            match recipients {
+                MessageRecipients::All => {
+                    for (_, player) in self.players.iter_players_mut() {
+                        player.add_message(message.clone());
+                    }
+                }
+                MessageRecipients::Player(player_id) => {
+                    if let Some(player) = self.players.get_player_mut(player_id) {
+                        player.add_message(message);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns the player if the player is admin, otherwise sends a message telling the user to log in first.
+    pub(crate) fn check_admin_or_deny(&mut self, player_id: PlayerId) -> Option<&ServerPlayer> {
+        let player = self.players.get_player(player_id)?;
+        if player.is_admin {
+            Some(player)
+        } else {
+            self.messages.add_directed_server_chat_message(
+                "Please log in before using that command",
+                player_id,
+            );
+            None
         }
     }
 
     pub(crate) fn new_game(&mut self) {
-        self.recording_messages.clear();
-        self.persistent_messages.clear();
+        self.flush_messages();
+        self.messages.recording_messages.clear();
+        self.messages.persistent_messages.clear();
 
         let mut messages = Vec::new();
         for (player_id, player) in self.players.iter_players_mut() {
@@ -280,11 +373,7 @@ impl ServerPlayersAndMessages {
     }
 
     pub(crate) fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
-        let chat = HQMMessage::Chat {
-            player_index: None,
-            message: message.into(),
-        };
-        self.broadcast_message(chat, MessageRetention::Transient, MessageRecording::Include);
+        self.messages.add_server_chat_message(message);
     }
 
     pub fn add_directed_chat_message(
@@ -293,9 +382,8 @@ impl ServerPlayersAndMessages {
         receiver_id: PlayerId,
         sender_index: Option<PlayerIndex>,
     ) {
-        if let Some(player) = self.players.get_player_mut(receiver_id) {
-            player.add_directed_chat_message(message, sender_index)
-        }
+        self.messages
+            .add_directed_chat_message(message, receiver_id, sender_index);
     }
 
     pub fn add_directed_user_chat_message(
@@ -353,16 +441,8 @@ impl ServerPlayersAndMessages {
         retention: MessageRetention,
         recording: MessageRecording,
     ) {
-        let rc = Rc::new(message);
-        if matches!(recording, MessageRecording::Include) {
-            self.recording_messages.push(rc.clone());
-        }
-        if matches!(retention, MessageRetention::ForLateJoiners) {
-            self.persistent_messages.push(rc.clone());
-        }
-        for (_, player) in self.players.iter_players_mut() {
-            player.add_message(rc.clone());
-        }
+        self.messages
+            .broadcast_message(message, retention, recording);
     }
 
     pub(crate) fn add_user_team_message(&mut self, message: &str, sender_id: PlayerId) {
@@ -412,6 +492,9 @@ impl ServerPlayersAndMessages {
     }
 
     fn send_to_team(&mut self, team: Team, messages: &[Rc<HQMMessage>]) {
+        // Team membership is decided when the message is sent, so earlier messages must be
+        // delivered first to keep the order.
+        self.flush_messages();
         for (_, player) in self.players.iter_players_mut() {
             if player.team().is_some_and(|player_team| player_team == team) {
                 for message in messages {
@@ -425,6 +508,9 @@ impl ServerPlayersAndMessages {
         if self.players.find_player_by_addr(addr).is_some() {
             return None;
         }
+        // The new player gets a copy of the persistent messages, so earlier messages must be
+        // delivered first or the player would receive them twice.
+        self.flush_messages();
         let player_index = self.players.find_empty_slot();
         match player_index {
             Some(player_index) => {
@@ -432,7 +518,7 @@ impl ServerPlayersAndMessages {
                     player_index,
                     player_name,
                     addr,
-                    &self.persistent_messages,
+                    &self.messages.persistent_messages,
                 );
                 let update = new_player.get_update_message(player_index);
 
@@ -451,6 +537,7 @@ impl ServerPlayersAndMessages {
     }
 
     pub(crate) fn add_bot(&mut self, player_name: &str) -> Option<PlayerId> {
+        self.flush_messages();
         let player_index = self.players.find_empty_slot();
         match player_index {
             Some(player_index) => {
@@ -472,11 +559,11 @@ impl ServerPlayersAndMessages {
     }
 
     pub(crate) fn recording_messages_since(&self, message_pos: usize) -> &[Rc<HQMMessage>] {
-        &self.recording_messages[message_pos..]
+        &self.messages.recording_messages[message_pos..]
     }
 
     pub(crate) fn recording_message_count(&self) -> usize {
-        self.recording_messages.len()
+        self.messages.recording_messages.len()
     }
 }
 
@@ -625,30 +712,6 @@ impl ServerPlayer {
         }
     }
 
-    pub fn add_directed_user_chat_message(
-        &mut self,
-        message: impl Into<Cow<'static, str>>,
-        sender_index: PlayerIndex,
-    ) {
-        self.add_directed_chat_message(message, Some(sender_index));
-    }
-
-    pub fn add_directed_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
-        self.add_directed_chat_message(message, None);
-    }
-
-    pub fn add_directed_chat_message(
-        &mut self,
-        message: impl Into<Cow<'static, str>>,
-        sender_index: Option<PlayerIndex>,
-    ) {
-        let chat = HQMMessage::Chat {
-            player_index: sender_index,
-            message: message.into(),
-        };
-        self.add_message(Rc::new(chat));
-    }
-
     pub fn team(&self) -> Option<Team> {
         self.object.as_ref().map(|x| x.1)
     }
@@ -692,6 +755,81 @@ mod tests {
         assert_ne!(previous_id, current_id);
         assert!(slots.get_player(previous_id).is_none());
         assert!(slots.get_player(current_id).is_some());
+    }
+
+    fn chat_messages(state: &ServerPlayersAndMessages, player_id: PlayerId) -> Vec<String> {
+        let player = state.players.get_player(player_id).unwrap();
+        let ServerPlayerData::NetworkPlayer { data } = &player.data else {
+            panic!("expected a network player");
+        };
+        data.messages
+            .iter()
+            .filter_map(|message| match message.as_ref() {
+                HQMMessage::Chat { message, .. } => Some(message.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn goal_message_count(state: &ServerPlayersAndMessages, player_id: PlayerId) -> usize {
+        let player = state.players.get_player(player_id).unwrap();
+        let ServerPlayerData::NetworkPlayer { data } = &player.data else {
+            panic!("expected a network player");
+        };
+        data.messages
+            .iter()
+            .filter(|message| matches!(message.as_ref(), HQMMessage::Goal { .. }))
+            .count()
+    }
+
+    #[test]
+    fn queued_messages_keep_their_order_per_player() {
+        let mut state = ServerPlayersAndMessages::new();
+        let first = state
+            .add_player("first", "127.0.0.1:1".parse().unwrap())
+            .unwrap();
+        let second = state
+            .add_player("second", "127.0.0.1:2".parse().unwrap())
+            .unwrap();
+
+        state.add_server_chat_message("a");
+        state.add_directed_server_chat_message("b", first);
+        state.add_server_chat_message("c");
+        state.add_directed_server_chat_message("d", second);
+        assert!(chat_messages(&state, first).is_empty());
+
+        state.flush_messages();
+        assert_eq!(chat_messages(&state, first), ["a", "b", "c"]);
+        assert_eq!(chat_messages(&state, second), ["a", "c", "d"]);
+    }
+
+    #[test]
+    fn late_joiners_get_queued_persistent_messages_once() {
+        let mut state = ServerPlayersAndMessages::new();
+        state
+            .add_player("first", "127.0.0.1:1".parse().unwrap())
+            .unwrap();
+        state.add_goal_message(Team::Red, None, None);
+
+        let late = state
+            .add_player("late", "127.0.0.1:2".parse().unwrap())
+            .unwrap();
+        state.flush_messages();
+        assert_eq!(goal_message_count(&state, late), 1);
+    }
+
+    #[test]
+    fn directed_messages_are_not_delivered_to_a_new_player_in_the_same_slot() {
+        let mut state = ServerPlayersAndMessages::new();
+        let address = "127.0.0.1:1".parse().unwrap();
+        let old = state.add_player("old", address).unwrap();
+        state.add_directed_server_chat_message("for old", old);
+        state.players.remove(old);
+
+        let new = state.add_player("new", address).unwrap();
+        assert_eq!(new.index, old.index);
+        state.flush_messages();
+        assert!(chat_messages(&state, new).is_empty());
     }
 }
 

@@ -566,7 +566,6 @@ impl PlayingState {
         };
         server
             .state_mut()
-            .players_mut()
             .add_goal_message(team, goal_scorer, assist);
         let unit = if game_state.config.use_mph {
             "mph"

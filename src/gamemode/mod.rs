@@ -4,7 +4,8 @@ use crate::game::{
     ScoreboardValues, SkaterObject, Team,
 };
 use crate::players::{
-    PlayerListExt, ServerPlayer as InternalServerPlayer, ServerPlayerData, ServerPlayersAndMessages,
+    PlayerListExt, PlayerSlots, ServerMessages, ServerPlayer as InternalServerPlayer,
+    ServerPlayerData,
 };
 use crate::server::{GameObject, HQMServer, HQMServerState, HQMTickHistory, ObjectExt};
 use glam::Vec3;
@@ -261,7 +262,13 @@ impl<'a> ServerStateMut<'a> {
     /// Gets a mutable reference to player state.
     pub fn players_mut(&mut self) -> ServerPlayersMut<'_> {
         ServerPlayersMut {
-            state: &mut self.state.player_message_state,
+            players: &mut self.state.player_message_state.players,
+        }
+    }
+    /// Gets a handle for sending messages to players.
+    pub fn messages_mut(&mut self) -> ServerMessagesMut<'_> {
+        ServerMessagesMut {
+            messages: &mut self.state.player_message_state.messages,
         }
     }
     pub fn replay_mut(&mut self) -> ServerReplayMut<'_> {
@@ -277,7 +284,7 @@ impl<'a> ServerStateMut<'a> {
 
     pub fn players(&self) -> ServerPlayers<'_> {
         ServerPlayers {
-            state: &self.state.player_message_state,
+            players: &self.state.player_message_state.players,
         }
     }
 
@@ -296,7 +303,10 @@ impl<'a> ServerStateMut<'a> {
     pub fn as_mut_parts(&mut self) -> ServerStateMutParts<'_> {
         ServerStateMutParts {
             players: ServerPlayersMut {
-                state: &mut self.state.player_message_state,
+                players: &mut self.state.player_message_state.players,
+            },
+            messages: ServerMessagesMut {
+                messages: &mut self.state.player_message_state.messages,
             },
             objects: ServerObjectsMut {
                 objects: &mut self.state.objects,
@@ -329,7 +339,7 @@ impl<'a> ServerStateMut<'a> {
 
     /// Sends a server chat message to all players.
     pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
-        self.players_mut().add_server_chat_message(message);
+        self.messages_mut().add_server_chat_message(message);
     }
 
     /// Sends a server chat message to a single player.
@@ -338,15 +348,44 @@ impl<'a> ServerStateMut<'a> {
         message: impl Into<Cow<'static, str>>,
         receiver: PlayerId,
     ) {
-        self.players_mut()
+        self.messages_mut()
             .add_directed_server_chat_message(message, receiver);
+    }
+
+    /// Sends a chat message to all players as if it was written by a player.
+    ///
+    /// Nothing is sent if the sender is not on the server.
+    pub fn add_user_chat_message(
+        &mut self,
+        message: impl Into<Cow<'static, str>>,
+        sender: PlayerId,
+    ) {
+        let state = &mut self.state.player_message_state;
+        if state.players.get_player(sender).is_some() {
+            state.add_user_chat_message(message, sender.index);
+        }
+    }
+
+    /// Announces a goal. Scorer and assist are left out if they are no longer on the server.
+    pub fn add_goal_message(
+        &mut self,
+        team: Team,
+        goal_player_index: Option<PlayerId>,
+        assist_player_index: Option<PlayerId>,
+    ) {
+        self.state.player_message_state.add_goal_message(
+            team,
+            goal_player_index,
+            assist_player_index,
+        );
     }
 
     /// Returns the player's name if the player is admin, otherwise sends a message telling the user to log in first.
     pub fn require_admin(&mut self, player_id: PlayerId) -> Option<Rc<str>> {
-        self.players_mut()
+        self.state
+            .player_message_state
             .check_admin_or_deny(player_id)
-            .map(|player| player.name())
+            .map(|player| player.player_name.clone())
     }
 }
 
@@ -377,7 +416,7 @@ impl<'a> ServerState<'a> {
     /// Gets an immutable reference to player state.
     pub fn players(&self) -> ServerPlayers<'_> {
         ServerPlayers {
-            state: &self.state.player_message_state,
+            players: &self.state.player_message_state.players,
         }
     }
 
@@ -400,6 +439,7 @@ impl<'a> ServerState<'a> {
 #[non_exhaustive]
 pub struct ServerStateMutParts<'a> {
     pub players: ServerPlayersMut<'a>,
+    pub messages: ServerMessagesMut<'a>,
     pub objects: ServerObjectsMut<'a>,
     pub replay: ServerReplayMut<'a>,
 }
@@ -538,105 +578,81 @@ impl<'a> ServerReplay<'a> {
     }
 }
 
+/// Handle for sending messages to players.
+///
+/// This is separate from [ServerPlayersMut], so messages can be sent while the player list is
+/// borrowed, for example while iterating over the players.
+pub struct ServerMessagesMut<'a> {
+    messages: &'a mut ServerMessages,
+}
+
+impl<'a> ServerMessagesMut<'a> {
+    /// Sends a server chat message to all players.
+    pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
+        self.messages.add_server_chat_message(message);
+    }
+
+    /// Sends a server chat message to a single player.
+    ///
+    /// Nothing is sent if the player is not on the server.
+    pub fn add_directed_server_chat_message(
+        &mut self,
+        message: impl Into<Cow<'static, str>>,
+        receiver: PlayerId,
+    ) {
+        self.messages
+            .add_directed_server_chat_message(message, receiver);
+    }
+}
+
 /// Mutable handle to player state.
 #[derive(ReborrowTraits)]
 #[Const(ServerPlayers)]
 pub struct ServerPlayersMut<'a> {
     #[reborrow]
-    state: &'a mut ServerPlayersAndMessages,
+    players: &'a mut PlayerSlots,
 }
 
 impl<'a> ServerPlayersMut<'a> {
-    pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
-        self.state.add_server_chat_message(message);
-    }
-
-    pub fn add_directed_server_chat_message(
-        &mut self,
-        message: impl Into<Cow<'static, str>>,
-        receiver_index: PlayerId,
-    ) {
-        self.state
-            .add_directed_server_chat_message(message, receiver_index);
-    }
-
-    pub fn add_user_chat_message(
-        &mut self,
-        message: impl Into<Cow<'static, str>>,
-        sender_index: PlayerId,
-    ) {
-        if self.state.players.get_player(sender_index).is_some() {
-            self.state
-                .add_user_chat_message(message, sender_index.index);
-        }
-    }
-
-    pub fn add_goal_message(
-        &mut self,
-        team: Team,
-        goal_player_index: Option<PlayerId>,
-        assist_player_index: Option<PlayerId>,
-    ) {
-        self.state
-            .add_goal_message(team, goal_player_index, assist_player_index);
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = ServerPlayer<'_>> {
-        self.state
-            .players
+        self.players
             .iter_players()
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns a iterator over the players in the server, that also allows changing the player objects.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = ServerPlayerMut<'_>> {
-        self.state
-            .players
+        self.players
             .iter_players_mut()
             .map(|(id, player)| ServerPlayerMut { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get_by_index(&self, index: PlayerIndex) -> Option<ServerPlayer<'_>> {
-        self.state
-            .players
+        self.players
             .get_player_by_index(index)
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get(&self, id: PlayerId) -> Option<ServerPlayer<'_>> {
-        self.state
-            .players
+        self.players
             .get_player(id)
             .map(|player| ServerPlayer { id, player })
     }
 
     /// Returns a mutable handle to a player in the server.
     pub fn get_by_index_mut(&mut self, index: PlayerIndex) -> Option<ServerPlayerMut<'_>> {
-        self.state
-            .players
+        self.players
             .get_player_mut_by_index(index)
             .map(|(id, player)| ServerPlayerMut { id, player })
     }
 
     /// Returns a mutable handle to a player in the server.
     pub fn get_mut(&mut self, id: PlayerId) -> Option<ServerPlayerMut<'_>> {
-        self.state
-            .players
+        self.players
             .get_player_mut(id)
             .map(|player| ServerPlayerMut { id, player })
-    }
-
-    /// Returns a player object if the player is admin, otherwise sends a message telling the user to log in first.
-    pub fn check_admin_or_deny(&mut self, player_id: PlayerId) -> Option<ServerPlayer<'_>> {
-        self.state
-            .players
-            .check_admin_or_deny(player_id)
-            .map(|player| ServerPlayer {
-                id: player_id,
-                player,
-            })
     }
 
     /// Convenience method to count the number of players currently in the red or blue team.
@@ -649,30 +665,27 @@ impl<'a> ServerPlayersMut<'a> {
 /// Immutable handle to player state.
 #[derive(ReborrowCopyTraits)]
 pub struct ServerPlayers<'a> {
-    state: &'a ServerPlayersAndMessages,
+    players: &'a PlayerSlots,
 }
 
 impl<'a> ServerPlayers<'a> {
     /// Returns a iterator over the players in the server.
     pub fn iter(&self) -> impl Iterator<Item = ServerPlayer<'_>> {
-        self.state
-            .players
+        self.players
             .iter_players()
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get_by_index(&self, index: PlayerIndex) -> Option<ServerPlayer<'_>> {
-        self.state
-            .players
+        self.players
             .get_player_by_index(index)
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
     pub fn get(&self, id: PlayerId) -> Option<ServerPlayer<'_>> {
-        self.state
-            .players
+        self.players
             .get_player(id)
             .map(|player| ServerPlayer { id, player })
     }
@@ -726,10 +739,6 @@ impl<'a> ServerPlayerMut<'a> {
 
     pub fn name(&self) -> Rc<str> {
         self.player.player_name.clone()
-    }
-
-    pub fn add_directed_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
-        self.player.add_directed_server_chat_message(message);
     }
 
     pub fn player_type(&self) -> ServerPlayerType {
@@ -814,5 +823,39 @@ mod tests {
         }
 
         assert!(object_view.pucks().all(|(_, puck)| puck.radius == 0.25));
+    }
+
+    #[test]
+    fn messages_can_be_sent_while_iterating_players() {
+        let mut state = HQMServerState::new();
+        let player_id = state
+            .player_message_state
+            .add_player("test", "127.0.0.1:1".parse().unwrap())
+            .unwrap();
+
+        let mut handle = ServerStateMut { state: &mut state };
+        let ServerStateMutParts {
+            players,
+            mut messages,
+            ..
+        } = handle.as_mut_parts();
+        for player in players.iter() {
+            messages
+                .add_directed_server_chat_message(format!("Hello {}", player.name()), player.id);
+        }
+
+        state.player_message_state.flush_messages();
+        let player = state
+            .player_message_state
+            .players
+            .get_player(player_id)
+            .unwrap();
+        let ServerPlayerData::NetworkPlayer { data } = &player.data else {
+            panic!("expected a network player");
+        };
+        assert!(data.messages.iter().any(|message| matches!(
+            message.as_ref(),
+            crate::players::HQMMessage::Chat { message, .. } if message == "Hello test"
+        )));
     }
 }
