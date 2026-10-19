@@ -16,7 +16,7 @@ on:
 
 env:
   BIN: migo-hqm-server
-  # cross 0.2.5 (the latest release) has no LoongArch images, so those targets build cross from this main commit
+  # cross 0.2.5 (the latest release) has no LoongArch or RISC-V musl images, so those targets build cross from this main commit
   CROSS_MAIN: 526d03ddcd2f70e683074b3ea6f75ed300f33132
 
 permissions:
@@ -61,6 +61,7 @@ jobs:
             {"target": "x86_64-unknown-linux-musl", "os": "ubuntu-latest"},
             {"target": "x86_64-unknown-freebsd", "os": "ubuntu-latest"},
             {"target": "riscv64gc-unknown-linux-gnu", "os": "ubuntu-latest"},
+            {"target": "riscv64gc-unknown-linux-musl", "os": "ubuntu-latest", "cross-main": true},
             {"target": "loongarch64-unknown-linux-gnu", "os": "ubuntu-latest", "cross-main": true},
             {"target": "loongarch64-unknown-linux-musl", "os": "ubuntu-latest", "cross-main": true}
           ]'
