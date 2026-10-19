@@ -1,13 +1,12 @@
 use glam::Vec3;
 use glamx::Rot3;
 use reborrow::ReborrowMut;
-use std::collections::HashMap;
 use std::f32::consts::PI;
 use tracing::info;
 
 use crate::game::{PhysicsEvent, PlayerId, RulesState};
 use crate::game::{PlayerIndex, Puck, ScoreboardValues, Team};
-use crate::gamemode::util::{SpawnPoint, add_players, get_spawnpoint};
+use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
 use crate::gamemode::{ExitReason, GameMode, Server, ServerMut, ServerMutParts};
 
 #[derive(Debug, Clone)]
@@ -75,8 +74,7 @@ pub struct ShootoutGameConfiguration {
 pub struct ShootoutGameMode {
     config: ShootoutGameConfiguration,
     status: ServerStatus,
-    team_switch_timer: HashMap<PlayerId, u32>,
-    team_max: usize,
+    teams: TeamSelection,
 }
 
 #[derive(Debug, Clone)]
@@ -184,10 +182,7 @@ impl AttackState {
         } else {
             format!("Tie-breaker round for {team}")
         };
-        server
-            .state_mut()
-            .players_mut()
-            .add_server_chat_message(msg);
+        server.add_server_chat_message(msg);
         server.state_mut().objects_mut().remove_all_pucks();
 
         let length = server.rink().length;
@@ -357,10 +352,7 @@ impl AttackState {
                 .players_mut()
                 .add_goal_message(game_state.team, None, None);
         } else {
-            server
-                .state_mut()
-                .players_mut()
-                .add_server_chat_message("Miss");
+            server.add_server_chat_message("Miss");
         }
 
         OverState {
@@ -449,8 +441,7 @@ impl ShootoutGameMode {
                 time: 1000,
                 time_until_start: 500,
             },
-            team_switch_timer: Default::default(),
-            team_max: 1,
+            teams: TeamSelection::new(1),
         }
     }
 
@@ -462,33 +453,19 @@ impl ShootoutGameMode {
     fn update_players(&mut self, mut server: ServerMut) -> (usize, usize) {
         let ServerMutParts { state, rink, .. } = server.as_mut_parts();
         let rink = &*rink;
-        add_players(
-            state,
-            self.team_max,
-            &mut self.team_switch_timer,
-            None,
-            move |team, _| get_spawnpoint(rink, team, SpawnPoint::Bench),
-            |_| {},
-            |_, _| {},
-        )
+        self.teams.update(state, |team, _| {
+            get_spawnpoint(rink, team, SpawnPoint::Bench)
+        })
     }
 
     fn reset_game(&mut self, mut server: ServerMut, player_id: PlayerId) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(player_id)
-        {
-            let name = player.name();
+        if let Some(name) = server.require_admin(player_id) {
             info!("{} ({}) reset game", name, player_id);
             let msg = format!("Game reset by {name}");
 
             server.new_game();
 
-            server
-                .state_mut()
-                .players_mut()
-                .add_server_chat_message(msg);
+            server.add_server_chat_message(msg);
         }
     }
 
@@ -498,27 +475,20 @@ impl ShootoutGameMode {
         admin_player_id: PlayerId,
         force_player_index: PlayerIndex,
     ) {
-        if let Some(player) = server
-            .state_mut()
-            .players_mut()
-            .check_admin_or_deny(admin_player_id)
-        {
-            let admin_player_name = player.name();
-
+        if let Some(admin_player_name) = server.require_admin(admin_player_id) {
             if let Some(force_player) = server.state().players().get_by_index(force_player_index) {
                 let force_player_name = force_player.name();
                 let force_player_id = force_player.id;
-                if server.state_mut().move_to_spectator(force_player_id) {
+                if self
+                    .teams
+                    .force_spectate(server.state_mut(), force_player_id)
+                {
                     let msg = format!("{force_player_name} forced off ice by {admin_player_name}");
                     info!(
                         "{} ({}) forced {} ({}) off ice",
                         admin_player_name, admin_player_id, force_player_name, force_player_index
                     );
-                    server
-                        .state_mut()
-                        .players_mut()
-                        .add_server_chat_message(msg);
-                    self.team_switch_timer.insert(force_player_id, 500);
+                    server.add_server_chat_message(msg);
                 }
             }
         }
@@ -600,11 +570,11 @@ impl GameMode for ShootoutGameMode {
     }
 
     fn before_player_exit(&mut self, _server: ServerMut, player_id: PlayerId, _reason: ExitReason) {
-        self.team_switch_timer.remove(&player_id);
+        self.teams.remove_player(player_id);
     }
 
     fn server_list_team_size(&self) -> u32 {
-        self.team_max as u32
+        self.teams.team_max as u32
     }
 
     fn include_tick_in_recording(&self, _server: Server) -> bool {

@@ -154,6 +154,26 @@ impl<'a> ServerMut<'a> {
     pub fn config(&self) -> &ServerConfiguration {
         &self.server.config
     }
+
+    /// Sends a server chat message to all players.
+    pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
+        self.state_mut().add_server_chat_message(message);
+    }
+
+    /// Sends a server chat message to a single player.
+    pub fn add_directed_server_chat_message(
+        &mut self,
+        message: impl Into<Cow<'static, str>>,
+        receiver: PlayerId,
+    ) {
+        self.state_mut()
+            .add_directed_server_chat_message(message, receiver);
+    }
+
+    /// Returns the player's name if the player is admin, otherwise sends a message telling the user to log in first.
+    pub fn require_admin(&mut self, player_id: PlayerId) -> Option<Rc<str>> {
+        self.state_mut().require_admin(player_id)
+    }
 }
 
 /// Immutable handle to server.
@@ -258,6 +278,28 @@ impl<'a> ServerStateMut<'a> {
 
     pub fn move_to_spectator(&mut self, player_id: PlayerId) -> bool {
         self.state.move_to_spectator(player_id)
+    }
+
+    /// Sends a server chat message to all players.
+    pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
+        self.players_mut().add_server_chat_message(message);
+    }
+
+    /// Sends a server chat message to a single player.
+    pub fn add_directed_server_chat_message(
+        &mut self,
+        message: impl Into<Cow<'static, str>>,
+        receiver: PlayerId,
+    ) {
+        self.players_mut()
+            .add_directed_server_chat_message(message, receiver);
+    }
+
+    /// Returns the player's name if the player is admin, otherwise sends a message telling the user to log in first.
+    pub fn require_admin(&mut self, player_id: PlayerId) -> Option<Rc<str>> {
+        self.players_mut()
+            .check_admin_or_deny(player_id)
+            .map(|player| player.name())
     }
 }
 

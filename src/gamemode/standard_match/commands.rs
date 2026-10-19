@@ -10,16 +10,11 @@ use super::{
 
 impl StandardMatchGameMode {
     pub(super) fn handle_set(&mut self, mut server: ServerMut, arg: &str, player: PlayerId) {
-        let admin_name = {
-            let mut state = server.state_mut();
-            let mut players = state.players_mut();
-            let Some(admin) = players.check_admin_or_deny(player) else {
-                return;
-            };
-            admin.name()
+        let Some(admin_name) = server.require_admin(player) else {
+            return;
         };
         let old_config = self.config;
-        let old_team_max = self.team_max;
+        let old_team_max = self.teams.team_max;
         let old_state_values = match &self.state {
             StandardMatchState::Game(game) => (
                 game.game_state.score,
@@ -34,10 +29,7 @@ impl StandardMatchGameMode {
         if matches!(setting, "period" | "clock")
             && matches!(self.state, StandardMatchState::WaitingForGame(_))
         {
-            server
-                .state_mut()
-                .players_mut()
-                .add_directed_server_chat_message("No game is currently ongoing", player);
+            server.add_directed_server_chat_message("No game is currently ongoing", player);
             return;
         }
         match setting {
@@ -153,7 +145,7 @@ impl StandardMatchGameMode {
             "teamsize" => {
                 if let Ok(size) = value.parse() {
                     if (1..=15).contains(&size) {
-                        self.team_max = size;
+                        self.teams.team_max = size;
                     }
                 }
             }
@@ -168,7 +160,7 @@ impl StandardMatchGameMode {
             StandardMatchState::WaitingForGame(warmup) => (warmup.score, 0, warmup.time),
         };
         if self.config != old_config
-            || self.team_max != old_team_max
+            || self.teams.team_max != old_team_max
             || new_state_values != old_state_values
         {
             let message = match (setting, value) {
@@ -203,10 +195,7 @@ impl StandardMatchGameMode {
                 ("teamsize", _) => format!("Team size set to {value}"),
                 _ => format!("{setting} changed to {value}"),
             };
-            server
-                .state_mut()
-                .players_mut()
-                .add_server_chat_message(format!("{message} by {admin_name}"));
+            server.add_server_chat_message(format!("{message} by {admin_name}"));
         }
     }
 }

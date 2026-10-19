@@ -1,15 +1,14 @@
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::game::{Puck, ScoreboardValues};
-use crate::gamemode::util::{SpawnPoint, add_players, get_spawnpoint};
-use crate::gamemode::{GameMode, ServerMut, ServerMutParts};
+use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
+use crate::gamemode::{ExitReason, GameMode, ServerMut, ServerMutParts};
 use glam::Vec3;
 use glamx::Rot3;
-use std::collections::HashMap;
 
 pub struct PermanentWarmup {
     pucks: usize,
     spawn_point: SpawnPoint,
-    team_switch_timer: HashMap<PlayerId, u32>,
+    teams: TeamSelection,
 }
 
 impl PermanentWarmup {
@@ -17,22 +16,15 @@ impl PermanentWarmup {
         PermanentWarmup {
             pucks,
             spawn_point,
-            team_switch_timer: Default::default(),
+            teams: TeamSelection::new(usize::MAX).with_team_switch_cooldown(0),
         }
     }
     fn update_players(&mut self, mut server: ServerMut) {
         let spawn_point = self.spawn_point;
         let ServerMutParts { state, rink, .. } = server.as_mut_parts();
         let rink = &*rink;
-        add_players(
-            state,
-            usize::MAX,
-            &mut self.team_switch_timer,
-            None,
-            |team, _| get_spawnpoint(rink, team, spawn_point),
-            |_| {},
-            |_, _| {},
-        );
+        self.teams
+            .update(state, |team, _| get_spawnpoint(rink, team, spawn_point));
     }
 }
 
@@ -69,6 +61,10 @@ impl GameMode for PermanentWarmup {
                 .objects_mut()
                 .spawn_puck(Puck::new(pos, rot));
         }
+    }
+
+    fn before_player_exit(&mut self, _server: ServerMut, player_id: PlayerId, _reason: ExitReason) {
+        self.teams.remove_player(player_id);
     }
 
     fn server_list_team_size(&self) -> u32 {
