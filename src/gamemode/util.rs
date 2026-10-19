@@ -1,5 +1,5 @@
 use crate::game::{PlayerId, Rink, Team};
-use crate::gamemode::{GameContext, ServerMessagesMut};
+use crate::gamemode::{GameContext, Messages};
 use glam::Vec3;
 use glamx::Rot3;
 use smallvec::SmallVec;
@@ -131,7 +131,7 @@ impl TeamSelection {
         self.show_extra_messages.remove(&player_id);
     }
 
-    fn send_extra_message(&self, messages: &mut ServerMessagesMut, message: String) {
+    fn send_extra_message(&self, messages: &mut Messages, message: String) {
         for player_id in self.show_extra_messages.iter() {
             messages.add_directed_server_chat_message(message.clone(), *player_id);
         }

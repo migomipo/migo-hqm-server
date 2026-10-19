@@ -256,6 +256,18 @@ impl ServerMessages {
         self.broadcast_message(chat, MessageRetention::Transient, MessageRecording::Include);
     }
 
+    pub(crate) fn add_user_chat_message(
+        &mut self,
+        message: impl Into<Cow<'static, str>>,
+        sender_index: PlayerIndex,
+    ) {
+        let chat = HQMMessage::Chat {
+            player_index: Some(sender_index),
+            message: message.into(),
+        };
+        self.broadcast_message(chat, MessageRetention::Transient, MessageRecording::Include);
+    }
+
     pub(crate) fn add_directed_chat_message(
         &mut self,
         message: impl Into<Cow<'static, str>>,
@@ -391,20 +403,12 @@ impl ServerPlayersAndMessages {
         self.messages.check_admin_or_deny(&self.players, player_id)
     }
 
-    pub(crate) fn new_game(&mut self) {
-        self.messages.new_game(&mut self.players);
-    }
-
     pub(crate) fn add_user_chat_message(
         &mut self,
         message: impl Into<Cow<'static, str>>,
         sender_index: PlayerIndex,
     ) {
-        let chat = HQMMessage::Chat {
-            player_index: Some(sender_index),
-            message: message.into(),
-        };
-        self.broadcast_message(chat, MessageRetention::Transient, MessageRecording::Include);
+        self.messages.add_user_chat_message(message, sender_index);
     }
 
     pub(crate) fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
@@ -436,16 +440,6 @@ impl ServerPlayersAndMessages {
         receiver_id: PlayerId,
     ) {
         self.add_directed_chat_message(message, receiver_id, None);
-    }
-
-    pub fn add_goal_message(
-        &mut self,
-        team: Team,
-        goal_player_index: Option<PlayerId>,
-        assist_player_index: Option<PlayerId>,
-    ) {
-        self.messages
-            .add_goal_message(&self.players, team, goal_player_index, assist_player_index);
     }
 
     pub(crate) fn broadcast_message(
@@ -822,7 +816,9 @@ mod tests {
         state
             .add_player("first", "127.0.0.1:1".parse().unwrap())
             .unwrap();
-        state.add_goal_message(Team::Red, None, None);
+        state
+            .messages
+            .add_goal_message(&state.players, Team::Red, None, None);
 
         let late = state
             .add_player("late", "127.0.0.1:2".parse().unwrap())

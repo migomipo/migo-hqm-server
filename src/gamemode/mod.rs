@@ -8,12 +8,10 @@ use crate::players::{
     ServerPlayerData,
 };
 use crate::server::{
-    GameObject, HQMServer, HQMServerState, HQMTickHistory, ObjectExt, ServerInternals, ServerSplit,
-    SkaterLinks,
+    GameObject, HQMTickHistory, ObjectExt, ServerInternals, ServerSplit, SkaterLinks,
 };
 use glam::Vec3;
 use glamx::Rot3;
-use reborrow::{Reborrow, ReborrowCopyTraits, ReborrowTraits};
 use std::borrow::Cow;
 use std::cmp::PartialEq;
 use std::rc::Rc;
@@ -25,20 +23,20 @@ pub mod warmup;
 
 /// Specifies the server game behaviour.
 ///
-/// To create a new game mode, you need to write an object that implements this trait.
+/// To create a new game mode, you need to write an object that implements this trait. Every
+/// hook that can change the server state gets a [GameContext].
 pub trait GameMode {
     /// Called when the server starts.
-    fn init(&mut self, _server: ServerMut) {}
+    fn init(&mut self, _ctx: &mut GameContext) {}
 
     /// Called once each tick before the physics simulation is done.
     ///
     /// It is recommended that things like spawning pucks and moving players to and from teams are done before the physics simulation, so it should be done here.
     ///
     /// This is also called on ticks where a replay is shown instead of the physics simulation, so
-    /// timers counted down here keep running during replays. Use
-    /// [ServerReplay::is_in_replay] to tell these ticks apart. No hooks are called at all while
-    /// there are no players on the server.
-    fn before_tick(&mut self, server: ServerMut);
+    /// timers counted down here keep running during replays. Use [Replay::is_in_replay] to tell
+    /// these ticks apart. No hooks are called at all while there are no players on the server.
+    fn before_tick(&mut self, ctx: &mut GameContext);
 
     /// Called once each tick after the physics simulation is done.
     /// A list of physics events that occurred during the simulation is provided. Most of them have to do with the puck's movement.
@@ -49,12 +47,12 @@ pub trait GameMode {
     /// This is not called on ticks where a replay is shown. During those ticks, physics is paused,
     /// the game step does not advance, and the scoreboard values returned on the last simulated
     /// tick are shown.
-    fn after_tick(&mut self, server: ServerMut, events: &[PhysicsEvent]) -> ScoreboardValues;
+    fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues;
 
     /// Called when a chat message starting with "/" is received from a user. This method is called between ticks and not during, so you can do anything here.
     fn handle_command(
         &mut self,
-        _server: ServerMut,
+        _ctx: &mut GameContext,
         _cmd: &str,
         _arg: &str,
         _player_index: PlayerId,
@@ -64,185 +62,61 @@ pub trait GameMode {
     /// Called when a new game begins, before the first [GameMode::before_tick] of that game.
     ///
     /// A new game begins on the first tick with a player on the server after the server has
-    /// started, after [ServerMut::new_game] was called, or after the previous game was abandoned.
-    /// The server state, such as pucks and skaters, has been cleared at this point, so this is the
-    /// place to reset game mode state and set up the new game.
-    fn game_started(&mut self, _server: ServerMut) {}
+    /// started, after [GameContext::new_game] was called, or after the previous game was
+    /// abandoned. The server state, such as pucks and skaters, has been cleared at this point, so
+    /// this is the place to reset game mode state and set up the new game.
+    fn game_started(&mut self, _ctx: &mut GameContext) {}
 
     /// Called when the last player has left the server during a game, right before the game is
     /// reset.
     ///
     /// The server state of the abandoned game can still be read here. [GameMode::game_started] is
-    /// called once a player joins again. Games that end through [ServerMut::new_game] do not call
-    /// this, as the game mode already knows about them.
-    fn game_abandoned(&mut self, _server: ServerMut) {}
+    /// called once a player joins again. Games that end through [GameContext::new_game] do not
+    /// call this, as the game mode already knows about them.
+    fn game_abandoned(&mut self, _ctx: &mut GameContext) {}
 
     /// Called right before a player is removed from the server.
     ///
-    /// As the player has not yet been removed, it is possible to get the player object from the server handle.
+    /// As the player has not yet been removed, it is possible to get the player object from the context.
     fn before_player_exit(
         &mut self,
-        _server: ServerMut,
+        _ctx: &mut GameContext,
         _player_id: PlayerId,
         _reason: ExitReason,
     ) {
     }
 
     /// Called right after a new player has joined the server.
-    fn after_player_join(&mut self, _server: ServerMut, _player_index: PlayerId) {}
+    fn after_player_join(&mut self, _ctx: &mut GameContext, _player_index: PlayerId) {}
 
     /// Gets the server team size that will be shown in the server list.
     fn server_list_team_size(&self) -> u32 {
         0
     }
 
-    fn include_tick_in_recording(&self, _server: Server) -> bool {
+    /// Whether the current tick should be written to the game recording, if recording is enabled.
+    fn include_tick_in_recording(&self) -> bool {
         false
     }
 }
 
-/// A struct containing the individual parts of a [ServerMut].
+/// Access to the server state, split into fields that can be borrowed independently.
 ///
-/// This is useful if you want to mutably borrow several properties at once without getting in trouble with the borrow checker.
-#[non_exhaustive]
-pub struct ServerMutParts<'a> {
-    pub state: ServerStateMut<'a>,
-    pub rink: &'a mut Rink,
-    pub config: &'a mut ServerConfiguration,
-    pub physics_config: &'a mut PhysicsConfiguration,
-}
-
-/// Handle to server.
+/// This is the object you will mainly use to interact with the server. The fields can be used at
+/// the same time, for example iterating over `players` while sending `messages` or changing
+/// skaters in `objects`. Operations that change several parts at once, like spawning skaters or
+/// starting a new game, are methods on the context itself and need the whole context.
 ///
-/// This is the object you will mainly use to interact with the server state.
-#[derive(ReborrowTraits)]
-#[Const(Server)]
-pub struct ServerMut<'a> {
-    #[reborrow]
-    pub(crate) server: &'a mut HQMServer,
-}
-
-impl<'a> From<&'a mut HQMServer> for ServerMut<'a> {
-    fn from(server: &'a mut HQMServer) -> Self {
-        Self { server }
-    }
-}
-
-impl<'a> ServerMut<'a> {
-    /// Splits this handle into mutable handles for the independent server parts.
-    ///
-    /// Unlike [ServerMut::as_mut_parts], the returned handles retain the full lifetime of this
-    /// server handle. This is useful when the original `ServerMut` is no longer needed.
-    pub fn into_parts(self) -> ServerMutParts<'a> {
-        let server = self.server;
-        ServerMutParts {
-            state: ServerStateMut {
-                state: &mut server.state,
-            },
-            rink: &mut server.rink,
-            config: &mut server.config,
-            physics_config: &mut server.physics_config,
-        }
-    }
-
-    pub fn as_mut_parts(&mut self) -> ServerMutParts<'_> {
-        ServerMutParts {
-            state: ServerStateMut {
-                state: &mut self.server.state,
-            },
-            rink: &mut self.server.rink,
-            config: &mut self.server.config,
-            physics_config: &mut self.server.physics_config,
-        }
-    }
-
-    /// Ends the current game and resets the server state.
-    ///
-    /// Pucks, skaters and replay history are cleared immediately, and the recording of the game is
-    /// saved if recording is enabled. [GameMode::game_started] is called on the next tick with a
-    /// player on the server, so game mode state should be reset there.
-    pub fn new_game(&mut self) {
-        self.server.new_game()
-    }
-
-    /// Gets a [GameContext], which splits the server state into fields that can be borrowed
-    /// independently.
-    pub fn context(&mut self) -> GameContext<'_> {
-        GameContext::from(self.server.split())
-    }
-
-    pub fn state_mut(&mut self) -> ServerStateMut<'_> {
-        ServerStateMut {
-            state: &mut self.server.state,
-        }
-    }
-
-    pub fn rink_mut(&mut self) -> &mut Rink {
-        &mut self.server.rink
-    }
-    pub fn config_mut(&mut self) -> &mut ServerConfiguration {
-        &mut self.server.config
-    }
-
-    /// Gets a mutable reference to the physics configuration.
-    ///
-    /// Changes take effect from the next physics simulation step.
-    pub fn physics_config_mut(&mut self) -> &mut PhysicsConfiguration {
-        &mut self.server.physics_config
-    }
-
-    pub fn physics_config(&self) -> &PhysicsConfiguration {
-        &self.server.physics_config
-    }
-
-    pub fn state(&self) -> ServerState<'_> {
-        ServerState {
-            state: &self.server.state,
-        }
-    }
-    pub fn rink(&self) -> &Rink {
-        &self.server.rink
-    }
-
-    pub fn config(&self) -> &ServerConfiguration {
-        &self.server.config
-    }
-
-    /// Sends a server chat message to all players.
-    pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
-        self.state_mut().add_server_chat_message(message);
-    }
-
-    /// Sends a server chat message to a single player.
-    pub fn add_directed_server_chat_message(
-        &mut self,
-        message: impl Into<Cow<'static, str>>,
-        receiver: PlayerId,
-    ) {
-        self.state_mut()
-            .add_directed_server_chat_message(message, receiver);
-    }
-
-    /// Returns the player's name if the player is admin, otherwise sends a message telling the user to log in first.
-    pub fn require_admin(&mut self, player_id: PlayerId) -> Option<Rc<str>> {
-        self.state_mut().require_admin(player_id)
-    }
-}
-
-/// Mutable access to the server state, split into fields that can be borrowed independently.
-///
-/// The fields can be used at the same time, for example iterating over `players` while sending
-/// `messages` or changing skaters in `objects`. Operations that change several parts at once,
-/// like spawning skaters or starting a new game, are methods on the context itself and need
-/// the whole context.
+/// Functions that only read the server state can take `&GameContext`.
 #[non_exhaustive]
 pub struct GameContext<'a> {
-    pub players: ServerPlayersMut<'a>,
-    pub objects: ServerObjectsMut<'a>,
-    pub messages: ServerMessagesMut<'a>,
-    pub replay: ServerReplayMut<'a>,
+    pub players: Players<'a>,
+    pub objects: Objects<'a>,
+    pub messages: Messages<'a>,
+    pub replay: Replay<'a>,
     pub rink: &'a mut Rink,
     pub config: &'a mut ServerConfiguration,
+    /// Physics configuration. Changes take effect from the next physics simulation step.
     pub physics_config: &'a mut PhysicsConfiguration,
     internals: ServerInternals<'a>,
 }
@@ -250,16 +124,16 @@ pub struct GameContext<'a> {
 impl<'a> From<ServerSplit<'a>> for GameContext<'a> {
     fn from(split: ServerSplit<'a>) -> Self {
         Self {
-            players: ServerPlayersMut {
+            players: Players {
                 players: split.players,
             },
-            objects: ServerObjectsMut {
+            objects: Objects {
                 objects: split.objects,
             },
-            messages: ServerMessagesMut {
+            messages: Messages {
                 messages: split.messages,
             },
-            replay: ServerReplayMut {
+            replay: Replay {
                 replay: split.replay,
             },
             rink: split.rink,
@@ -281,7 +155,9 @@ impl GameContext<'_> {
 
     /// Ends the current game and resets the server state.
     ///
-    /// See [ServerMut::new_game].
+    /// Pucks, skaters and replay history are cleared immediately, and the recording of the game is
+    /// saved if recording is enabled. [GameMode::game_started] is called on the next tick with a
+    /// player on the server, so game mode state should be reset there.
     pub fn new_game(&mut self) {
         crate::server::new_game(
             &mut self.internals,
@@ -340,139 +216,6 @@ impl GameContext<'_> {
             assist_player,
         );
     }
-}
-
-/// Immutable handle to server.
-#[derive(ReborrowCopyTraits)]
-pub struct Server<'a> {
-    pub(crate) server: &'a HQMServer,
-}
-
-impl<'a> From<&'a HQMServer> for Server<'a> {
-    fn from(server: &'a HQMServer) -> Self {
-        Self { server }
-    }
-}
-
-impl<'a> Server<'a> {
-    /// Gets an immutable reference to player and puck state.
-    pub fn state(&self) -> ServerState<'a> {
-        ServerState {
-            state: &self.server.state,
-        }
-    }
-    pub fn rink(&self) -> &'a Rink {
-        &self.server.rink
-    }
-
-    pub fn config(&self) -> &'a ServerConfiguration {
-        &self.server.config
-    }
-
-    pub fn physics_config(&self) -> &'a PhysicsConfiguration {
-        &self.server.physics_config
-    }
-}
-
-#[derive(ReborrowTraits)]
-#[Const(ServerState)]
-pub struct ServerStateMut<'a> {
-    state: &'a mut HQMServerState,
-}
-
-impl<'a> ServerStateMut<'a> {
-    /// Gets a mutable reference to player state.
-    pub fn players_mut(&mut self) -> ServerPlayersMut<'_> {
-        ServerPlayersMut {
-            players: &mut self.state.player_message_state.players,
-        }
-    }
-    /// Gets a handle for sending messages to players.
-    pub fn messages_mut(&mut self) -> ServerMessagesMut<'_> {
-        ServerMessagesMut {
-            messages: &mut self.state.player_message_state.messages,
-        }
-    }
-    pub fn replay_mut(&mut self) -> ServerReplayMut<'_> {
-        ServerReplayMut {
-            replay: &mut self.state.replay,
-        }
-    }
-    pub fn objects_mut(&mut self) -> ServerObjectsMut<'_> {
-        ServerObjectsMut {
-            objects: &mut self.state.objects,
-        }
-    }
-
-    pub fn players(&self) -> ServerPlayers<'_> {
-        ServerPlayers {
-            players: &self.state.player_message_state.players,
-        }
-    }
-
-    pub fn replay(&self) -> ServerReplay<'_> {
-        ServerReplay {
-            replay: &self.state.replay,
-        }
-    }
-
-    pub fn objects(&self) -> ServerObjects<'_> {
-        ServerObjects {
-            objects: &self.state.objects,
-        }
-    }
-
-    pub fn as_mut_parts(&mut self) -> ServerStateMutParts<'_> {
-        ServerStateMutParts {
-            players: ServerPlayersMut {
-                players: &mut self.state.player_message_state.players,
-            },
-            messages: ServerMessagesMut {
-                messages: &mut self.state.player_message_state.messages,
-            },
-            objects: ServerObjectsMut {
-                objects: &mut self.state.objects,
-            },
-            replay: ServerReplayMut {
-                replay: &mut self.state.replay,
-            },
-        }
-    }
-
-    pub fn remove_player(&mut self, player_id: PlayerId) -> bool {
-        self.state.remove_player(player_id, true)
-    }
-
-    pub fn spawn_skater(
-        &mut self,
-        player_id: PlayerId,
-        team: Team,
-        pos: Vec3,
-        rot: Rot3,
-        keep_stick_position: bool,
-    ) -> bool {
-        self.state
-            .spawn_skater(player_id, team, pos, rot, keep_stick_position)
-    }
-
-    pub fn move_to_spectator(&mut self, player_id: PlayerId) -> bool {
-        self.state.move_to_spectator(player_id)
-    }
-
-    /// Sends a server chat message to all players.
-    pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
-        self.messages_mut().add_server_chat_message(message);
-    }
-
-    /// Sends a server chat message to a single player.
-    pub fn add_directed_server_chat_message(
-        &mut self,
-        message: impl Into<Cow<'static, str>>,
-        receiver: PlayerId,
-    ) {
-        self.messages_mut()
-            .add_directed_server_chat_message(message, receiver);
-    }
 
     /// Sends a chat message to all players as if it was written by a player.
     ///
@@ -482,79 +225,20 @@ impl<'a> ServerStateMut<'a> {
         message: impl Into<Cow<'static, str>>,
         sender: PlayerId,
     ) {
-        let state = &mut self.state.player_message_state;
-        if state.players.get_player(sender).is_some() {
-            state.add_user_chat_message(message, sender.index);
-        }
-    }
-
-    /// Announces a goal. Scorer and assist are left out if they are no longer on the server.
-    pub fn add_goal_message(
-        &mut self,
-        team: Team,
-        goal_player_index: Option<PlayerId>,
-        assist_player_index: Option<PlayerId>,
-    ) {
-        self.state.player_message_state.add_goal_message(
-            team,
-            goal_player_index,
-            assist_player_index,
-        );
-    }
-
-    /// Returns the player's name if the player is admin, otherwise sends a message telling the user to log in first.
-    pub fn require_admin(&mut self, player_id: PlayerId) -> Option<Rc<str>> {
-        self.state
-            .player_message_state
-            .check_admin_or_deny(player_id)
-            .map(|player| player.player_name.clone())
-    }
-}
-
-#[derive(ReborrowCopyTraits)]
-pub struct ServerState<'a> {
-    state: &'a HQMServerState,
-}
-
-impl<'a> ServerState<'a> {
-    /// Gets an immutable reference to player state.
-    pub fn players(&self) -> ServerPlayers<'a> {
-        ServerPlayers {
-            players: &self.state.player_message_state.players,
-        }
-    }
-
-    pub fn replay(&self) -> ServerReplay<'a> {
-        ServerReplay {
-            replay: &self.state.replay,
-        }
-    }
-
-    pub fn objects(&self) -> ServerObjects<'a> {
-        ServerObjects {
-            objects: &self.state.objects,
+        if self.players.players.get_player(sender).is_some() {
+            self.messages
+                .messages
+                .add_user_chat_message(message, sender.index);
         }
     }
 }
 
-/// A struct containing the individual parts of a [ServerStateMut].
-///
-/// This is useful if you want to mutably borrow several properties at once without getting in trouble with the borrow checker.
-#[non_exhaustive]
-pub struct ServerStateMutParts<'a> {
-    pub players: ServerPlayersMut<'a>,
-    pub messages: ServerMessagesMut<'a>,
-    pub objects: ServerObjectsMut<'a>,
-    pub replay: ServerReplayMut<'a>,
-}
-
-#[derive(ReborrowTraits)]
-#[Const(ServerObjects)]
-pub struct ServerObjectsMut<'a> {
+/// Pucks and skaters on the ice.
+pub struct Objects<'a> {
     objects: &'a mut [Option<GameObject>],
 }
 
-impl<'a> ServerObjectsMut<'a> {
+impl Objects<'_> {
     pub fn spawn_puck(&mut self, puck: Puck) -> Option<usize> {
         self.objects.spawn_puck(puck)
     }
@@ -569,6 +253,13 @@ impl<'a> ServerObjectsMut<'a> {
 
     pub fn get_puck(&self, object_index: usize) -> Option<&Puck> {
         self.objects.get(object_index).and_then(|x| match x {
+            Some(GameObject::Puck(puck)) => Some(puck),
+            _ => None,
+        })
+    }
+
+    pub fn get_puck_mut(&mut self, object_index: usize) -> Option<&mut Puck> {
+        self.objects.get_mut(object_index).and_then(|x| match x {
             Some(GameObject::Puck(puck)) => Some(puck),
             _ => None,
         })
@@ -598,13 +289,6 @@ impl<'a> ServerObjectsMut<'a> {
                 };
                 Some((index, puck))
             })
-    }
-
-    pub fn get_puck_mut(&mut self, object_index: usize) -> Option<&mut Puck> {
-        self.objects.get_mut(object_index).and_then(|x| match x {
-            Some(GameObject::Puck(puck)) => Some(puck),
-            _ => None,
-        })
     }
 
     /// Returns a player's skater, if the player is currently on the ice.
@@ -640,55 +324,12 @@ impl<'a> ServerObjectsMut<'a> {
     }
 }
 
-#[derive(ReborrowCopyTraits)]
-pub struct ServerObjects<'a> {
-    objects: &'a [Option<GameObject>],
-}
-
-impl<'a> ServerObjects<'a> {
-    pub fn get_puck(&self, object_index: usize) -> Option<&'a Puck> {
-        self.objects.get(object_index).and_then(|x| match x {
-            Some(GameObject::Puck(puck)) => Some(puck),
-            _ => None,
-        })
-    }
-
-    /// Iterates over every puck and its object index.
-    pub fn pucks(&self) -> impl Iterator<Item = (usize, &'a Puck)> {
-        self.objects
-            .iter()
-            .enumerate()
-            .filter_map(|(index, object)| {
-                let Some(GameObject::Puck(puck)) = object else {
-                    return None;
-                };
-                Some((index, puck))
-            })
-    }
-
-    /// Returns a player's skater, if the player is currently on the ice.
-    pub fn skater(&self, player_id: PlayerId) -> Option<&'a SkaterObject> {
-        self.skaters()
-            .find_map(|(id, skater)| (id == player_id).then_some(skater))
-    }
-
-    /// Iterates over every skater and the player it belongs to.
-    pub fn skaters(&self) -> impl Iterator<Item = (PlayerId, &'a SkaterObject)> {
-        self.objects.iter().filter_map(|object| match object {
-            Some(GameObject::Skater(player_id, skater)) => Some((*player_id, skater)),
-            _ => None,
-        })
-    }
-}
-
-#[derive(ReborrowTraits)]
-#[Const(ServerReplay)]
-pub struct ServerReplayMut<'a> {
-    #[reborrow]
+/// Replay history and the replay queue.
+pub struct Replay<'a> {
     replay: &'a mut HQMTickHistory,
 }
 
-impl<'a> ServerReplayMut<'a> {
+impl Replay<'_> {
     /// Adds a replay to the replay queue.
     pub fn add_replay_to_queue(
         &mut self,
@@ -713,30 +354,15 @@ impl<'a> ServerReplayMut<'a> {
     }
 }
 
-#[derive(ReborrowCopyTraits)]
-pub struct ServerReplay<'a> {
-    replay: &'a HQMTickHistory,
-}
-
-impl<'a> ServerReplay<'a> {
-    pub fn is_in_replay(&self) -> bool {
-        self.replay.is_in_replay()
-    }
-
-    pub fn game_step(&self) -> u32 {
-        self.replay.game_step()
-    }
-}
-
-/// Handle for sending messages to players.
+/// Sending messages to players.
 ///
-/// This is separate from [ServerPlayersMut], so messages can be sent while the player list is
-/// borrowed, for example while iterating over the players.
-pub struct ServerMessagesMut<'a> {
+/// This is separate from [Players], so messages can be sent while the player list is borrowed,
+/// for example while iterating over the players.
+pub struct Messages<'a> {
     messages: &'a mut ServerMessages,
 }
 
-impl<'a> ServerMessagesMut<'a> {
+impl Messages<'_> {
     /// Sends a server chat message to all players.
     pub fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
         self.messages.add_server_chat_message(message);
@@ -755,22 +381,20 @@ impl<'a> ServerMessagesMut<'a> {
     }
 }
 
-/// Mutable handle to player state.
-#[derive(ReborrowTraits)]
-#[Const(ServerPlayers)]
-pub struct ServerPlayersMut<'a> {
-    #[reborrow]
+/// The players connected to the server.
+pub struct Players<'a> {
     players: &'a mut PlayerSlots,
 }
 
-impl<'a> ServerPlayersMut<'a> {
+impl Players<'_> {
+    /// Returns an iterator over the players in the server.
     pub fn iter(&self) -> impl Iterator<Item = ServerPlayer<'_>> {
         self.players
             .iter_players()
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
-    /// Returns a iterator over the players in the server, that also allows changing the player objects.
+    /// Returns an iterator over the players in the server, that also allows changing the player objects.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = ServerPlayerMut<'_>> {
         self.players
             .iter_players_mut()
@@ -807,50 +431,13 @@ impl<'a> ServerPlayersMut<'a> {
 
     /// Convenience method to count the number of players currently in the red or blue team.
     pub fn count_team_members(&self) -> (usize, usize) {
-        let a = self.rb();
-        a.count_team_members()
-    }
-}
-
-/// Immutable handle to player state.
-#[derive(ReborrowCopyTraits)]
-pub struct ServerPlayers<'a> {
-    players: &'a PlayerSlots,
-}
-
-impl<'a> ServerPlayers<'a> {
-    /// Returns a iterator over the players in the server.
-    pub fn iter(&self) -> impl Iterator<Item = ServerPlayer<'a>> {
-        self.players
-            .iter_players()
-            .map(|(id, player)| ServerPlayer { id, player })
-    }
-
-    /// Returns an immutable handle to a player in the server.
-    pub fn get_by_index(&self, index: PlayerIndex) -> Option<ServerPlayer<'a>> {
-        self.players
-            .get_player_by_index(index)
-            .map(|(id, player)| ServerPlayer { id, player })
-    }
-
-    /// Returns an immutable handle to a player in the server.
-    pub fn get(&self, id: PlayerId) -> Option<ServerPlayer<'a>> {
-        self.players
-            .get_player(id)
-            .map(|player| ServerPlayer { id, player })
-    }
-
-    /// Convenience method to count the number of players currently in the red or blue team.
-    pub fn count_team_members(&self) -> (usize, usize) {
         let mut red_player_count = 0usize;
         let mut blue_player_count = 0usize;
         for player in self.iter() {
-            if let Some(team) = player.team() {
-                if team == Team::Red {
-                    red_player_count += 1;
-                } else if team == Team::Blue {
-                    blue_player_count += 1;
-                }
+            match player.team() {
+                Some(Team::Red) => red_player_count += 1,
+                Some(Team::Blue) => blue_player_count += 1,
+                None => {}
             }
         }
         (red_player_count, blue_player_count)
@@ -858,15 +445,12 @@ impl<'a> ServerPlayers<'a> {
 }
 
 /// Mutable handle to player who is connected to the server.
-#[derive(ReborrowTraits)]
-#[Const(ServerPlayer)]
 pub struct ServerPlayerMut<'a> {
     pub id: PlayerId,
-    #[reborrow]
     pub(crate) player: &'a mut InternalServerPlayer,
 }
 
-impl<'a> ServerPlayerMut<'a> {
+impl ServerPlayerMut<'_> {
     pub fn has_skater(&self) -> bool {
         self.player.has_skater()
     }
@@ -892,10 +476,7 @@ impl<'a> ServerPlayerMut<'a> {
     }
 
     pub fn player_type(&self) -> ServerPlayerType {
-        match self.player.data {
-            ServerPlayerData::NetworkPlayer { .. } => ServerPlayerType::Player,
-            ServerPlayerData::Bot { .. } => ServerPlayerType::Bot,
-        }
+        player_type(self.player)
     }
 }
 
@@ -905,8 +486,15 @@ pub enum ServerPlayerType {
     Bot,
 }
 
+fn player_type(player: &InternalServerPlayer) -> ServerPlayerType {
+    match player.data {
+        ServerPlayerData::NetworkPlayer { .. } => ServerPlayerType::Player,
+        ServerPlayerData::Bot { .. } => ServerPlayerType::Bot,
+    }
+}
+
 /// Immutable handle to player who is connected to the server.
-#[derive(ReborrowCopyTraits)]
+#[derive(Copy, Clone)]
 pub struct ServerPlayer<'a> {
     pub id: PlayerId,
     pub(crate) player: &'a InternalServerPlayer,
@@ -934,10 +522,7 @@ impl<'a> ServerPlayer<'a> {
     }
 
     pub fn player_type(&self) -> ServerPlayerType {
-        match self.player.data {
-            ServerPlayerData::NetworkPlayer { .. } => ServerPlayerType::Player,
-            ServerPlayerData::Bot { .. } => ServerPlayerType::Bot,
-        }
+        player_type(self.player)
     }
 }
 
@@ -952,6 +537,7 @@ pub enum ExitReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::HQMServerState;
 
     #[test]
     fn puck_iterators_return_indices_and_allow_mutation() {
@@ -959,15 +545,12 @@ mod tests {
         objects[1] = Some(GameObject::Puck(Puck::new(Vec3::X, Rot3::IDENTITY)));
         objects[3] = Some(GameObject::Puck(Puck::new(Vec3::Z, Rot3::IDENTITY)));
 
-        let indices: Vec<_> = ServerObjects { objects: &objects }
-            .pucks()
-            .map(|(index, _)| index)
-            .collect();
-        assert_eq!(indices, [1, 3]);
-
-        let mut object_view = ServerObjectsMut {
+        let mut object_view = Objects {
             objects: &mut objects,
         };
+        let indices: Vec<_> = object_view.pucks().map(|(index, _)| index).collect();
+        assert_eq!(indices, [1, 3]);
+
         for (_, puck) in object_view.pucks_mut() {
             puck.radius = 0.25;
         }
@@ -989,14 +572,20 @@ mod tests {
         state
             .objects
             .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
-        assert!(state.spawn_skater(on_ice, Team::Blue, Vec3::X, Rot3::IDENTITY, false));
+        assert!(state.skater_links().spawn_skater(
+            on_ice,
+            Team::Blue,
+            Vec3::X,
+            Rot3::IDENTITY,
+            false
+        ));
 
-        let mut handle = ServerStateMut { state: &mut state };
-        let ServerStateMutParts {
-            players,
-            mut objects,
-            ..
-        } = handle.as_mut_parts();
+        let players = Players {
+            players: &mut state.player_message_state.players,
+        };
+        let mut objects = Objects {
+            objects: &mut state.objects,
+        };
         assert!(objects.skater(spectator).is_none());
         for (id, skater) in objects.skaters_mut() {
             if players.get(id).and_then(|p| p.team()) == Some(Team::Blue) {
@@ -1004,10 +593,10 @@ mod tests {
             }
         }
 
-        let skater = handle.objects().skater(on_ice).unwrap();
+        let skater = objects.skater(on_ice).unwrap();
         assert_eq!(skater.body.pos, Vec3::X);
         assert_eq!(skater.body.linear_velocity, Vec3::Z);
-        assert_eq!(handle.objects().skaters().count(), 1);
+        assert_eq!(objects.skaters().count(), 1);
     }
 
     #[test]
@@ -1018,12 +607,12 @@ mod tests {
             .add_player("test", "127.0.0.1:1".parse().unwrap())
             .unwrap();
 
-        let mut handle = ServerStateMut { state: &mut state };
-        let ServerStateMutParts {
-            players,
-            mut messages,
-            ..
-        } = handle.as_mut_parts();
+        let players = Players {
+            players: &mut state.player_message_state.players,
+        };
+        let mut messages = Messages {
+            messages: &mut state.player_message_state.messages,
+        };
         for player in players.iter() {
             messages
                 .add_directed_server_chat_message(format!("Hello {}", player.name()), player.id);

@@ -1,7 +1,7 @@
 //! Runtime administration commands for the standard-match game mode.
 
 use crate::game::PlayerId;
-use crate::gamemode::ServerMut;
+use crate::gamemode::GameContext;
 
 use super::{
     IcingConfiguration, OffsideConfiguration, OffsideLineConfiguration, StandardMatchGameMode,
@@ -9,8 +9,8 @@ use super::{
 };
 
 impl StandardMatchGameMode {
-    pub(super) fn handle_set(&mut self, mut server: ServerMut, arg: &str, player: PlayerId) {
-        let Some(admin_name) = server.require_admin(player) else {
+    pub(super) fn handle_set(&mut self, ctx: &mut GameContext, arg: &str, player: PlayerId) {
+        let Some(admin_name) = ctx.require_admin(player) else {
             return;
         };
         let old_config = self.config;
@@ -29,7 +29,8 @@ impl StandardMatchGameMode {
         if matches!(setting, "period" | "clock")
             && matches!(self.state, StandardMatchState::WaitingForGame(_))
         {
-            server.add_directed_server_chat_message("No game is currently ongoing", player);
+            ctx.messages
+                .add_directed_server_chat_message("No game is currently ongoing", player);
             return;
         }
         match setting {
@@ -195,7 +196,8 @@ impl StandardMatchGameMode {
                 ("teamsize", _) => format!("Team size set to {value}"),
                 _ => format!("{setting} changed to {value}"),
             };
-            server.add_server_chat_message(format!("{message} by {admin_name}"));
+            ctx.messages
+                .add_server_chat_message(format!("{message} by {admin_name}"));
         }
     }
 }

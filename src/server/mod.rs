@@ -18,7 +18,7 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::udp::UdpFramed;
 use tracing::{info, warn};
 
-use crate::gamemode::{ExitReason, GameMode};
+use crate::gamemode::{ExitReason, GameContext, GameMode};
 
 use self::ban::{BanCheck, BanCheckResponse};
 use self::recording::RecordingSaveMethod;
@@ -174,22 +174,6 @@ impl HQMServerState {
 
     pub fn set_hand(&mut self, hand: SkaterHand, player_id: PlayerId) {
         self.skater_links().set_hand(hand, player_id);
-    }
-
-    pub(crate) fn move_to_spectator(&mut self, player_id: PlayerId) -> bool {
-        self.skater_links().move_to_spectator(player_id)
-    }
-
-    pub(crate) fn spawn_skater(
-        &mut self,
-        player_id: PlayerId,
-        team: Team,
-        pos: Vec3,
-        rot: Rot3,
-        keep_stick_position: bool,
-    ) -> bool {
-        self.skater_links()
-            .spawn_skater(player_id, team, pos, rot, keep_stick_position)
     }
 
     pub fn remove_player(&mut self, player_id: PlayerId, on_recording: bool) -> bool {
@@ -639,7 +623,7 @@ impl HQMServer {
         }
 
         if let Some(player_index) = self.add_player(&name, addr) {
-            behaviour.after_player_join(self.into(), player_index);
+            behaviour.after_player_join(&mut self.context(), player_index);
             info!(
                 "{} ({}) joined server from address {:?}",
                 name, player_index, addr
@@ -755,7 +739,7 @@ impl HQMServer {
             }
             ChatCommand::Builtin(_) => {}
             ChatCommand::GameMode { command, arg } => {
-                behaviour.handle_command(self.into(), command, arg, player_id);
+                behaviour.handle_command(&mut self.context(), command, arg, player_id);
             }
         }
     }
@@ -1024,7 +1008,7 @@ impl HQMServer {
             .get_player(player_id)?
             .player_name
             .clone();
-        behaviour.before_player_exit(self.into(), player_id, reason);
+        behaviour.before_player_exit(&mut self.context(), player_id, reason);
         self.state
             .remove_player(player_id, true)
             .then_some(player_name)
@@ -1050,7 +1034,7 @@ impl HQMServer {
         self.state.replay.advance_step();
 
         let events = self.simulate_step();
-        let scoreboard = behaviour.after_tick(self.into(), &events);
+        let scoreboard = behaviour.after_tick(&mut self.context(), &events);
         self.state.replication.last_scoreboard = Some(scoreboard);
 
         let packets = self.get_packets();
@@ -1060,7 +1044,7 @@ impl HQMServer {
         self.state.replication.history.push(packets);
 
         if self.config.recording_enabled != ReplayRecording::Off
-            && behaviour.include_tick_in_recording((&*self).into())
+            && behaviour.include_tick_in_recording()
         {
             self.write_recording_tick(&scoreboard);
         }
@@ -1117,7 +1101,7 @@ impl HQMServer {
         if self.real_player_count() == 0 {
             if self.has_current_game_been_active {
                 info!("Game {} abandoned", self.game_id);
-                behaviour.game_abandoned(self.into());
+                behaviour.game_abandoned(&mut self.context());
                 self.new_game();
             }
             return None;
@@ -1126,12 +1110,12 @@ impl HQMServer {
         if !self.has_current_game_been_active {
             self.start_time = Timestamp::now();
             self.has_current_game_been_active = true;
-            behaviour.game_started(self.into());
+            behaviour.game_started(&mut self.context());
             info!("New game {} started", self.game_id);
         }
 
         self.remove_inactive_players(behaviour);
-        behaviour.before_tick(self.into());
+        behaviour.before_tick(&mut self.context());
 
         let (game_step, forced_view, scoreboard) =
             if let Some((forced_view, tick)) = self.state.replay.pop_replay_tick() {
@@ -1173,6 +1157,11 @@ impl HQMServer {
             )
             .await;
         }
+    }
+
+    /// Gets a [GameContext] for passing to game mode hooks.
+    pub(crate) fn context(&mut self) -> GameContext<'_> {
+        GameContext::from(self.split())
     }
 
     /// Splits the server into parts that can be borrowed independently.
@@ -1386,7 +1375,7 @@ pub async fn run_server<B: GameMode>(
     let mut server = HQMServer::new(config, physics_config, ban, recording);
     info!("Server started");
 
-    behaviour.init((&mut server).into());
+    behaviour.init(&mut server.context());
 
     // Set up timers
     let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
@@ -1461,7 +1450,6 @@ mod tests {
 
     use crate::ban::InMemoryBanCheck;
     use crate::game::PhysicsEvent;
-    use crate::gamemode::ServerMut;
     use crate::players::ServerPlayer;
     use crate::record::RecordingSaveToFile;
 
@@ -1627,7 +1615,13 @@ mod tests {
             .add_player("test", "127.0.0.1:12345".parse().unwrap())
             .unwrap();
 
-        assert!(state.spawn_skater(player_id, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false,));
+        assert!(state.skater_links().spawn_skater(
+            player_id,
+            Team::Red,
+            Vec3::ZERO,
+            Rot3::IDENTITY,
+            false
+        ));
         let object_slot = state
             .player_message_state
             .players
@@ -1640,7 +1634,7 @@ mod tests {
             Some(GameObject::Skater(id, _)) if id == player_id
         ));
 
-        assert!(state.move_to_spectator(player_id));
+        assert!(state.skater_links().move_to_spectator(player_id));
         assert!(
             state
                 .player_message_state
@@ -1656,16 +1650,14 @@ mod tests {
         struct SpawnsPuckAfterTick;
 
         impl GameMode for SpawnsPuckAfterTick {
-            fn before_tick(&mut self, _server: ServerMut) {}
+            fn before_tick(&mut self, _ctx: &mut GameContext) {}
 
             fn after_tick(
                 &mut self,
-                mut server: ServerMut,
+                ctx: &mut GameContext,
                 _events: &[PhysicsEvent],
             ) -> ScoreboardValues {
-                server
-                    .state_mut()
-                    .objects_mut()
+                ctx.objects
                     .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
                 ScoreboardValues::default()
             }
@@ -1692,8 +1684,7 @@ mod tests {
         server.has_current_game_been_active = true;
         let game_id = server.game_id;
 
-        let mut server_handle = ServerMut::from(&mut server);
-        let mut ctx = server_handle.context();
+        let mut ctx = server.context();
         ctx.objects
             .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
         assert!(ctx.spawn_skater(player_id, Team::Red, Vec3::X, Rot3::IDENTITY, false));
@@ -1735,27 +1726,24 @@ mod tests {
         }
 
         impl GameMode for TracksLifecycle {
-            fn before_tick(&mut self, _server: ServerMut) {}
+            fn before_tick(&mut self, _ctx: &mut GameContext) {}
 
             fn after_tick(
                 &mut self,
-                _server: ServerMut,
+                _ctx: &mut GameContext,
                 _events: &[PhysicsEvent],
             ) -> ScoreboardValues {
                 ScoreboardValues::default()
             }
 
-            fn game_started(&mut self, mut server: ServerMut) {
+            fn game_started(&mut self, ctx: &mut GameContext) {
                 self.started += 1;
-                server
-                    .state_mut()
-                    .objects_mut()
+                ctx.objects
                     .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
             }
 
-            fn game_abandoned(&mut self, server: ServerMut) {
-                self.abandoned_with_pucks
-                    .push(server.state().objects().pucks().count());
+            fn game_abandoned(&mut self, ctx: &mut GameContext) {
+                self.abandoned_with_pucks.push(ctx.objects.pucks().count());
             }
         }
 

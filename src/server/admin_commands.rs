@@ -264,7 +264,7 @@ impl HQMServer {
                 for (player_id, player_name, player_addr) in kick_player_list {
                     if player_id != admin_player_id {
                         behaviour.before_player_exit(
-                            self.into(),
+                            &mut self.context(),
                             player_id,
                             ExitReason::AdminKicked,
                         );
@@ -363,7 +363,7 @@ impl HQMServer {
                         let kick_player_name = kick_player.player_name.clone();
                         let kick_ip = data.addr.ip();
                         behaviour.before_player_exit(
-                            self.into(),
+                            &mut self.context(),
                             kick_player_id,
                             ExitReason::AdminKicked,
                         );

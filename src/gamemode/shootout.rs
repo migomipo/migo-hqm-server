@@ -1,13 +1,12 @@
 use glam::Vec3;
 use glamx::Rot3;
-use reborrow::ReborrowMut;
 use std::f32::consts::PI;
 use tracing::info;
 
 use crate::game::{PhysicsEvent, PlayerId, RulesState};
 use crate::game::{PlayerIndex, Puck, ScoreboardValues, Team};
 use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
-use crate::gamemode::{ExitReason, GameContext, GameMode, Server, ServerMut};
+use crate::gamemode::{ExitReason, GameContext, GameMode};
 
 #[derive(Debug, Clone)]
 enum ServerStatus {
@@ -99,18 +98,18 @@ enum ShootoutAttemptState {
 }
 
 impl ShootoutAttemptState {
-    fn before_tick(&mut self, mut server: ServerMut, game_state: &mut ShootoutGameState) -> bool {
+    fn before_tick(&mut self, ctx: &mut GameContext, game_state: &mut ShootoutGameState) -> bool {
         match self {
             Self::Attack(state) => {
                 if let Some(end) = state.before_tick() {
-                    *self = Self::Over(state.end_attempt(server.rb_mut(), game_state, end));
+                    *self = Self::Over(state.end_attempt(ctx, game_state, end));
                 }
                 false
             }
             Self::Over(state) => match state.before_tick() {
                 Some(OverTransition::StartNewGame) => true,
                 Some(OverTransition::StartNextAttempt) => {
-                    let attack = state.start_next_attempt(server.rb_mut(), game_state);
+                    let attack = state.start_next_attempt(ctx, game_state);
                     *self = Self::Attack(attack);
                     false
                 }
@@ -121,15 +120,15 @@ impl ShootoutAttemptState {
 
     fn tick(
         &mut self,
-        mut server: ServerMut,
+        ctx: &mut GameContext,
         attacking_team: Team,
         events: &[PhysicsEvent],
         game_state: &mut ShootoutGameState,
     ) {
         match self {
             Self::Attack(state) => {
-                if let Some(end) = state.tick(server.rb_mut(), attacking_team, events) {
-                    *self = Self::Over(state.end_attempt(server, game_state, end));
+                if let Some(end) = state.tick(ctx, attacking_team, events) {
+                    *self = Self::Over(state.end_attempt(ctx, game_state, end));
                 }
             }
             Self::Over(_) => {}
@@ -170,7 +169,7 @@ enum OverTransition {
 }
 
 impl AttackState {
-    fn setup_attempt(mut server: ServerMut, game_state: &ShootoutGameState) -> AttackState {
+    fn setup_attempt(ctx: &mut GameContext, game_state: &ShootoutGameState) -> AttackState {
         let team = game_state.team;
         let defending_team = team.get_other_team();
 
@@ -182,22 +181,19 @@ impl AttackState {
         } else {
             format!("Tie-breaker round for {team}")
         };
-        server.add_server_chat_message(msg);
-        server.state_mut().objects_mut().remove_all_pucks();
+        ctx.messages.add_server_chat_message(msg);
+        ctx.objects.remove_all_pucks();
 
-        let length = server.rink().length;
-        let width = server.rink().width;
+        let length = ctx.rink.length;
+        let width = ctx.rink.width;
 
         let puck_pos = Vec3::new(width / 2.0, 1.0, length / 2.0);
-        server
-            .state_mut()
-            .objects_mut()
-            .spawn_puck(Puck::new(puck_pos, Rot3::IDENTITY));
+        ctx.objects.spawn_puck(Puck::new(puck_pos, Rot3::IDENTITY));
 
         let mut red_players = vec![];
         let mut blue_players = vec![];
 
-        for player in server.state().players().iter() {
+        for player in ctx.players.iter() {
             let player_index = player.id;
             if let Some(team) = player.team() {
                 if team == Team::Red {
@@ -234,9 +230,7 @@ impl AttackState {
                 let side = Vec3::new(-1.5 * dist, 0.0, 0.0);
                 pos += attacking_rot * side;
             }
-            server
-                .state_mut()
-                .spawn_skater(player_index, team, pos, attacking_rot, false);
+            ctx.spawn_skater(player_index, team, pos, attacking_rot, false);
         }
         for (index, player_index) in defending_players.into_iter().enumerate() {
             let mut pos = goalie_pos;
@@ -246,13 +240,7 @@ impl AttackState {
                 let side = Vec3::new(-1.5 * dist, 0.0, 0.0);
                 pos += defending_rot * side;
             }
-            server.state_mut().spawn_skater(
-                player_index,
-                defending_team,
-                pos,
-                defending_rot,
-                false,
-            );
+            ctx.spawn_skater(player_index, defending_team, pos, defending_rot, false);
         }
         Self {
             time: 2000,
@@ -271,7 +259,7 @@ impl AttackState {
 
     fn tick(
         &mut self,
-        server: ServerMut,
+        ctx: &mut GameContext,
         attacking_team: Team,
         events: &[PhysicsEvent],
     ) -> Option<AttackTransition> {
@@ -290,11 +278,8 @@ impl AttackState {
                     });
                 }
                 PhysicsEvent::PuckTouch { player, .. } => {
-                    if let Some(touching_team) = server
-                        .state()
-                        .players()
-                        .get(*player)
-                        .and_then(|player| player.team())
+                    if let Some(touching_team) =
+                        ctx.players.get(*player).and_then(|player| player.team())
                     {
                         if touching_team == attacking_team && self.no_more_touch {
                             return Some(AttackTransition {
@@ -315,17 +300,12 @@ impl AttackState {
             }
         }
 
-        let center_pos = Vec3::new(server.rink().width / 2.0, 0.0, server.rink().length / 2.0);
+        let center_pos = Vec3::new(ctx.rink.width / 2.0, 0.0, ctx.rink.length / 2.0);
         let normal = match attacking_team {
             Team::Red => Vec3::NEG_Z,
             Team::Blue => Vec3::Z,
         };
-        let progress = {
-            let state = server.state();
-            let objects = state.objects();
-            let puck = objects.get_puck(0)?;
-            (puck.body.pos - center_pos).dot(normal)
-        };
+        let progress = (ctx.objects.get_puck(0)?.body.pos - center_pos).dot(normal);
         if !self.no_more_touch && progress > self.progress {
             self.progress = progress;
             None
@@ -341,17 +321,15 @@ impl AttackState {
 
     fn end_attempt(
         &mut self,
-        mut server: ServerMut,
+        ctx: &mut GameContext,
         game_state: &mut ShootoutGameState,
         end: AttackTransition,
     ) -> OverState {
         let game_over = game_state.finish_attempt(end.goal_scored);
         if end.goal_scored {
-            server
-                .state_mut()
-                .add_goal_message(game_state.team, None, None);
+            ctx.add_goal_message(game_state.team, None, None);
         } else {
-            server.add_server_chat_message("Miss");
+            ctx.messages.add_server_chat_message("Miss");
         }
 
         OverState {
@@ -375,16 +353,16 @@ impl OverState {
 
     fn start_next_attempt(
         &self,
-        server: ServerMut,
+        ctx: &mut GameContext,
         game_state: &mut ShootoutGameState,
     ) -> AttackState {
         game_state.start_next_attempt();
-        AttackState::setup_attempt(server, game_state)
+        AttackState::setup_attempt(ctx, game_state)
     }
 }
 
 impl ShootoutGame {
-    fn start(mut server: ServerMut, config: ShootoutGameConfiguration) -> Self {
+    fn start(ctx: &mut GameContext, config: ShootoutGameConfiguration) -> Self {
         let game_state = ShootoutGameState {
             config: config.clone(),
             round: 0,
@@ -392,7 +370,7 @@ impl ShootoutGame {
             red_score: 0,
             blue_score: 0,
         };
-        let attack = AttackState::setup_attempt(server.rb_mut(), &game_state);
+        let attack = AttackState::setup_attempt(ctx, &game_state);
         ShootoutGame {
             state: ShootoutAttemptState::Attack(attack),
             game_state,
@@ -417,18 +395,15 @@ impl ShootoutGame {
 }
 
 impl ShootoutGame {
-    fn before_tick(&mut self, mut server: ServerMut) {
-        if self
-            .state
-            .before_tick(server.rb_mut(), &mut self.game_state)
-        {
-            server.new_game();
+    fn before_tick(&mut self, ctx: &mut GameContext) {
+        if self.state.before_tick(ctx, &mut self.game_state) {
+            ctx.new_game();
         }
     }
 
-    fn tick(&mut self, server: ServerMut, events: &[PhysicsEvent]) {
+    fn tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) {
         self.state
-            .tick(server, self.game_state.team, events, &mut self.game_state);
+            .tick(ctx, self.game_state.team, events, &mut self.game_state);
     }
 }
 
@@ -444,13 +419,13 @@ impl ShootoutGameMode {
         }
     }
 
-    fn start_game(&mut self, mut server: ServerMut) {
-        let game = ShootoutGame::start(server.rb_mut(), self.config.clone());
+    fn start_game(&mut self, ctx: &mut GameContext) {
+        let game = ShootoutGame::start(ctx, self.config.clone());
         self.status = ServerStatus::Game(game);
     }
 
-    fn update_players(&mut self, mut server: ServerMut) -> (usize, usize) {
-        self.teams.update(&mut server.context(), |rink, team, _| {
+    fn update_players(&mut self, ctx: &mut GameContext) -> (usize, usize) {
+        self.teams.update(ctx, |rink, team, _| {
             get_spawnpoint(rink, team, SpawnPoint::Bench)
         })
     }
@@ -490,8 +465,8 @@ impl ShootoutGameMode {
 }
 
 impl GameMode for ShootoutGameMode {
-    fn before_tick(&mut self, mut server: ServerMut) {
-        let (red_player_count, blue_player_count) = self.update_players(server.rb_mut());
+    fn before_tick(&mut self, ctx: &mut GameContext) {
+        let (red_player_count, blue_player_count) = self.update_players(ctx);
         match &mut self.status {
             ServerStatus::WaitingForGame {
                 time,
@@ -502,7 +477,7 @@ impl GameMode for ShootoutGameMode {
                     if *time == 0 {
                         *time_until_start = time_until_start.saturating_sub(1);
                         if *time_until_start == 0 {
-                            self.start_game(server.rb_mut());
+                            self.start_game(ctx);
                         }
                     }
                 } else {
@@ -510,11 +485,11 @@ impl GameMode for ShootoutGameMode {
                     *time_until_start = 500;
                 }
             }
-            ServerStatus::Game(game) => game.before_tick(server),
+            ServerStatus::Game(game) => game.before_tick(ctx),
         }
     }
 
-    fn after_tick(&mut self, server: ServerMut, events: &[PhysicsEvent]) -> ScoreboardValues {
+    fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues {
         match self.status {
             ServerStatus::WaitingForGame { time, .. } => ScoreboardValues {
                 rules_state: RulesState::default(),
@@ -526,14 +501,13 @@ impl GameMode for ShootoutGameMode {
                 game_over: false,
             },
             ServerStatus::Game(ref mut game) => {
-                game.tick(server, events);
+                game.tick(ctx, events);
                 game.scoreboard()
             }
         }
     }
 
-    fn handle_command(&mut self, mut server: ServerMut, cmd: &str, arg: &str, player_id: PlayerId) {
-        let ctx = &mut server.context();
+    fn handle_command(&mut self, ctx: &mut GameContext, cmd: &str, arg: &str, player_id: PlayerId) {
         match cmd {
             "reset" | "resetgame" => {
                 self.reset_game(ctx, player_id);
@@ -547,24 +521,26 @@ impl GameMode for ShootoutGameMode {
         }
     }
 
-    fn game_started(&mut self, mut server: ServerMut) {
+    fn game_started(&mut self, ctx: &mut GameContext) {
         self.status = ServerStatus::WaitingForGame {
             time: 1000,
             time_until_start: 500,
         };
-        let rink = server.rink();
+        let rink = &*ctx.rink;
         let width = rink.width;
         let length = rink.length;
 
         let pos = Vec3::new(width / 2.0, 1.5, length / 2.0);
         let rot = Rot3::IDENTITY;
-        server
-            .state_mut()
-            .objects_mut()
-            .spawn_puck(Puck::new(pos, rot));
+        ctx.objects.spawn_puck(Puck::new(pos, rot));
     }
 
-    fn before_player_exit(&mut self, _server: ServerMut, player_id: PlayerId, _reason: ExitReason) {
+    fn before_player_exit(
+        &mut self,
+        _ctx: &mut GameContext,
+        player_id: PlayerId,
+        _reason: ExitReason,
+    ) {
         self.teams.remove_player(player_id);
     }
 
@@ -572,7 +548,7 @@ impl GameMode for ShootoutGameMode {
         self.teams.team_max as u32
     }
 
-    fn include_tick_in_recording(&self, _server: Server) -> bool {
+    fn include_tick_in_recording(&self) -> bool {
         !matches!(self.status, ServerStatus::WaitingForGame { .. })
     }
 }

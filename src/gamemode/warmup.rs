@@ -1,7 +1,7 @@
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::game::{Puck, ScoreboardValues};
 use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
-use crate::gamemode::{ExitReason, GameMode, ServerMut};
+use crate::gamemode::{ExitReason, GameContext, GameMode};
 use glam::Vec3;
 use glamx::Rot3;
 
@@ -19,35 +19,34 @@ impl PermanentWarmup {
             teams: TeamSelection::new(usize::MAX).with_team_switch_cooldown(0),
         }
     }
-    fn update_players(&mut self, mut server: ServerMut) {
+    fn update_players(&mut self, ctx: &mut GameContext) {
         let spawn_point = self.spawn_point;
-        self.teams.update(&mut server.context(), |rink, team, _| {
-            get_spawnpoint(rink, team, spawn_point)
-        });
+        self.teams
+            .update(ctx, |rink, team, _| get_spawnpoint(rink, team, spawn_point));
     }
 }
 
 impl GameMode for PermanentWarmup {
-    fn before_tick(&mut self, server: ServerMut) {
-        self.update_players(server);
+    fn before_tick(&mut self, ctx: &mut GameContext) {
+        self.update_players(ctx);
     }
 
-    fn after_tick(&mut self, _server: ServerMut, _events: &[PhysicsEvent]) -> ScoreboardValues {
+    fn after_tick(&mut self, _ctx: &mut GameContext, _events: &[PhysicsEvent]) -> ScoreboardValues {
         ScoreboardValues::default()
     }
 
     fn handle_command(
         &mut self,
-        _server: ServerMut,
+        _ctx: &mut GameContext,
         _cmd: &str,
         _arg: &str,
         _player_index: PlayerId,
     ) {
     }
 
-    fn game_started(&mut self, mut server: ServerMut) {
+    fn game_started(&mut self, ctx: &mut GameContext) {
         let warmup_pucks = self.pucks;
-        let rink = server.rink();
+        let rink = &*ctx.rink;
         let width = rink.width;
         let length = rink.length;
         let puck_line_start = width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
@@ -55,14 +54,16 @@ impl GameMode for PermanentWarmup {
         for i in 0..warmup_pucks {
             let pos = Vec3::new(puck_line_start + 0.8 * (i as f32), 1.5, length / 2.0);
             let rot = Rot3::IDENTITY;
-            server
-                .state_mut()
-                .objects_mut()
-                .spawn_puck(Puck::new(pos, rot));
+            ctx.objects.spawn_puck(Puck::new(pos, rot));
         }
     }
 
-    fn before_player_exit(&mut self, _server: ServerMut, player_id: PlayerId, _reason: ExitReason) {
+    fn before_player_exit(
+        &mut self,
+        _ctx: &mut GameContext,
+        player_id: PlayerId,
+        _reason: ExitReason,
+    ) {
         self.teams.remove_player(player_id);
     }
 
