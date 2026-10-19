@@ -1,6 +1,7 @@
 use crate::ServerConfiguration;
 use crate::game::{
-    PhysicsEvent, PlayerId, PlayerIndex, PlayerInput, Puck, Rink, ScoreboardValues, Team,
+    PhysicsConfiguration, PhysicsEvent, PlayerId, PlayerIndex, PlayerInput, Puck, Rink,
+    ScoreboardValues, SkaterObject, Team,
 };
 use crate::players::{
     PlayerListExt, ServerPlayer as InternalServerPlayer, ServerPlayerData, ServerPlayersAndMessages,
@@ -81,6 +82,7 @@ pub struct ServerMutParts<'a> {
     pub state: ServerStateMut<'a>,
     pub rink: &'a mut Rink,
     pub config: &'a mut ServerConfiguration,
+    pub physics_config: &'a mut PhysicsConfiguration,
 }
 
 /// Handle to server.
@@ -112,6 +114,7 @@ impl<'a> ServerMut<'a> {
             },
             rink: &mut server.rink,
             config: &mut server.config,
+            physics_config: &mut server.physics_config,
         }
     }
 
@@ -122,6 +125,7 @@ impl<'a> ServerMut<'a> {
             },
             rink: &mut self.server.rink,
             config: &mut self.server.config,
+            physics_config: &mut self.server.physics_config,
         }
     }
 
@@ -140,6 +144,17 @@ impl<'a> ServerMut<'a> {
     }
     pub fn config_mut(&mut self) -> &mut ServerConfiguration {
         &mut self.server.config
+    }
+
+    /// Gets a mutable reference to the physics configuration.
+    ///
+    /// Changes take effect from the next physics simulation step.
+    pub fn physics_config_mut(&mut self) -> &mut PhysicsConfiguration {
+        &mut self.server.physics_config
+    }
+
+    pub fn physics_config(&self) -> &PhysicsConfiguration {
+        &self.server.physics_config
     }
 
     pub fn state(&self) -> ServerState<'_> {
@@ -201,6 +216,10 @@ impl<'a> Server<'a> {
 
     pub fn config(&self) -> &ServerConfiguration {
         &self.server.config
+    }
+
+    pub fn physics_config(&self) -> &PhysicsConfiguration {
+        &self.server.physics_config
     }
 }
 
@@ -309,6 +328,13 @@ pub struct ServerState<'a> {
 }
 
 impl<'a> ServerState<'a> {
+    /// Returns a player's skater, if the player is currently on the ice.
+    ///
+    /// This gives read access to the full skater state, such as velocity, rotation and stick position.
+    pub fn skater(&self, player_id: PlayerId) -> Option<&SkaterObject> {
+        self.state.skater_for_player(player_id)
+    }
+
     /// Returns the position of a player's skater, if the player is currently on the ice.
     pub fn skater_position(&self, player_id: PlayerId) -> Option<Vec3> {
         Some(self.state.skater_for_player(player_id)?.body.pos)
@@ -566,7 +592,7 @@ impl<'a> ServerPlayersMut<'a> {
             .map(|(id, player)| ServerPlayerMut { id, player })
     }
 
-    /// Returns an immutable handle to a player in the server.
+    /// Returns a mutable handle to a player in the server.
     pub fn get_mut(&mut self, id: PlayerId) -> Option<ServerPlayerMut<'_>> {
         self.state
             .players
@@ -728,6 +754,7 @@ impl<'a> ServerPlayer<'a> {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ExitReason {
     Disconnected,

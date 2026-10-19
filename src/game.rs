@@ -694,6 +694,9 @@ pub enum Team {
 }
 
 impl Team {
+    /// Both teams, red first.
+    pub const ALL: [Team; 2] = [Team::Red, Team::Blue];
+
     pub(crate) fn get_num(self) -> u32 {
         match self {
             Team::Red => 0,
