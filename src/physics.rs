@@ -3,7 +3,7 @@ use crate::game::{
     PhysicsConfiguration, PlayerInput, Puck, Rink, RinkNet, SkaterCollisionBall, SkaterHand,
     SkaterObject, Team,
 };
-use crate::game::{PhysicsEvent, PlayerId};
+use crate::game::{PhysicsEvent, PlayerId, PuckId};
 use crate::players::PlayerListExt;
 use crate::server::{GameObject, HQMServer};
 use arrayvec::ArrayVec;
@@ -30,23 +30,21 @@ impl HQMServer {
         let mut events: PhysicsEventList = SmallVec::new();
         let mut players: ArrayVec<(PlayerId, &mut SkaterObject, &PlayerInput), 32> =
             ArrayVec::new();
-        let mut pucks: ArrayVec<(usize, &mut Puck, Vec3), 32> = ArrayVec::new();
-        for (i, p) in self.state.objects.iter_mut().enumerate() {
-            if let Some(p) = p {
-                match p {
-                    GameObject::Skater(player_id, skater) => {
-                        let player = self
-                            .state
-                            .player_message_state
-                            .players
-                            .get_player(*player_id)
-                            .unwrap();
-                        players.push((*player_id, skater, &player.input))
-                    }
-                    GameObject::Puck(puck) => {
-                        let old_pos = puck.body.pos;
-                        pucks.push((i, puck, old_pos));
-                    }
+        let mut pucks: ArrayVec<(PuckId, &mut Puck, Vec3), 32> = ArrayVec::new();
+        for object in self.state.objects.iter_mut().flatten() {
+            match object {
+                GameObject::Skater(player_id, skater) => {
+                    let player = self
+                        .state
+                        .player_message_state
+                        .players
+                        .get_player(*player_id)
+                        .unwrap();
+                    players.push((*player_id, skater, &player.input))
+                }
+                GameObject::Puck(puck_id, puck) => {
+                    let old_pos = puck.body.pos;
+                    pucks.push((*puck_id, puck, old_pos));
                 }
             }
         }
@@ -132,7 +130,7 @@ impl HQMServer {
 
 fn update_sticks_and_pucks(
     players: &mut [(PlayerId, &mut SkaterObject, &PlayerInput)],
-    pucks: &mut [(usize, &mut Puck, Vec3)],
+    pucks: &mut [(PuckId, &mut Puck, Vec3)],
     rink: &Rink,
     events: &mut PhysicsEventList,
     physics_config: &PhysicsConfiguration,
@@ -552,7 +550,7 @@ fn apply_collisions(
 
 fn puck_detection(
     puck: &mut Puck,
-    puck_index: usize,
+    puck_index: PuckId,
     old_puck_pos: Vec3,
     rink: &Rink,
     events: &mut PhysicsEventList,
@@ -560,7 +558,7 @@ fn puck_detection(
     let puck_pos = puck.body.pos;
 
     fn check_lines(
-        puck_index: usize,
+        puck_index: PuckId,
         puck_pos: Vec3,
         old_puck_pos: Vec3,
         puck_radius: f32,
@@ -637,7 +635,7 @@ fn puck_detection(
     }
 
     fn check_net(
-        puck_index: usize,
+        puck_index: PuckId,
         puck_pos: Vec3,
         old_puck_pos: Vec3,
         net: &RinkNet,

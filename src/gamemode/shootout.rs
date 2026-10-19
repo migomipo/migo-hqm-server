@@ -4,7 +4,7 @@ use std::f32::consts::PI;
 use tracing::info;
 
 use crate::game::{PhysicsEvent, PlayerId, RulesState};
-use crate::game::{PlayerIndex, Puck, ScoreboardValues, Team};
+use crate::game::{PlayerIndex, Puck, PuckId, ScoreboardValues, Team};
 use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
 use crate::gamemode::{ExitReason, GameContext, GameMode};
 
@@ -81,6 +81,8 @@ struct AttackState {
     time: u32,
     progress: f32,
     no_more_touch: bool,
+    /// The puck of this attempt, if it could be spawned.
+    puck: Option<PuckId>,
 }
 
 #[derive(Debug, Clone)]
@@ -188,7 +190,7 @@ impl AttackState {
         let width = ctx.rink.width;
 
         let puck_pos = Vec3::new(width / 2.0, 1.0, length / 2.0);
-        ctx.objects.spawn_puck(Puck::new(puck_pos, Rot3::IDENTITY));
+        let puck = ctx.objects.spawn_puck(Puck::new(puck_pos, Rot3::IDENTITY));
 
         let mut red_players = vec![];
         let mut blue_players = vec![];
@@ -246,6 +248,7 @@ impl AttackState {
             time: 2000,
             progress: 0.0,
             no_more_touch: false,
+            puck,
         }
     }
 
@@ -305,7 +308,7 @@ impl AttackState {
             Team::Red => Vec3::NEG_Z,
             Team::Blue => Vec3::Z,
         };
-        let progress = (ctx.objects.get_puck(0)?.body.pos - center_pos).dot(normal);
+        let progress = (ctx.objects.get_puck(self.puck?)?.body.pos - center_pos).dot(normal);
         if !self.no_more_touch && progress > self.progress {
             self.progress = progress;
             None

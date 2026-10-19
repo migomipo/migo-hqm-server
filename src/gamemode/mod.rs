@@ -1,6 +1,6 @@
 use crate::ServerConfiguration;
 use crate::game::{
-    PhysicsConfiguration, PhysicsEvent, PlayerId, PlayerIndex, PlayerInput, Puck, Rink,
+    PhysicsConfiguration, PhysicsEvent, PlayerId, PlayerIndex, PlayerInput, Puck, PuckId, Rink,
     ScoreboardValues, SkaterObject, Team,
 };
 use crate::players::{
@@ -129,6 +129,7 @@ impl<'a> From<ServerSplit<'a>> for GameContext<'a> {
             },
             objects: Objects {
                 objects: split.objects,
+                puck_counter: split.puck_counter,
             },
             messages: Messages {
                 messages: split.messages,
@@ -236,59 +237,65 @@ impl GameContext<'_> {
 /// Pucks and skaters on the ice.
 pub struct Objects<'a> {
     objects: &'a mut [Option<GameObject>],
+    puck_counter: &'a mut u32,
 }
 
 impl Objects<'_> {
-    pub fn spawn_puck(&mut self, puck: Puck) -> Option<usize> {
-        self.objects.spawn_puck(puck)
+    /// Puts a puck on the ice. Returns `None` if there is no free object slot.
+    pub fn spawn_puck(&mut self, puck: Puck) -> Option<PuckId> {
+        self.objects.spawn_puck(puck, self.puck_counter)
+    }
+
+    /// Removes a puck from the ice and returns it, if it is still there.
+    pub fn remove_puck(&mut self, puck_id: PuckId) -> Option<Puck> {
+        let slot = self.objects.get_mut(puck_id.index)?;
+        match slot.take() {
+            Some(GameObject::Puck(id, puck)) if id == puck_id => Some(puck),
+            other => {
+                *slot = other;
+                None
+            }
+        }
     }
 
     pub fn remove_all_pucks(&mut self) {
         for x in self.objects.iter_mut() {
-            if matches!(x, Some(GameObject::Puck(_))) {
+            if matches!(x, Some(GameObject::Puck(..))) {
                 *x = None;
             }
         }
     }
 
-    pub fn get_puck(&self, object_index: usize) -> Option<&Puck> {
-        self.objects.get(object_index).and_then(|x| match x {
-            Some(GameObject::Puck(puck)) => Some(puck),
+    /// Returns a puck, if it is still on the ice.
+    pub fn get_puck(&self, puck_id: PuckId) -> Option<&Puck> {
+        match self.objects.get(puck_id.index)? {
+            Some(GameObject::Puck(id, puck)) if *id == puck_id => Some(puck),
+            _ => None,
+        }
+    }
+
+    /// Returns a mutable reference to a puck, if it is still on the ice.
+    pub fn get_puck_mut(&mut self, puck_id: PuckId) -> Option<&mut Puck> {
+        match self.objects.get_mut(puck_id.index)? {
+            Some(GameObject::Puck(id, puck)) if *id == puck_id => Some(puck),
+            _ => None,
+        }
+    }
+
+    /// Iterates over every puck and its ID.
+    pub fn pucks(&self) -> impl Iterator<Item = (PuckId, &Puck)> {
+        self.objects.iter().filter_map(|object| match object {
+            Some(GameObject::Puck(id, puck)) => Some((*id, puck)),
             _ => None,
         })
     }
 
-    pub fn get_puck_mut(&mut self, object_index: usize) -> Option<&mut Puck> {
-        self.objects.get_mut(object_index).and_then(|x| match x {
-            Some(GameObject::Puck(puck)) => Some(puck),
+    /// Iterates mutably over every puck and its ID.
+    pub fn pucks_mut(&mut self) -> impl Iterator<Item = (PuckId, &mut Puck)> {
+        self.objects.iter_mut().filter_map(|object| match object {
+            Some(GameObject::Puck(id, puck)) => Some((*id, puck)),
             _ => None,
         })
-    }
-
-    /// Iterates over every puck and its object index.
-    pub fn pucks(&self) -> impl Iterator<Item = (usize, &Puck)> {
-        self.objects
-            .iter()
-            .enumerate()
-            .filter_map(|(index, object)| {
-                let Some(GameObject::Puck(puck)) = object else {
-                    return None;
-                };
-                Some((index, puck))
-            })
-    }
-
-    /// Iterates mutably over every puck and its object index.
-    pub fn pucks_mut(&mut self) -> impl Iterator<Item = (usize, &mut Puck)> {
-        self.objects
-            .iter_mut()
-            .enumerate()
-            .filter_map(|(index, object)| {
-                let Some(GameObject::Puck(puck)) = object else {
-                    return None;
-                };
-                Some((index, puck))
-            })
     }
 
     /// Returns a player's skater, if the player is currently on the ice.
@@ -540,22 +547,36 @@ mod tests {
     use crate::server::HQMServerState;
 
     #[test]
-    fn puck_iterators_return_indices_and_allow_mutation() {
+    fn pucks_are_found_by_id_and_old_ids_do_not_match_new_pucks() {
         let mut objects: [Option<GameObject>; 4] = std::array::from_fn(|_| None);
-        objects[1] = Some(GameObject::Puck(Puck::new(Vec3::X, Rot3::IDENTITY)));
-        objects[3] = Some(GameObject::Puck(Puck::new(Vec3::Z, Rot3::IDENTITY)));
-
+        let mut puck_counter = 0;
         let mut object_view = Objects {
             objects: &mut objects,
+            puck_counter: &mut puck_counter,
         };
-        let indices: Vec<_> = object_view.pucks().map(|(index, _)| index).collect();
-        assert_eq!(indices, [1, 3]);
+        let first = object_view
+            .spawn_puck(Puck::new(Vec3::X, Rot3::IDENTITY))
+            .unwrap();
+        let second = object_view
+            .spawn_puck(Puck::new(Vec3::Z, Rot3::IDENTITY))
+            .unwrap();
+        let ids: Vec<_> = object_view.pucks().map(|(id, _)| id).collect();
+        assert_eq!(ids, [first, second]);
 
         for (_, puck) in object_view.pucks_mut() {
             puck.radius = 0.25;
         }
-
         assert!(object_view.pucks().all(|(_, puck)| puck.radius == 0.25));
+
+        assert!(object_view.remove_puck(first).is_some());
+        let replacement = object_view
+            .spawn_puck(Puck::new(Vec3::Y, Rot3::IDENTITY))
+            .unwrap();
+        assert_eq!(replacement.index, first.index);
+        assert_ne!(replacement, first);
+        assert!(object_view.get_puck(first).is_none());
+        assert!(object_view.remove_puck(first).is_none());
+        assert_eq!(object_view.get_puck(replacement).unwrap().body.pos, Vec3::Y);
     }
 
     #[test]
@@ -569,9 +590,10 @@ mod tests {
             .player_message_state
             .add_player("spectator", "127.0.0.1:2".parse().unwrap())
             .unwrap();
-        state
-            .objects
-            .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+        state.objects.spawn_puck(
+            Puck::new(Vec3::ZERO, Rot3::IDENTITY),
+            &mut state.puck_counter,
+        );
         assert!(state.skater_links().spawn_skater(
             on_ice,
             Team::Blue,
@@ -585,6 +607,7 @@ mod tests {
         };
         let mut objects = Objects {
             objects: &mut state.objects,
+            puck_counter: &mut state.puck_counter,
         };
         assert!(objects.skater(spectator).is_none());
         for (id, skater) in objects.skaters_mut() {

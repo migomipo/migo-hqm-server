@@ -23,7 +23,7 @@ use crate::gamemode::{ExitReason, GameContext, GameMode};
 use self::ban::{BanCheck, BanCheckResponse};
 use self::recording::RecordingSaveMethod;
 use crate::game::{
-    PhysicsConfiguration, PlayerId, PlayerIndex, PlayerInput, Puck, Rink, ScoreboardValues,
+    PhysicsConfiguration, PlayerId, PlayerIndex, PlayerInput, Puck, PuckId, Rink, ScoreboardValues,
     SkaterHand, SkaterObject, Team,
 };
 use crate::protocol::{
@@ -89,22 +89,24 @@ impl HQMClientVersion {
 #[derive(Debug, Clone)]
 pub enum GameObject {
     Skater(PlayerId, SkaterObject),
-    Puck(Puck),
+    Puck(PuckId, Puck),
 }
 
 pub(crate) trait ObjectExt {
-    fn spawn_puck(&mut self, puck: Puck) -> Option<usize>;
+    fn spawn_puck(&mut self, puck: Puck, puck_counter: &mut u32) -> Option<PuckId>;
     fn spawn_skater(&mut self, player_id: PlayerId, skater: SkaterObject) -> Option<ObjectSlot>;
 }
 
 impl ObjectExt for [Option<GameObject>] {
-    fn spawn_puck(&mut self, puck: Puck) -> Option<usize> {
-        if let Some(object_index) = self.iter().position(|x| x.is_none()) {
-            self[object_index] = Some(GameObject::Puck(puck));
-            Some(object_index)
-        } else {
-            None
-        }
+    fn spawn_puck(&mut self, puck: Puck, puck_counter: &mut u32) -> Option<PuckId> {
+        let index = self.iter().position(|x| x.is_none())?;
+        let puck_id = PuckId {
+            index,
+            counter: *puck_counter,
+        };
+        *puck_counter = puck_counter.wrapping_add(1);
+        self[index] = Some(GameObject::Puck(puck_id, puck));
+        Some(puck_id)
     }
 
     fn spawn_skater(&mut self, player_id: PlayerId, skater: SkaterObject) -> Option<ObjectSlot> {
@@ -147,6 +149,8 @@ pub(crate) struct HQMServerState {
     pub(crate) player_message_state: ServerPlayersAndMessages,
 
     pub(crate) objects: Vec<Option<GameObject>>,
+    /// Counter for [PuckId], so that every spawned puck gets a new ID.
+    pub(crate) puck_counter: u32,
 
     pub(crate) replay: HQMTickHistory,
     replication: ReplicationState,
@@ -158,6 +162,7 @@ impl HQMServerState {
         Self {
             player_message_state: ServerPlayersAndMessages::new(),
             objects: vec![None; 32],
+            puck_counter: 0,
             replay: HQMTickHistory::new(),
             replication: ReplicationState::new(),
             recording: RecordingState::new(),
@@ -369,6 +374,7 @@ pub(crate) struct ServerSplit<'a> {
     pub(crate) players: &'a mut PlayerSlots,
     pub(crate) messages: &'a mut ServerMessages,
     pub(crate) objects: &'a mut [Option<GameObject>],
+    pub(crate) puck_counter: &'a mut u32,
     pub(crate) replay: &'a mut HQMTickHistory,
     pub(crate) rink: &'a mut Rink,
     pub(crate) config: &'a mut ServerConfiguration,
@@ -1057,7 +1063,7 @@ impl HQMServer {
             packets[i] = match object {
                 None => ObjectPacket::None,
                 Some(GameObject::Skater(_, skater)) => ObjectPacket::Skater(skater.get_packet()),
-                Some(GameObject::Puck(puck)) => ObjectPacket::Puck(puck.get_packet()),
+                Some(GameObject::Puck(_, puck)) => ObjectPacket::Puck(puck.get_packet()),
             };
         }
 
@@ -1169,6 +1175,7 @@ impl HQMServer {
         let HQMServerState {
             player_message_state: ServerPlayersAndMessages { players, messages },
             objects,
+            puck_counter,
             replay,
             replication,
             recording,
@@ -1177,6 +1184,7 @@ impl HQMServer {
             players,
             messages,
             objects,
+            puck_counter,
             replay,
             rink: &mut self.rink,
             config: &mut self.config,

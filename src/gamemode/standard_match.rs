@@ -3,7 +3,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use glam::Vec3;
 use glamx::Rot3;
 
-use crate::game::{PhysicsEvent, PlayerId, PlayerIndex, Puck, RulesState, ScoreboardValues, Team};
+use crate::game::{
+    PhysicsEvent, PlayerId, PlayerIndex, Puck, PuckId, RulesState, ScoreboardValues, Team,
+};
 use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
 use crate::gamemode::{ExitReason, GameContext, GameMode};
 
@@ -208,7 +210,7 @@ struct PlayingState {
     twoline: TwoLine,
     pass: Option<Pass>,
     started_goalies: HashSet<PlayerId>,
-    puck_touches: HashMap<usize, VecDeque<PuckTouch>>,
+    puck_touches: HashMap<PuckId, VecDeque<PuckTouch>>,
     faceoff_step: u32,
 }
 impl BreakState {
@@ -411,7 +413,7 @@ impl PlayingState {
     fn team_in_zone(ctx: &GameContext, team: Team, ignore: Option<PlayerId>) -> bool {
         !Self::players_past(ctx, team, ignore, false).is_empty()
     }
-    fn side(ctx: &GameContext, puck: usize) -> RinkSide {
+    fn side(ctx: &GameContext, puck: PuckId) -> RinkSide {
         ctx.objects.get_puck(puck).map_or(RinkSide::Lower, |p| {
             if p.body.pos.x <= ctx.rink.width / 2.0 {
                 RinkSide::Lower
@@ -493,7 +495,7 @@ impl PlayingState {
         ctx: &mut GameContext,
         playing: &mut PlayingState,
         team: Team,
-        puck: usize,
+        puck: PuckId,
     ) -> BreakState {
         if let Offside::Warning(warning) = playing.offside {
             if warning.offending_team == team {
@@ -584,7 +586,7 @@ impl PlayingState {
         ctx: &mut GameContext,
         playing: &mut PlayingState,
         player: PlayerId,
-        puck: usize,
+        puck: PuckId,
     ) -> Option<BreakState> {
         let Some(team) = ctx.players.get(player).and_then(|p| p.team()) else {
             return None;

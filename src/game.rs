@@ -692,6 +692,25 @@ impl std::fmt::Display for PlayerId {
     }
 }
 
+/**
+Unique puck ID.
+
+Each puck that is spawned gets an ID that no other puck has had since the server started. An ID
+of a puck that has been removed never refers to a puck that was spawned later in the same object
+slot.
+**/
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct PuckId {
+    pub(crate) index: usize,
+    pub(crate) counter: u32,
+}
+
+impl std::fmt::Display for PuckId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.index, self.counter)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Team {
     Red,
@@ -728,15 +747,15 @@ impl Display for Team {
 
 #[derive(Debug, Copy, Clone)]
 pub enum PhysicsEvent {
-    PuckTouch { player: PlayerId, puck: usize },
-    PuckReachedDefensiveLine { team: Team, puck: usize },
-    PuckPassedDefensiveLine { team: Team, puck: usize },
-    PuckReachedCenterLine { team: Team, puck: usize },
-    PuckPassedCenterLine { team: Team, puck: usize },
-    PuckReachedOffensiveZone { team: Team, puck: usize },
-    PuckEnteredOffensiveZone { team: Team, puck: usize },
+    PuckTouch { player: PlayerId, puck: PuckId },
+    PuckReachedDefensiveLine { team: Team, puck: PuckId },
+    PuckPassedDefensiveLine { team: Team, puck: PuckId },
+    PuckReachedCenterLine { team: Team, puck: PuckId },
+    PuckPassedCenterLine { team: Team, puck: PuckId },
+    PuckReachedOffensiveZone { team: Team, puck: PuckId },
+    PuckEnteredOffensiveZone { team: Team, puck: PuckId },
 
-    PuckEnteredNet { team: Team, puck: usize },
-    PuckPassedGoalLine { team: Team, puck: usize },
-    PuckTouchedNet { team: Team, puck: usize },
+    PuckEnteredNet { team: Team, puck: PuckId },
+    PuckPassedGoalLine { team: Team, puck: PuckId },
+    PuckTouchedNet { team: Team, puck: PuckId },
 }
