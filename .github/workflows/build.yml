@@ -1,15 +1,38 @@
+name: Migo HQM Server Build
+
 on:
   push:
-    # Sequence of patterns matched against refs/tags
+    branches:
+      - master
     tags:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
+  pull_request:
+  workflow_dispatch:
 
-name: Migo HQM Server Build
 env:
   BIN: migo-hqm-server
+  # cross 0.2.5 (the latest release) has no LoongArch images, so those targets build cross from this main commit
+  CROSS_MAIN: 526d03ddcd2f70e683074b3ea6f75ed300f33132
+
+permissions:
+  contents: read
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check that the tag matches the Cargo.toml version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+
   build:
+    needs: version
     runs-on: ${{ matrix.platform.os }}
     strategy:
       fail-fast: false
@@ -51,23 +74,24 @@ jobs:
             os: ubuntu-latest
           - target: loongarch64-unknown-linux-gnu
             os: ubuntu-latest
+            cross-main: true
           - target: loongarch64-unknown-linux-musl
             os: ubuntu-latest
+            cross-main: true
     steps:
-      - uses: actions/checkout@v4
-      - name: Cache cargo & target directories
-        uses: Swatinem/rust-cache@v2
-      - name: Install musl-tools on Linux
-        run: sudo apt-get update --yes && sudo apt-get install --yes musl-tools
-        if: contains(matrix.platform.target, 'musl')
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build binary
-        uses: houseabsolute/actions-rust-cross@v0
+        uses: houseabsolute/actions-rust-cross@21b0f18dc621b25bfae556ff2791fca4173121e8 # v1.0.8
         with:
           command: "build"
           target: ${{ matrix.platform.target }}
           toolchain: "stable"
           args: "--locked --release"
           strip: true
+          cross-version: ${{ matrix.platform.cross-main && env.CROSS_MAIN || '' }}
+          # Tag builds can only read caches from their own tag or the default branch, so only master saves them
+          rust-cache-parameters: >-
+            {"save-if": "${{ github.ref == 'refs/heads/master' }}"}
       - run: |
           7z a migo-hqm-server-${{ matrix.platform.target }}.zip config.toml README.md example_replay_integration.py ".\target\${{ matrix.platform.target }}\release\migo-hqm-server.exe"
         shell: bash
@@ -76,10 +100,28 @@ jobs:
           tar -czvf migo-hqm-server-${{ matrix.platform.target }}.tar.gz config.toml README.md example_replay_integration.py -C target/${{ matrix.platform.target }}/release migo-hqm-server
         shell: bash
         if: matrix.platform.os != 'windows-latest'
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          files: "migo-hqm-server-*"
+          name: migo-hqm-server-${{ matrix.platform.target }}
+          path: migo-hqm-server-${{ matrix.platform.target }}.*
+          if-no-files-found: error
 
-
-
+  # Publishes only after every target has built, so a release never has missing files
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: migo-hqm-server-*
+          merge-multiple: true
+          path: dist
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: dist/migo-hqm-server-*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
