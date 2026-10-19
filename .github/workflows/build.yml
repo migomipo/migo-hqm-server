@@ -70,6 +70,7 @@ jobs:
           echo "platforms=$(jq -c . <<< "$platforms")" >> "$GITHUB_OUTPUT"
 
   build:
+    name: build (${{ matrix.platform.target }})
     needs: setup
     runs-on: ${{ matrix.platform.os }}
     strategy:
