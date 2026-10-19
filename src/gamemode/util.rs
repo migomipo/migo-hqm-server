@@ -1,8 +1,7 @@
 use crate::game::{PlayerId, Rink, Team};
-use crate::gamemode::ServerStateMut;
+use crate::gamemode::{GameContext, ServerMessagesMut};
 use glam::Vec3;
 use glamx::Rot3;
-use reborrow::ReborrowMut;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::{FRAC_PI_2, PI};
@@ -48,8 +47,8 @@ impl TeamSelection {
     /// `coords` gives the spawn position and rotation for the n-th player joining a team this tick.
     pub fn update(
         &mut self,
-        mut server: ServerStateMut,
-        coords: impl Fn(Team, usize) -> (Vec3, Rot3),
+        ctx: &mut GameContext,
+        coords: impl Fn(&Rink, Team, usize) -> (Vec3, Rot3),
     ) -> (usize, usize) {
         let mut red_player_count = 0;
         let mut blue_player_count = 0;
@@ -60,7 +59,7 @@ impl TeamSelection {
             *x = x.saturating_sub(1);
             *x > 0
         });
-        for player in server.players().iter() {
+        for player in ctx.players.iter() {
             let player_id = player.id;
             let input = player.input();
             if let Some(team) = player.team() {
@@ -81,8 +80,8 @@ impl TeamSelection {
         }
         for (player_id, player_name) in spectating_players {
             info!("{} ({}) is spectating", player_name, player_id);
-            self.force_spectate(server.rb_mut(), player_id);
-            self.send_extra_message(server.rb_mut(), format!("{player_name} is spectating"));
+            self.force_spectate(ctx, player_id);
+            self.send_extra_message(&mut ctx.messages, format!("{player_name} is spectating"));
         }
 
         let mut add_players =
@@ -92,15 +91,15 @@ impl TeamSelection {
                         break;
                     }
 
-                    let (pos, rot) = coords(team, i);
+                    let (pos, rot) = coords(ctx.rink, team, i);
 
-                    if !server.spawn_skater(player_id, team, pos, rot, false) {
+                    if !ctx.spawn_skater(player_id, team, pos, rot, false) {
                         break;
                     }
                     info!("{} ({}) has joined team {:?}", player_name, player_id, team);
                     *player_count += 1;
                     self.send_extra_message(
-                        server.rb_mut(),
+                        &mut ctx.messages,
                         format!("{player_name} is playing for {team}"),
                     );
                 }
@@ -115,8 +114,8 @@ impl TeamSelection {
     /// Moves a player to the spectators and starts their team switch cooldown.
     ///
     /// Returns false if the player was not on the ice.
-    pub fn force_spectate(&mut self, mut server: ServerStateMut, player_id: PlayerId) -> bool {
-        if !server.move_to_spectator(player_id) {
+    pub fn force_spectate(&mut self, ctx: &mut GameContext, player_id: PlayerId) -> bool {
+        if !ctx.move_to_spectator(player_id) {
             return false;
         }
         if self.team_switch_cooldown > 0 {
@@ -132,9 +131,9 @@ impl TeamSelection {
         self.show_extra_messages.remove(&player_id);
     }
 
-    fn send_extra_message(&self, mut server: ServerStateMut, message: String) {
+    fn send_extra_message(&self, messages: &mut ServerMessagesMut, message: String) {
         for player_id in self.show_extra_messages.iter() {
-            server.add_directed_server_chat_message(message.clone(), *player_id);
+            messages.add_directed_server_chat_message(message.clone(), *player_id);
         }
     }
 }

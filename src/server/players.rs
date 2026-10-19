@@ -293,6 +293,79 @@ impl ServerMessages {
         }
         self.pending.push((MessageRecipients::All, rc));
     }
+
+    /// Delivers all queued messages to the players' message queues.
+    pub(crate) fn flush(&mut self, players: &mut PlayerSlots) {
+        for (recipients, message) in self.pending.drain(..) {
+            match recipients {
+                MessageRecipients::All => {
+                    for (_, player) in players.iter_players_mut() {
+                        player.add_message(message.clone());
+                    }
+                }
+                MessageRecipients::Player(player_id) => {
+                    if let Some(player) = players.get_player_mut(player_id) {
+                        player.add_message(message);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Clears all messages and the players' message queues, and announces the players again.
+    pub(crate) fn new_game(&mut self, players: &mut PlayerSlots) {
+        self.flush(players);
+        self.recording_messages.clear();
+        self.persistent_messages.clear();
+
+        for (player_id, player) in players.iter_players_mut() {
+            player.reset(player_id.index);
+            self.broadcast_message(
+                player.get_update_message(player_id.index),
+                MessageRetention::ForLateJoiners,
+                MessageRecording::Include,
+            );
+        }
+    }
+
+    /// Returns the player if the player is admin, otherwise sends a message telling the user to log in first.
+    pub(crate) fn check_admin_or_deny<'p>(
+        &mut self,
+        players: &'p PlayerSlots,
+        player_id: PlayerId,
+    ) -> Option<&'p ServerPlayer> {
+        let player = players.get_player(player_id)?;
+        if player.is_admin {
+            Some(player)
+        } else {
+            self.add_directed_server_chat_message(
+                "Please log in before using that command",
+                player_id,
+            );
+            None
+        }
+    }
+
+    /// Announces a goal. Scorer and assist are left out if they are no longer on the server.
+    pub(crate) fn add_goal_message(
+        &mut self,
+        players: &PlayerSlots,
+        team: Team,
+        goal_player_id: Option<PlayerId>,
+        assist_player_id: Option<PlayerId>,
+    ) {
+        let index_if_present = |id: PlayerId| players.get_player(id).is_some().then_some(id.index);
+        let message = HQMMessage::Goal {
+            team,
+            goal_player_index: goal_player_id.and_then(index_if_present),
+            assist_player_index: assist_player_id.and_then(index_if_present),
+        };
+        self.broadcast_message(
+            message,
+            MessageRetention::ForLateJoiners,
+            MessageRecording::Include,
+        );
+    }
 }
 
 pub(crate) struct ServerPlayersAndMessages {
@@ -310,54 +383,16 @@ impl ServerPlayersAndMessages {
 
     /// Delivers all queued messages to the players' message queues.
     pub(crate) fn flush_messages(&mut self) {
-        for (recipients, message) in self.messages.pending.drain(..) {
-            match recipients {
-                MessageRecipients::All => {
-                    for (_, player) in self.players.iter_players_mut() {
-                        player.add_message(message.clone());
-                    }
-                }
-                MessageRecipients::Player(player_id) => {
-                    if let Some(player) = self.players.get_player_mut(player_id) {
-                        player.add_message(message);
-                    }
-                }
-            }
-        }
+        self.messages.flush(&mut self.players);
     }
 
     /// Returns the player if the player is admin, otherwise sends a message telling the user to log in first.
     pub(crate) fn check_admin_or_deny(&mut self, player_id: PlayerId) -> Option<&ServerPlayer> {
-        let player = self.players.get_player(player_id)?;
-        if player.is_admin {
-            Some(player)
-        } else {
-            self.messages.add_directed_server_chat_message(
-                "Please log in before using that command",
-                player_id,
-            );
-            None
-        }
+        self.messages.check_admin_or_deny(&self.players, player_id)
     }
 
     pub(crate) fn new_game(&mut self) {
-        self.flush_messages();
-        self.messages.recording_messages.clear();
-        self.messages.persistent_messages.clear();
-
-        let mut messages = Vec::new();
-        for (player_id, player) in self.players.iter_players_mut() {
-            player.reset(player_id.index);
-            messages.push(player.get_update_message(player_id.index));
-        }
-
-        for message in messages {
-            self.broadcast_message(
-                message,
-                MessageRetention::ForLateJoiners,
-                MessageRecording::Include,
-            );
-        }
+        self.messages.new_game(&mut self.players);
     }
 
     pub(crate) fn add_user_chat_message(
@@ -409,30 +444,8 @@ impl ServerPlayersAndMessages {
         goal_player_index: Option<PlayerId>,
         assist_player_index: Option<PlayerId>,
     ) {
-        let goal_player_index = goal_player_index.and_then(|x| {
-            if self.players.get_player(x).is_some() {
-                Some(x.index)
-            } else {
-                None
-            }
-        });
-        let assist_player_index = assist_player_index.and_then(|x| {
-            if self.players.get_player(x).is_some() {
-                Some(x.index)
-            } else {
-                None
-            }
-        });
-        let message = HQMMessage::Goal {
-            team,
-            goal_player_index,
-            assist_player_index,
-        };
-        self.broadcast_message(
-            message,
-            MessageRetention::ForLateJoiners,
-            MessageRecording::Include,
-        );
+        self.messages
+            .add_goal_message(&self.players, team, goal_player_index, assist_player_index);
     }
 
     pub(crate) fn broadcast_message(

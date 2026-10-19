@@ -1,7 +1,7 @@
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::game::{Puck, ScoreboardValues};
 use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
-use crate::gamemode::{ExitReason, GameMode, ServerMut, ServerMutParts};
+use crate::gamemode::{ExitReason, GameMode, ServerMut};
 use glam::Vec3;
 use glamx::Rot3;
 
@@ -21,10 +21,9 @@ impl PermanentWarmup {
     }
     fn update_players(&mut self, mut server: ServerMut) {
         let spawn_point = self.spawn_point;
-        let ServerMutParts { state, rink, .. } = server.as_mut_parts();
-        let rink = &*rink;
-        self.teams
-            .update(state, |team, _| get_spawnpoint(rink, team, spawn_point));
+        self.teams.update(&mut server.context(), |rink, team, _| {
+            get_spawnpoint(rink, team, spawn_point)
+        });
     }
 }
 

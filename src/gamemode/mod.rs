@@ -7,7 +7,10 @@ use crate::players::{
     PlayerListExt, PlayerSlots, ServerMessages, ServerPlayer as InternalServerPlayer,
     ServerPlayerData,
 };
-use crate::server::{GameObject, HQMServer, HQMServerState, HQMTickHistory, ObjectExt};
+use crate::server::{
+    GameObject, HQMServer, HQMServerState, HQMTickHistory, ObjectExt, ServerInternals, ServerSplit,
+    SkaterLinks,
+};
 use glam::Vec3;
 use glamx::Rot3;
 use reborrow::{Reborrow, ReborrowCopyTraits, ReborrowTraits};
@@ -162,6 +165,12 @@ impl<'a> ServerMut<'a> {
         self.server.new_game()
     }
 
+    /// Gets a [GameContext], which splits the server state into fields that can be borrowed
+    /// independently.
+    pub fn context(&mut self) -> GameContext<'_> {
+        GameContext::from(self.server.split())
+    }
+
     pub fn state_mut(&mut self) -> ServerStateMut<'_> {
         ServerStateMut {
             state: &mut self.server.state,
@@ -217,6 +226,119 @@ impl<'a> ServerMut<'a> {
     /// Returns the player's name if the player is admin, otherwise sends a message telling the user to log in first.
     pub fn require_admin(&mut self, player_id: PlayerId) -> Option<Rc<str>> {
         self.state_mut().require_admin(player_id)
+    }
+}
+
+/// Mutable access to the server state, split into fields that can be borrowed independently.
+///
+/// The fields can be used at the same time, for example iterating over `players` while sending
+/// `messages` or changing skaters in `objects`. Operations that change several parts at once,
+/// like spawning skaters or starting a new game, are methods on the context itself and need
+/// the whole context.
+#[non_exhaustive]
+pub struct GameContext<'a> {
+    pub players: ServerPlayersMut<'a>,
+    pub objects: ServerObjectsMut<'a>,
+    pub messages: ServerMessagesMut<'a>,
+    pub replay: ServerReplayMut<'a>,
+    pub rink: &'a mut Rink,
+    pub config: &'a mut ServerConfiguration,
+    pub physics_config: &'a mut PhysicsConfiguration,
+    internals: ServerInternals<'a>,
+}
+
+impl<'a> From<ServerSplit<'a>> for GameContext<'a> {
+    fn from(split: ServerSplit<'a>) -> Self {
+        Self {
+            players: ServerPlayersMut {
+                players: split.players,
+            },
+            objects: ServerObjectsMut {
+                objects: split.objects,
+            },
+            messages: ServerMessagesMut {
+                messages: split.messages,
+            },
+            replay: ServerReplayMut {
+                replay: split.replay,
+            },
+            rink: split.rink,
+            config: split.config,
+            physics_config: split.physics_config,
+            internals: split.internals,
+        }
+    }
+}
+
+impl GameContext<'_> {
+    fn skater_links(&mut self) -> SkaterLinks<'_> {
+        SkaterLinks {
+            players: self.players.players,
+            messages: self.messages.messages,
+            objects: self.objects.objects,
+        }
+    }
+
+    /// Ends the current game and resets the server state.
+    ///
+    /// See [ServerMut::new_game].
+    pub fn new_game(&mut self) {
+        crate::server::new_game(
+            &mut self.internals,
+            self.config,
+            self.players.players,
+            self.messages.messages,
+            self.objects.objects,
+            self.replay.replay,
+        );
+    }
+
+    /// Puts a player on the ice, or moves their skater if they are already on the ice.
+    ///
+    /// Returns false if the player does not exist or there is no free object slot.
+    pub fn spawn_skater(
+        &mut self,
+        player_id: PlayerId,
+        team: Team,
+        pos: Vec3,
+        rot: Rot3,
+        keep_stick_position: bool,
+    ) -> bool {
+        self.skater_links()
+            .spawn_skater(player_id, team, pos, rot, keep_stick_position)
+    }
+
+    /// Moves a player off the ice. Returns false if the player was not on the ice.
+    pub fn move_to_spectator(&mut self, player_id: PlayerId) -> bool {
+        self.skater_links().move_to_spectator(player_id)
+    }
+
+    /// Removes a player from the server. Returns false if the player does not exist.
+    pub fn remove_player(&mut self, player_id: PlayerId) -> bool {
+        self.skater_links().remove_player(player_id, true)
+    }
+
+    /// Returns the player's name if the player is admin, otherwise sends a message telling the user to log in first.
+    pub fn require_admin(&mut self, player_id: PlayerId) -> Option<Rc<str>> {
+        self.messages
+            .messages
+            .check_admin_or_deny(self.players.players, player_id)
+            .map(|player| player.player_name.clone())
+    }
+
+    /// Announces a goal. Scorer and assist are left out if they are no longer on the server.
+    pub fn add_goal_message(
+        &mut self,
+        team: Team,
+        goal_player: Option<PlayerId>,
+        assist_player: Option<PlayerId>,
+    ) {
+        self.messages.messages.add_goal_message(
+            self.players.players,
+            team,
+            goal_player,
+            assist_player,
+        );
     }
 }
 

@@ -6,7 +6,7 @@ use reborrow::{Reborrow, ReborrowMut};
 
 use crate::game::{PhysicsEvent, PlayerId, PlayerIndex, Puck, RulesState, ScoreboardValues, Team};
 use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
-use crate::gamemode::{ExitReason, GameMode, Server, ServerMut, ServerMutParts};
+use crate::gamemode::{ExitReason, GameMode, Server, ServerMut};
 
 mod commands;
 mod faceoff;
@@ -1022,9 +1022,9 @@ impl StandardMatchGameMode {
     }
     fn update_players(&mut self, mut server: ServerMut) -> (usize, usize) {
         let point = self.spawn_point;
-        let ServerMutParts { state, rink, .. } = server.as_mut_parts();
-        self.teams
-            .update(state, |team, _| get_spawnpoint(rink, team, point))
+        self.teams.update(&mut server.context(), |rink, team, _| {
+            get_spawnpoint(rink, team, point)
+        })
     }
     fn start_game(&mut self, preliminary_score: (u32, u32)) {
         self.state = StandardMatchState::Game(Match::start(
@@ -1095,7 +1095,7 @@ impl GameMode for StandardMatchGameMode {
                     if server.require_admin(player).is_some() {
                         let target = server.state().players().get_by_index(index).map(|p| p.id);
                         if let Some(target) = target {
-                            self.teams.force_spectate(server.state_mut(), target);
+                            self.teams.force_spectate(&mut server.context(), target);
                         }
                     }
                 }

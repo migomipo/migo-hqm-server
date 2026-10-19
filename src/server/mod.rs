@@ -33,7 +33,7 @@ use crate::protocol::{
 use crate::{ReplayRecording, ServerConfiguration};
 pub(crate) use players::{
     HQMMessage, MessageRecording, MessageRetention, MuteStatus, PlayerListExt, PlayerSlots,
-    ServerPlayerData, ServerPlayersAndMessages,
+    ServerMessages, ServerPlayerData, ServerPlayersAndMessages,
 };
 
 type HQMFramedSocket = UdpFramed<HQMMessageCodec, Arc<UdpSocket>>;
@@ -164,23 +164,55 @@ impl HQMServerState {
         }
     }
 
-    fn new_game(&mut self) {
-        self.player_message_state.new_game();
-
-        self.replay.clear();
-        self.replication.new_game();
-        self.recording.new_game();
-
-        self.objects = vec![None; 32];
+    pub(crate) fn skater_links(&mut self) -> SkaterLinks<'_> {
+        SkaterLinks {
+            players: &mut self.player_message_state.players,
+            messages: &mut self.player_message_state.messages,
+            objects: &mut self.objects,
+        }
     }
 
-    fn skater_for_player_mut(&mut self, player_id: PlayerId) -> Option<&mut SkaterObject> {
-        let object_slot = self
-            .player_message_state
-            .players
-            .get_player(player_id)?
-            .skater_assignment()?
-            .0;
+    pub fn set_hand(&mut self, hand: SkaterHand, player_id: PlayerId) {
+        self.skater_links().set_hand(hand, player_id);
+    }
+
+    pub(crate) fn move_to_spectator(&mut self, player_id: PlayerId) -> bool {
+        self.skater_links().move_to_spectator(player_id)
+    }
+
+    pub(crate) fn spawn_skater(
+        &mut self,
+        player_id: PlayerId,
+        team: Team,
+        pos: Vec3,
+        rot: Rot3,
+        keep_stick_position: bool,
+    ) -> bool {
+        self.skater_links()
+            .spawn_skater(player_id, team, pos, rot, keep_stick_position)
+    }
+
+    pub fn remove_player(&mut self, player_id: PlayerId, on_recording: bool) -> bool {
+        self.skater_links().remove_player(player_id, on_recording)
+    }
+}
+
+/// The parts of the server state that link players to their skater objects.
+///
+/// Operations that create or remove skaters, or remove players, go through this, so the link
+/// stored on the player and the owner stored on the skater object always match.
+pub(crate) struct SkaterLinks<'a> {
+    pub(crate) players: &'a mut PlayerSlots,
+    pub(crate) messages: &'a mut ServerMessages,
+    pub(crate) objects: &'a mut [Option<GameObject>],
+}
+
+impl SkaterLinks<'_> {
+    pub(crate) fn skater_for_player_mut(
+        &mut self,
+        player_id: PlayerId,
+    ) -> Option<&mut SkaterObject> {
+        let object_slot = self.players.get_player(player_id)?.skater_assignment()?.0;
         match self.objects.get_mut(object_slot.index())? {
             Some(GameObject::Skater(object_player_id, skater))
                 if *object_player_id == player_id =>
@@ -193,7 +225,6 @@ impl HQMServerState {
 
     fn clear_skater_assignment(&mut self, player_id: PlayerId) -> bool {
         let object_slot = match self
-            .player_message_state
             .players
             .get_player(player_id)
             .and_then(|player| player.skater_assignment())
@@ -214,7 +245,7 @@ impl HQMServerState {
         }
 
         self.objects[object_slot.index()] = None;
-        if let Some(player) = self.player_message_state.players.get_player_mut(player_id) {
+        if let Some(player) = self.players.get_player_mut(player_id) {
             player.clear_skater_assignment();
             true
         } else {
@@ -223,9 +254,9 @@ impl HQMServerState {
     }
 
     fn broadcast_player_update(&mut self, player_id: PlayerId) {
-        if let Some(player) = self.player_message_state.players.get_player(player_id) {
+        if let Some(player) = self.players.get_player(player_id) {
             let update = player.get_update_message(player_id.index);
-            self.player_message_state.broadcast_message(
+            self.messages.broadcast_message(
                 update,
                 MessageRetention::ForLateJoiners,
                 MessageRecording::Include,
@@ -233,8 +264,8 @@ impl HQMServerState {
         }
     }
 
-    pub fn set_hand(&mut self, hand: SkaterHand, player_id: PlayerId) {
-        if let Some(player) = self.player_message_state.players.get_player_mut(player_id) {
+    pub(crate) fn set_hand(&mut self, hand: SkaterHand, player_id: PlayerId) {
+        if let Some(player) = self.players.get_player_mut(player_id) {
             player.preferred_hand = hand;
         }
         if let Some(skater) = self.skater_for_player_mut(player_id) {
@@ -259,7 +290,7 @@ impl HQMServerState {
         rot: Rot3,
         keep_stick_position: bool,
     ) -> bool {
-        let Some(player) = self.player_message_state.players.get_player(player_id) else {
+        let Some(player) = self.players.get_player(player_id) else {
             return false;
         };
         let hand = player.preferred_hand;
@@ -280,8 +311,7 @@ impl HQMServerState {
                 new_skater.stick_placement_delta = skater.stick_placement_delta;
             }
             *skater = new_skater;
-            self.player_message_state
-                .players
+            self.players
                 .get_player_mut(player_id)
                 .expect("player must exist while updating its skater")
                 .set_skater_team(team);
@@ -291,7 +321,6 @@ impl HQMServerState {
                 return false;
             };
             let player = self
-                .player_message_state
                 .players
                 .get_player_mut(player_id)
                 .expect("player must exist while spawning its skater");
@@ -305,8 +334,8 @@ impl HQMServerState {
         true
     }
 
-    pub fn remove_player(&mut self, player_id: PlayerId, on_recording: bool) -> bool {
-        if let Some(player) = self.player_message_state.players.get_player(player_id) {
+    pub(crate) fn remove_player(&mut self, player_id: PlayerId, on_recording: bool) -> bool {
+        if let Some(player) = self.players.get_player(player_id) {
             let update = HQMMessage::PlayerUpdate {
                 player_index: player_id.index,
                 data: None,
@@ -320,12 +349,11 @@ impl HQMServerState {
                 );
             }
 
-            self.player_message_state
-                .players
+            self.players
                 .remove(player_id)
                 .expect("player must exist while removing it");
 
-            self.player_message_state.broadcast_message(
+            self.messages.broadcast_message(
                 update,
                 MessageRetention::ForLateJoiners,
                 if on_recording {
@@ -340,6 +368,64 @@ impl HQMServerState {
             false
         }
     }
+}
+
+/// Server state that game modes can not access directly, but that is needed to start a new game.
+pub(crate) struct ServerInternals<'a> {
+    replication: &'a mut ReplicationState,
+    recording: &'a mut RecordingState,
+    game_id: &'a mut u32,
+    has_current_game_been_active: &'a mut bool,
+    start_time: Timestamp,
+    save_recording: &'a mut dyn RecordingSaveMethod,
+}
+
+/// All server state, split into parts that can be borrowed independently.
+pub(crate) struct ServerSplit<'a> {
+    pub(crate) players: &'a mut PlayerSlots,
+    pub(crate) messages: &'a mut ServerMessages,
+    pub(crate) objects: &'a mut [Option<GameObject>],
+    pub(crate) replay: &'a mut HQMTickHistory,
+    pub(crate) rink: &'a mut Rink,
+    pub(crate) config: &'a mut ServerConfiguration,
+    pub(crate) physics_config: &'a mut PhysicsConfiguration,
+    pub(crate) internals: ServerInternals<'a>,
+}
+
+/// Ends the current game and resets the server state.
+pub(crate) fn new_game(
+    internals: &mut ServerInternals,
+    config: &ServerConfiguration,
+    players: &mut PlayerSlots,
+    messages: &mut ServerMessages,
+    objects: &mut [Option<GameObject>],
+    replay: &mut HQMTickHistory,
+) {
+    *internals.game_id += 1;
+
+    *internals.has_current_game_been_active = false;
+
+    let old_recording_data = internals.recording.take_data();
+
+    if config.recording_enabled == ReplayRecording::On && !old_recording_data.is_empty() {
+        let size = old_recording_data.len();
+        let mut recording_data = BytesMut::with_capacity(size + 8);
+        recording_data.put_u32_le(0u32);
+        recording_data.put_u32_le(size as u32);
+        recording_data.put_slice(&old_recording_data);
+        let recording_data = recording_data.freeze();
+        internals
+            .save_recording
+            .save_recording_data(config, recording_data, internals.start_time);
+    }
+
+    messages.new_game(players);
+
+    replay.clear();
+    internals.replication.new_game();
+    internals.recording.new_game();
+
+    objects.fill(None);
 }
 
 pub(crate) struct HQMServer {
@@ -1089,28 +1175,45 @@ impl HQMServer {
         }
     }
 
-    fn save_recording(&mut self, old_recording_data: &[u8]) {
-        let size = old_recording_data.len();
-        let mut recording_data = BytesMut::with_capacity(size + 8);
-        recording_data.put_u32_le(0u32);
-        recording_data.put_u32_le(size as u32);
-        recording_data.put_slice(old_recording_data);
-        let recording_data = recording_data.freeze();
-        self.save_recording
-            .save_recording_data(&self.config, recording_data, self.start_time);
-    }
-    pub fn new_game(&mut self) {
-        self.game_id += 1;
-
-        self.has_current_game_been_active = false;
-
-        let old_recording_data = self.state.recording.take_data();
-
-        if self.config.recording_enabled == ReplayRecording::On && !old_recording_data.is_empty() {
-            self.save_recording(&old_recording_data);
+    /// Splits the server into parts that can be borrowed independently.
+    pub(crate) fn split(&mut self) -> ServerSplit<'_> {
+        let HQMServerState {
+            player_message_state: ServerPlayersAndMessages { players, messages },
+            objects,
+            replay,
+            replication,
+            recording,
+        } = &mut self.state;
+        ServerSplit {
+            players,
+            messages,
+            objects,
+            replay,
+            rink: &mut self.rink,
+            config: &mut self.config,
+            physics_config: &mut self.physics_config,
+            internals: ServerInternals {
+                replication,
+                recording,
+                game_id: &mut self.game_id,
+                has_current_game_been_active: &mut self.has_current_game_been_active,
+                start_time: self.start_time,
+                save_recording: self.save_recording.as_mut(),
+            },
         }
+    }
 
-        self.state.new_game();
+    pub fn new_game(&mut self) {
+        let ServerSplit {
+            players,
+            messages,
+            objects,
+            replay,
+            config,
+            mut internals,
+            ..
+        } = self.split();
+        new_game(&mut internals, config, players, messages, objects, replay);
     }
 
     fn write_recording_tick(&mut self, scoreboard: &ScoreboardValues) {
@@ -1576,6 +1679,51 @@ mod tests {
             server.state.replication.history.current_objects()[0],
             ObjectPacket::Puck(_)
         ));
+    }
+
+    #[test]
+    fn context_new_game_resets_state_and_keeps_later_messages() {
+        let mut server = test_server();
+        let player_id = server
+            .state
+            .player_message_state
+            .add_player("test", "127.0.0.1:12345".parse().unwrap())
+            .unwrap();
+        server.has_current_game_been_active = true;
+        let game_id = server.game_id;
+
+        let mut server_handle = ServerMut::from(&mut server);
+        let mut ctx = server_handle.context();
+        ctx.objects
+            .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+        assert!(ctx.spawn_skater(player_id, Team::Red, Vec3::X, Rot3::IDENTITY, false));
+        ctx.messages.add_server_chat_message("before");
+        ctx.new_game();
+        ctx.messages.add_server_chat_message("after");
+
+        assert_eq!(server.game_id, game_id + 1);
+        assert!(!server.has_current_game_been_active);
+        assert!(server.state.objects.iter().all(Option::is_none));
+        server.state.player_message_state.flush_messages();
+        let player = server
+            .state
+            .player_message_state
+            .players
+            .get_player(player_id)
+            .unwrap();
+        assert!(!player.has_skater());
+        let ServerPlayerData::NetworkPlayer { data } = &player.data else {
+            panic!("expected a network player");
+        };
+        let chats: Vec<_> = data
+            .messages
+            .iter()
+            .filter_map(|message| match message.as_ref() {
+                HQMMessage::Chat { message, .. } => Some(message.as_ref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(chats, ["after"]);
     }
 
     #[test]

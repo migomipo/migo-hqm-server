@@ -7,7 +7,7 @@ use tracing::info;
 use crate::game::{PhysicsEvent, PlayerId, RulesState};
 use crate::game::{PlayerIndex, Puck, ScoreboardValues, Team};
 use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
-use crate::gamemode::{ExitReason, GameMode, Server, ServerMut, ServerMutParts};
+use crate::gamemode::{ExitReason, GameContext, GameMode, Server, ServerMut};
 
 #[derive(Debug, Clone)]
 enum ServerStatus {
@@ -450,46 +450,41 @@ impl ShootoutGameMode {
     }
 
     fn update_players(&mut self, mut server: ServerMut) -> (usize, usize) {
-        let ServerMutParts { state, rink, .. } = server.as_mut_parts();
-        let rink = &*rink;
-        self.teams.update(state, |team, _| {
+        self.teams.update(&mut server.context(), |rink, team, _| {
             get_spawnpoint(rink, team, SpawnPoint::Bench)
         })
     }
 
-    fn reset_game(&mut self, mut server: ServerMut, player_id: PlayerId) {
-        if let Some(name) = server.require_admin(player_id) {
+    fn reset_game(&mut self, ctx: &mut GameContext, player_id: PlayerId) {
+        if let Some(name) = ctx.require_admin(player_id) {
             info!("{} ({}) reset game", name, player_id);
-            let msg = format!("Game reset by {name}");
-
-            server.new_game();
-
-            server.add_server_chat_message(msg);
+            ctx.new_game();
+            ctx.messages
+                .add_server_chat_message(format!("Game reset by {name}"));
         }
     }
 
     fn force_player_off_ice(
         &mut self,
-        mut server: ServerMut,
+        ctx: &mut GameContext,
         admin_player_id: PlayerId,
         force_player_index: PlayerIndex,
     ) {
-        if let Some(admin_player_name) = server.require_admin(admin_player_id) {
-            if let Some(force_player) = server.state().players().get_by_index(force_player_index) {
-                let force_player_name = force_player.name();
-                let force_player_id = force_player.id;
-                if self
-                    .teams
-                    .force_spectate(server.state_mut(), force_player_id)
-                {
-                    let msg = format!("{force_player_name} forced off ice by {admin_player_name}");
-                    info!(
-                        "{} ({}) forced {} ({}) off ice",
-                        admin_player_name, admin_player_id, force_player_name, force_player_index
-                    );
-                    server.add_server_chat_message(msg);
-                }
-            }
+        let Some(admin_player_name) = ctx.require_admin(admin_player_id) else {
+            return;
+        };
+        let Some(force_player) = ctx.players.get_by_index(force_player_index) else {
+            return;
+        };
+        let (force_player_id, force_player_name) = (force_player.id, force_player.name());
+        if self.teams.force_spectate(ctx, force_player_id) {
+            info!(
+                "{} ({}) forced {} ({}) off ice",
+                admin_player_name, admin_player_id, force_player_name, force_player_index
+            );
+            ctx.messages.add_server_chat_message(format!(
+                "{force_player_name} forced off ice by {admin_player_name}"
+            ));
         }
     }
 }
@@ -537,14 +532,15 @@ impl GameMode for ShootoutGameMode {
         }
     }
 
-    fn handle_command(&mut self, server: ServerMut, cmd: &str, arg: &str, player_id: PlayerId) {
+    fn handle_command(&mut self, mut server: ServerMut, cmd: &str, arg: &str, player_id: PlayerId) {
+        let ctx = &mut server.context();
         match cmd {
             "reset" | "resetgame" => {
-                self.reset_game(server, player_id);
+                self.reset_game(ctx, player_id);
             }
             "fs" => {
                 if let Ok(force_player_index) = arg.parse::<PlayerIndex>() {
-                    self.force_player_off_ice(server, player_id, force_player_index);
+                    self.force_player_off_ice(ctx, player_id, force_player_index);
                 }
             }
             _ => {}
