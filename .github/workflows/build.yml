@@ -8,6 +8,11 @@ on:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
   pull_request:
   workflow_dispatch:
+    inputs:
+      all-targets:
+        description: Build every release target instead of only the common ones
+        type: boolean
+        default: false
 
 env:
   BIN: migo-hqm-server
@@ -18,8 +23,10 @@ permissions:
   contents: read
 
 jobs:
-  version:
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      platforms: ${{ steps.platforms.outputs.platforms }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check that the tag matches the Cargo.toml version
@@ -30,54 +37,45 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
             exit 1
           fi
+      # Releases and manual all-targets runs build every target; other builds only those marked "common"
+      - name: Choose targets
+        id: platforms
+        env:
+          ALL_TARGETS: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.all-targets }}
+        run: |
+          platforms='[
+            {"target": "x86_64-pc-windows-msvc", "os": "windows-latest", "common": true},
+            {"target": "aarch64-pc-windows-msvc", "os": "windows-latest"},
+            {"target": "x86_64-apple-darwin", "os": "macos-latest"},
+            {"target": "aarch64-apple-darwin", "os": "macos-latest"},
+            {"target": "aarch64-unknown-linux-gnu", "os": "ubuntu-latest", "common": true},
+            {"target": "aarch64-unknown-linux-musl", "os": "ubuntu-latest"},
+            {"target": "armv7-unknown-linux-gnueabihf", "os": "ubuntu-latest"},
+            {"target": "armv7-unknown-linux-musleabihf", "os": "ubuntu-latest"},
+            {"target": "arm-unknown-linux-gnueabihf", "os": "ubuntu-latest"},
+            {"target": "arm-unknown-linux-musleabihf", "os": "ubuntu-latest"},
+            {"target": "i686-unknown-linux-gnu", "os": "ubuntu-latest"},
+            {"target": "i686-unknown-linux-musl", "os": "ubuntu-latest"},
+            {"target": "i686-unknown-freebsd", "os": "ubuntu-latest"},
+            {"target": "x86_64-unknown-linux-gnu", "os": "ubuntu-latest", "common": true},
+            {"target": "x86_64-unknown-linux-musl", "os": "ubuntu-latest"},
+            {"target": "x86_64-unknown-freebsd", "os": "ubuntu-latest"},
+            {"target": "riscv64gc-unknown-linux-gnu", "os": "ubuntu-latest"},
+            {"target": "loongarch64-unknown-linux-gnu", "os": "ubuntu-latest", "cross-main": true},
+            {"target": "loongarch64-unknown-linux-musl", "os": "ubuntu-latest", "cross-main": true}
+          ]'
+          if [ "$ALL_TARGETS" != "true" ]; then
+            platforms=$(jq 'map(select(.common))' <<< "$platforms")
+          fi
+          echo "platforms=$(jq -c . <<< "$platforms")" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: version
+    needs: setup
     runs-on: ${{ matrix.platform.os }}
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-          - target: aarch64-pc-windows-msvc
-            os: windows-latest
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: aarch64-apple-darwin
-            os: macos-latest
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-          - target: armv7-unknown-linux-gnueabihf
-            os: ubuntu-latest
-          - target: armv7-unknown-linux-musleabihf
-            os: ubuntu-latest
-          - target: arm-unknown-linux-gnueabihf
-            os: ubuntu-latest
-          - target: arm-unknown-linux-musleabihf
-            os: ubuntu-latest
-          - target: i686-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: i686-unknown-linux-musl
-            os: ubuntu-latest
-          - target: i686-unknown-freebsd
-            os: ubuntu-latest
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-          - target: x86_64-unknown-freebsd
-            os: ubuntu-latest
-          - target: riscv64gc-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: loongarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            cross-main: true
-          - target: loongarch64-unknown-linux-musl
-            os: ubuntu-latest
-            cross-main: true
+        platform: ${{ fromJSON(needs.setup.outputs.platforms) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build binary
