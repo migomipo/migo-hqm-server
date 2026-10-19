@@ -69,11 +69,11 @@ jobs:
           args: "--locked --release"
           strip: true
       - run: |
-          7z a migo-hqm-server-${{ matrix.platform.target }}.zip config.ini README.md example_replay_integration.py ".\target\${{ matrix.platform.target }}\release\migo-hqm-server.exe"
+          7z a migo-hqm-server-${{ matrix.platform.target }}.zip config.toml README.md example_replay_integration.py ".\target\${{ matrix.platform.target }}\release\migo-hqm-server.exe"
         shell: bash
         if: matrix.platform.os == 'windows-latest'
       - run: |
-          tar -czvf migo-hqm-server-${{ matrix.platform.target }}.tar.gz config.ini README.md example_replay_integration.py -C target/${{ matrix.platform.target }}/release migo-hqm-server
+          tar -czvf migo-hqm-server-${{ matrix.platform.target }}.tar.gz config.toml README.md example_replay_integration.py -C target/${{ matrix.platform.target }}/release migo-hqm-server
         shell: bash
         if: matrix.platform.os != 'windows-latest'
       - name: Publish GitHub release
