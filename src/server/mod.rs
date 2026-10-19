@@ -1048,6 +1048,7 @@ impl HQMServer {
         if self.real_player_count() == 0 {
             if self.has_current_game_been_active {
                 info!("Game {} abandoned", self.game_id);
+                behaviour.game_abandoned(self.into());
                 self.new_game();
             }
             return None;
@@ -1591,5 +1592,65 @@ mod tests {
             server.state.replication.history.current_objects()[0],
             ObjectPacket::Puck(_)
         ));
+    }
+
+    #[test]
+    fn game_abandoned_is_called_before_the_game_is_reset() {
+        #[derive(Default)]
+        struct TracksLifecycle {
+            started: u32,
+            abandoned_with_pucks: Vec<usize>,
+        }
+
+        impl GameMode for TracksLifecycle {
+            fn before_tick(&mut self, _server: ServerMut) {}
+
+            fn after_tick(
+                &mut self,
+                _server: ServerMut,
+                _events: &[PhysicsEvent],
+            ) -> ScoreboardValues {
+                ScoreboardValues::default()
+            }
+
+            fn game_started(&mut self, mut server: ServerMut) {
+                self.started += 1;
+                server
+                    .state_mut()
+                    .objects_mut()
+                    .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+            }
+
+            fn game_abandoned(&mut self, server: ServerMut) {
+                self.abandoned_with_pucks
+                    .push(server.state().objects().pucks().count());
+            }
+        }
+
+        let address = "127.0.0.1:12345".parse().unwrap();
+        let mut server = test_server();
+        let mut behaviour = TracksLifecycle::default();
+
+        let player_id = server
+            .state
+            .player_message_state
+            .add_player("test", address)
+            .unwrap();
+        server.advance_tick(&mut behaviour);
+        assert_eq!(behaviour.started, 1);
+
+        server.state.remove_player(player_id, true);
+        server.advance_tick(&mut behaviour);
+        server.advance_tick(&mut behaviour);
+        assert_eq!(behaviour.abandoned_with_pucks, [1]);
+        assert!(server.state.objects.iter().all(Option::is_none));
+
+        server
+            .state
+            .player_message_state
+            .add_player("test", address)
+            .unwrap();
+        server.advance_tick(&mut behaviour);
+        assert_eq!(behaviour.started, 2);
     }
 }

@@ -29,6 +29,11 @@ pub trait GameMode {
     /// Called once each tick before the physics simulation is done.
     ///
     /// It is recommended that things like spawning pucks and moving players to and from teams are done before the physics simulation, so it should be done here.
+    ///
+    /// This is also called on ticks where a replay is shown instead of the physics simulation, so
+    /// timers counted down here keep running during replays. Use
+    /// [ServerReplay::is_in_replay] to tell these ticks apart. No hooks are called at all while
+    /// there are no players on the server.
     fn before_tick(&mut self, server: ServerMut);
 
     /// Called once each tick after the physics simulation is done.
@@ -36,6 +41,10 @@ pub trait GameMode {
     ///
     /// Changes to the server state are included in this tick's replication and recording data, but
     /// do not affect physics until the next tick.
+    ///
+    /// This is not called on ticks where a replay is shown. During those ticks, physics is paused,
+    /// the game step does not advance, and the scoreboard values returned on the last simulated
+    /// tick are shown.
     fn after_tick(&mut self, server: ServerMut, events: &[PhysicsEvent]) -> ScoreboardValues;
 
     /// Called when a chat message starting with "/" is received from a user. This method is called between ticks and not during, so you can do anything here.
@@ -48,7 +57,21 @@ pub trait GameMode {
     ) {
     }
 
+    /// Called when a new game begins, before the first [GameMode::before_tick] of that game.
+    ///
+    /// A new game begins on the first tick with a player on the server after the server has
+    /// started, after [ServerMut::new_game] was called, or after the previous game was abandoned.
+    /// The server state, such as pucks and skaters, has been cleared at this point, so this is the
+    /// place to reset game mode state and set up the new game.
     fn game_started(&mut self, _server: ServerMut) {}
+
+    /// Called when the last player has left the server during a game, right before the game is
+    /// reset.
+    ///
+    /// The server state of the abandoned game can still be read here. [GameMode::game_started] is
+    /// called once a player joins again. Games that end through [ServerMut::new_game] do not call
+    /// this, as the game mode already knows about them.
+    fn game_abandoned(&mut self, _server: ServerMut) {}
 
     /// Called right before a player is removed from the server.
     ///
@@ -129,6 +152,11 @@ impl<'a> ServerMut<'a> {
         }
     }
 
+    /// Ends the current game and resets the server state.
+    ///
+    /// Pucks, skaters and replay history are cleared immediately, and the recording of the game is
+    /// saved if recording is enabled. [GameMode::game_started] is called on the next tick with a
+    /// player on the server, so game mode state should be reset there.
     pub fn new_game(&mut self) {
         self.server.new_game()
     }
