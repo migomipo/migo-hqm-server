@@ -234,20 +234,20 @@ impl<'a> From<&'a HQMServer> for Server<'a> {
 
 impl<'a> Server<'a> {
     /// Gets an immutable reference to player and puck state.
-    pub fn state(&self) -> ServerState<'_> {
+    pub fn state(&self) -> ServerState<'a> {
         ServerState {
             state: &self.server.state,
         }
     }
-    pub fn rink(&self) -> &Rink {
+    pub fn rink(&self) -> &'a Rink {
         &self.server.rink
     }
 
-    pub fn config(&self) -> &ServerConfiguration {
+    pub fn config(&self) -> &'a ServerConfiguration {
         &self.server.config
     }
 
-    pub fn physics_config(&self) -> &PhysicsConfiguration {
+    pub fn physics_config(&self) -> &'a PhysicsConfiguration {
         &self.server.physics_config
     }
 }
@@ -395,38 +395,20 @@ pub struct ServerState<'a> {
 }
 
 impl<'a> ServerState<'a> {
-    /// Returns a player's skater, if the player is currently on the ice.
-    ///
-    /// This gives read access to the full skater state, such as velocity, rotation and stick position.
-    pub fn skater(&self, player_id: PlayerId) -> Option<&SkaterObject> {
-        self.state.skater_for_player(player_id)
-    }
-
-    /// Returns the position of a player's skater, if the player is currently on the ice.
-    pub fn skater_position(&self, player_id: PlayerId) -> Option<Vec3> {
-        Some(self.state.skater_for_player(player_id)?.body.pos)
-    }
-
-    /// Returns the position of the bottom of a player's skater, if on ice.
-    pub fn skater_feet_position(&self, player_id: PlayerId) -> Option<Vec3> {
-        let skater = self.state.skater_for_player(player_id)?;
-        Some(skater.body.pos - skater.body.rot * Vec3::Y * skater.height)
-    }
-
     /// Gets an immutable reference to player state.
-    pub fn players(&self) -> ServerPlayers<'_> {
+    pub fn players(&self) -> ServerPlayers<'a> {
         ServerPlayers {
             players: &self.state.player_message_state.players,
         }
     }
 
-    pub fn replay(&self) -> ServerReplay<'_> {
+    pub fn replay(&self) -> ServerReplay<'a> {
         ServerReplay {
             replay: &self.state.replay,
         }
     }
 
-    pub fn objects(&self) -> ServerObjects<'_> {
+    pub fn objects(&self) -> ServerObjects<'a> {
         ServerObjects {
             objects: &self.state.objects,
         }
@@ -502,6 +484,38 @@ impl<'a> ServerObjectsMut<'a> {
             _ => None,
         })
     }
+
+    /// Returns a player's skater, if the player is currently on the ice.
+    pub fn skater(&self, player_id: PlayerId) -> Option<&SkaterObject> {
+        self.skaters()
+            .find_map(|(id, skater)| (id == player_id).then_some(skater))
+    }
+
+    /// Returns a mutable reference to a player's skater, if the player is currently on the ice.
+    ///
+    /// See [SkaterObject] for what to keep in mind when changing its physics properties.
+    pub fn skater_mut(&mut self, player_id: PlayerId) -> Option<&mut SkaterObject> {
+        self.skaters_mut()
+            .find_map(|(id, skater)| (id == player_id).then_some(skater))
+    }
+
+    /// Iterates over every skater and the player it belongs to.
+    pub fn skaters(&self) -> impl Iterator<Item = (PlayerId, &SkaterObject)> {
+        self.objects.iter().filter_map(|object| match object {
+            Some(GameObject::Skater(player_id, skater)) => Some((*player_id, skater)),
+            _ => None,
+        })
+    }
+
+    /// Iterates mutably over every skater and the player it belongs to.
+    ///
+    /// See [SkaterObject] for what to keep in mind when changing its physics properties.
+    pub fn skaters_mut(&mut self) -> impl Iterator<Item = (PlayerId, &mut SkaterObject)> {
+        self.objects.iter_mut().filter_map(|object| match object {
+            Some(GameObject::Skater(player_id, skater)) => Some((*player_id, skater)),
+            _ => None,
+        })
+    }
 }
 
 #[derive(ReborrowCopyTraits)]
@@ -510,7 +524,7 @@ pub struct ServerObjects<'a> {
 }
 
 impl<'a> ServerObjects<'a> {
-    pub fn get_puck(&self, object_index: usize) -> Option<&Puck> {
+    pub fn get_puck(&self, object_index: usize) -> Option<&'a Puck> {
         self.objects.get(object_index).and_then(|x| match x {
             Some(GameObject::Puck(puck)) => Some(puck),
             _ => None,
@@ -518,7 +532,7 @@ impl<'a> ServerObjects<'a> {
     }
 
     /// Iterates over every puck and its object index.
-    pub fn pucks(&self) -> impl Iterator<Item = (usize, &Puck)> {
+    pub fn pucks(&self) -> impl Iterator<Item = (usize, &'a Puck)> {
         self.objects
             .iter()
             .enumerate()
@@ -528,6 +542,20 @@ impl<'a> ServerObjects<'a> {
                 };
                 Some((index, puck))
             })
+    }
+
+    /// Returns a player's skater, if the player is currently on the ice.
+    pub fn skater(&self, player_id: PlayerId) -> Option<&'a SkaterObject> {
+        self.skaters()
+            .find_map(|(id, skater)| (id == player_id).then_some(skater))
+    }
+
+    /// Iterates over every skater and the player it belongs to.
+    pub fn skaters(&self) -> impl Iterator<Item = (PlayerId, &'a SkaterObject)> {
+        self.objects.iter().filter_map(|object| match object {
+            Some(GameObject::Skater(player_id, skater)) => Some((*player_id, skater)),
+            _ => None,
+        })
     }
 }
 
@@ -670,21 +698,21 @@ pub struct ServerPlayers<'a> {
 
 impl<'a> ServerPlayers<'a> {
     /// Returns a iterator over the players in the server.
-    pub fn iter(&self) -> impl Iterator<Item = ServerPlayer<'_>> {
+    pub fn iter(&self) -> impl Iterator<Item = ServerPlayer<'a>> {
         self.players
             .iter_players()
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
-    pub fn get_by_index(&self, index: PlayerIndex) -> Option<ServerPlayer<'_>> {
+    pub fn get_by_index(&self, index: PlayerIndex) -> Option<ServerPlayer<'a>> {
         self.players
             .get_player_by_index(index)
             .map(|(id, player)| ServerPlayer { id, player })
     }
 
     /// Returns an immutable handle to a player in the server.
-    pub fn get(&self, id: PlayerId) -> Option<ServerPlayer<'_>> {
+    pub fn get(&self, id: PlayerId) -> Option<ServerPlayer<'a>> {
         self.players
             .get_player(id)
             .map(|player| ServerPlayer { id, player })
@@ -771,7 +799,7 @@ impl<'a> ServerPlayer<'a> {
         self.player.team()
     }
 
-    pub fn input(&self) -> &PlayerInput {
+    pub fn input(&self) -> &'a PlayerInput {
         &self.player.input
     }
 
@@ -823,6 +851,41 @@ mod tests {
         }
 
         assert!(object_view.pucks().all(|(_, puck)| puck.radius == 0.25));
+    }
+
+    #[test]
+    fn skaters_are_found_by_player_and_can_be_changed_while_reading_players() {
+        let mut state = HQMServerState::new();
+        let on_ice = state
+            .player_message_state
+            .add_player("on ice", "127.0.0.1:1".parse().unwrap())
+            .unwrap();
+        let spectator = state
+            .player_message_state
+            .add_player("spectator", "127.0.0.1:2".parse().unwrap())
+            .unwrap();
+        state
+            .objects
+            .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+        assert!(state.spawn_skater(on_ice, Team::Blue, Vec3::X, Rot3::IDENTITY, false));
+
+        let mut handle = ServerStateMut { state: &mut state };
+        let ServerStateMutParts {
+            players,
+            mut objects,
+            ..
+        } = handle.as_mut_parts();
+        assert!(objects.skater(spectator).is_none());
+        for (id, skater) in objects.skaters_mut() {
+            if players.get(id).and_then(|p| p.team()) == Some(Team::Blue) {
+                skater.body.linear_velocity = Vec3::Z;
+            }
+        }
+
+        let skater = handle.objects().skater(on_ice).unwrap();
+        assert_eq!(skater.body.pos, Vec3::X);
+        assert_eq!(skater.body.linear_velocity, Vec3::Z);
+        assert_eq!(handle.objects().skaters().count(), 1);
     }
 
     #[test]

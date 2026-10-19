@@ -174,23 +174,6 @@ impl HQMServerState {
         self.objects = vec![None; 32];
     }
 
-    pub(crate) fn skater_for_player(&self, player_id: PlayerId) -> Option<&SkaterObject> {
-        let object_slot = self
-            .player_message_state
-            .players
-            .get_player(player_id)?
-            .skater_assignment()?
-            .0;
-        match self.objects.get(object_slot.index())? {
-            Some(GameObject::Skater(object_player_id, skater))
-                if *object_player_id == player_id =>
-            {
-                Some(skater)
-            }
-            _ => None,
-        }
-    }
-
     fn skater_for_player_mut(&mut self, player_id: PlayerId) -> Option<&mut SkaterObject> {
         let object_slot = self
             .player_message_state

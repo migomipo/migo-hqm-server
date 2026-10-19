@@ -371,6 +371,11 @@ impl SkaterObject {
         }
     }
 
+    /// Returns the position of the bottom of the skater.
+    pub fn feet_position(&self) -> Vec3 {
+        self.body.pos - self.body.rot * Vec3::Y * self.height
+    }
+
     pub fn reset_collision_balls(&mut self) {
         self.collision_balls = Self::get_collision_balls(
             &self.body.pos,

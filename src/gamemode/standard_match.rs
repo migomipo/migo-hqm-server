@@ -405,24 +405,21 @@ impl PlayingState {
                 Team::Blue => &server.rink().red_zone_blue_line,
             }
         };
+        let players = server.state().players();
         server
             .state()
-            .players()
-            .iter()
-            .filter_map(|p| {
-                if Some(p.id) == ignore || p.team() != Some(team) {
-                    None
-                } else {
-                    server
-                        .state()
-                        .skater_feet_position(p.id)
-                        .filter(|pos| match team {
-                            Team::Red => pos.z < line.z - line.width,
-                            Team::Blue => pos.z > line.z + line.width / 2.0,
-                        })
-                        .map(|_| p.id)
-                }
+            .objects()
+            .skaters()
+            .filter(|&(id, skater)| {
+                let pos = skater.feet_position();
+                Some(id) != ignore
+                    && players.get(id).and_then(|p| p.team()) == Some(team)
+                    && match team {
+                        Team::Red => pos.z < line.z - line.width,
+                        Team::Blue => pos.z > line.z + line.width / 2.0,
+                    }
             })
+            .map(|(id, _)| id)
             .collect()
     }
     fn team_in_zone(server: Server, team: Team, ignore: Option<PlayerId>) -> bool {
