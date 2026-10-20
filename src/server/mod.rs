@@ -1475,7 +1475,8 @@ mod tests {
     use tokio_util::codec::Encoder;
 
     use crate::game::PhysicsEvent;
-    use crate::players::ServerPlayer;
+    use crate::gamemode::ServerPlayerType;
+    use crate::players::{MAX_PLAYERS, ServerPlayer};
 
     fn network_player() -> ServerPlayer {
         ServerPlayer::new_network_player(
@@ -1890,5 +1891,190 @@ mod tests {
             .unwrap();
         server.advance_tick(&mut behaviour);
         assert_eq!(behaviour.started, 2);
+    }
+
+    #[test]
+    fn bots_are_controlled_by_the_game_mode_and_do_not_keep_a_game_going() {
+        #[derive(Default)]
+        struct DrivesBots {
+            skating: Option<PlayerId>,
+            standing: Option<PlayerId>,
+            abandoned: u32,
+        }
+
+        impl GameMode for DrivesBots {
+            fn before_tick(&mut self, ctx: &mut GameContext) {
+                let skating = self.skating.unwrap();
+                ctx.players.get_mut(skating).unwrap().input_mut().fwbw = 1.0;
+            }
+
+            fn after_tick(
+                &mut self,
+                _ctx: &mut GameContext,
+                _events: &[PhysicsEvent],
+            ) -> ScoreboardValues {
+                ScoreboardValues::default()
+            }
+
+            fn game_started(&mut self, ctx: &mut GameContext) {
+                let skating = ctx.add_bot("skating").unwrap();
+                let standing = ctx.add_bot("standing").unwrap();
+                let rot = Rot3::IDENTITY;
+                assert!(ctx.spawn_skater(
+                    skating,
+                    Team::Red,
+                    Vec3::new(10.0, 1.5, 30.0),
+                    rot,
+                    false
+                ));
+                assert!(ctx.spawn_skater(
+                    standing,
+                    Team::Red,
+                    Vec3::new(20.0, 1.5, 30.0),
+                    rot,
+                    false
+                ));
+                self.skating = Some(skating);
+                self.standing = Some(standing);
+            }
+
+            fn game_abandoned(&mut self, ctx: &mut GameContext) {
+                self.abandoned += 1;
+                assert!(ctx.remove_player(self.skating.take().unwrap()));
+                assert!(ctx.remove_player(self.standing.take().unwrap()));
+            }
+        }
+
+        fn distance_moved(ctx: &GameContext, bot: PlayerId, start: Vec3) -> f32 {
+            let pos = ctx.objects.skater(bot).unwrap().body.pos;
+            (pos - start).with_y(0.0).length()
+        }
+
+        let mut server = test_server();
+        let mut behaviour = DrivesBots::default();
+        let player_id = server
+            .state
+            .player_message_state
+            .add_player("test", "127.0.0.1:12345".parse().unwrap())
+            .unwrap();
+        for _ in 0..100 {
+            server.advance_tick(&mut behaviour);
+        }
+
+        let skating = behaviour.skating.unwrap();
+        let standing = behaviour.standing.unwrap();
+        let ctx = server.context();
+        for bot in [skating, standing] {
+            let bot = ctx.players.get(bot).unwrap();
+            assert!(bot.player_type() == ServerPlayerType::Bot);
+            assert_eq!(bot.team(), Some(Team::Red));
+        }
+        let skated = distance_moved(&ctx, skating, Vec3::new(10.0, 1.5, 30.0));
+        let stood = distance_moved(&ctx, standing, Vec3::new(20.0, 1.5, 30.0));
+        assert!(
+            skated > 0.1 && skated > 10.0 * stood,
+            "skated {skated} m, stood {stood} m"
+        );
+
+        server.state.player_message_state.flush_messages();
+        let player = server
+            .state
+            .player_message_state
+            .players
+            .get_player(player_id)
+            .unwrap();
+        let ServerPlayerData::NetworkPlayer { data } = &player.data else {
+            panic!("expected a network player");
+        };
+        assert!(data.messages.iter().any(|message| matches!(
+            message.as_ref(),
+            HQMMessage::PlayerUpdate { player_index, data: Some(data) }
+                if *player_index == skating.index && &*data.player_name == "skating"
+        )));
+
+        server.state.remove_player(player_id, true);
+        server.advance_tick(&mut behaviour);
+        assert_eq!(behaviour.abandoned, 1);
+        let players = &server.state.player_message_state.players;
+        assert_eq!(players.iter_players().count(), 0);
+        assert!(server.state.objects.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn add_bot_returns_none_when_all_player_slots_are_taken() {
+        let mut server = test_server();
+        let mut ctx = server.context();
+        let bots: Vec<_> = (0..MAX_PLAYERS)
+            .map(|i| ctx.add_bot(&format!("bot {i}")).unwrap())
+            .collect();
+        assert!(ctx.add_bot("one too many").is_none());
+
+        assert!(ctx.remove_player(bots[3]));
+        let replacement = ctx.add_bot("replacement").unwrap();
+        assert_eq!(replacement.index, bots[3].index);
+        assert!(ctx.players.get(bots[3]).is_none());
+    }
+
+    #[test]
+    fn bots_can_chat_to_everyone_and_to_their_team() {
+        let mut server = test_server();
+        let [red, blue] =
+            [("red", "127.0.0.1:1"), ("blue", "127.0.0.1:2")].map(|(name, address)| {
+                server
+                    .state
+                    .player_message_state
+                    .add_player(name, address.parse().unwrap())
+                    .unwrap()
+            });
+        let mut ctx = server.context();
+        let bot = ctx.add_bot("bot").unwrap();
+        let benched_bot = ctx.add_bot("benched").unwrap();
+        for (player, team) in [(red, Team::Red), (blue, Team::Blue), (bot, Team::Red)] {
+            assert!(ctx.spawn_skater(player, team, Vec3::ZERO, Rot3::IDENTITY, false));
+        }
+        server.state.player_message_state.flush_messages();
+        let messages = |server: &HQMServer, player_id| {
+            let player = server
+                .state
+                .player_message_state
+                .players
+                .get_player(player_id)
+                .unwrap();
+            let ServerPlayerData::NetworkPlayer { data } = &player.data else {
+                panic!("expected a network player");
+            };
+            data.messages.clone()
+        };
+        let start = [red, blue].map(|id| messages(&server, id).len());
+
+        let mut ctx = server.context();
+        ctx.add_user_chat_message("hello everyone", bot);
+        ctx.add_user_team_message("hello red", bot);
+        ctx.add_user_team_message("not on the ice", benched_bot);
+        server.state.player_message_state.flush_messages();
+
+        let received = |player_id, start| {
+            let messages = messages(&server, player_id);
+            for message in &messages[start..] {
+                if let HQMMessage::Chat { player_index, .. } = message.as_ref() {
+                    assert_eq!(*player_index, Some(bot.index));
+                }
+            }
+            messages[start..]
+                .iter()
+                .map(|message| describe_message(message))
+                .collect::<Vec<_>>()
+        };
+        let i = bot.index;
+        assert_eq!(
+            received(red, start[0]),
+            [
+                "chat hello everyone".to_owned(),
+                format!("update {i} [Red] bot Red"),
+                "chat hello red".to_owned(),
+                format!("update {i} bot Red"),
+            ]
+        );
+        assert_eq!(received(blue, start[1]), ["chat hello everyone"]);
     }
 }

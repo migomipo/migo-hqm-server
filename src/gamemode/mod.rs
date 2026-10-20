@@ -35,7 +35,8 @@ pub trait GameMode {
     ///
     /// This is also called on ticks where a replay is shown instead of the physics simulation, so
     /// timers counted down here keep running during replays. Use [Replay::is_in_replay] to tell
-    /// these ticks apart. No hooks are called at all while there are no players on the server.
+    /// these ticks apart. No hooks are called at all while there are no players on the server,
+    /// not counting bots.
     fn before_tick(&mut self, ctx: &mut GameContext);
 
     /// Called once each tick after the physics simulation is done.
@@ -70,9 +71,11 @@ pub trait GameMode {
     /// Called when the last player has left the server during a game, right before the game is
     /// reset.
     ///
-    /// The server state of the abandoned game can still be read here. [GameMode::game_started] is
-    /// called once a player joins again. Games that end through [GameContext::new_game] do not
-    /// call this, as the game mode already knows about them.
+    /// Bots do not count as players here, and are not removed when the game is reset, so this is
+    /// the place to remove bots that belong to the game. The server state of the abandoned game
+    /// can still be read here. [GameMode::game_started] is called once a player joins again.
+    /// Games that end through [GameContext::new_game] do not call this, as the game mode already
+    /// knows about them.
     fn game_abandoned(&mut self, _ctx: &mut GameContext) {}
 
     /// Called right before a player is removed from the server.
@@ -190,7 +193,23 @@ impl GameContext<'_> {
         self.skater_links().move_to_spectator(player_id)
     }
 
-    /// Removes a player from the server. Returns false if the player does not exist.
+    /// Adds a bot to the server and returns its player ID, or `None` if there is no free player
+    /// slot.
+    ///
+    /// A bot is a player without a network connection. It starts as a spectator, and the game mode
+    /// controls it by putting it on the ice with [GameContext::spawn_skater] and setting its
+    /// input with [ServerPlayerMut::input_mut] before the physics simulation.
+    ///
+    /// Bots use the same player slots as network players, but do not count towards
+    /// [ServerConfiguration::player_max] or keep a game going on their own. They stay on the
+    /// server across games until they are removed with [GameContext::remove_player].
+    pub fn add_bot(&mut self, name: &str) -> Option<PlayerId> {
+        self.messages.messages.add_bot(self.players.players, name)
+    }
+
+    /// Removes a player or bot from the server. Returns false if the player does not exist.
+    ///
+    /// [GameMode::before_player_exit] is not called for players removed this way.
     pub fn remove_player(&mut self, player_id: PlayerId) -> bool {
         self.skater_links().remove_player(player_id, true)
     }
@@ -231,6 +250,20 @@ impl GameContext<'_> {
                 .messages
                 .add_user_chat_message(message, sender.index);
         }
+    }
+
+    /// Sends a chat message to the players on the sender's team, as if the sender had written it
+    /// in team chat.
+    ///
+    /// Nothing is sent if the sender is not on the ice.
+    pub fn add_user_team_message(
+        &mut self,
+        message: impl Into<Cow<'static, str>>,
+        sender: PlayerId,
+    ) {
+        self.messages
+            .messages
+            .add_user_team_message(self.players.players, message, sender);
     }
 }
 

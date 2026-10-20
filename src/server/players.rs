@@ -340,6 +340,24 @@ impl ServerMessages {
         }
     }
 
+    /// Adds a bot and announces it to the players. Returns `None` if there is no free player slot.
+    pub(crate) fn add_bot(
+        &mut self,
+        players: &mut PlayerSlots,
+        player_name: &str,
+    ) -> Option<PlayerId> {
+        let player_index = players.find_empty_slot()?;
+        let new_player = ServerPlayer::new_bot(player_name);
+        let update = new_player.get_update_message(player_index);
+        let player_id = players.insert(player_index, new_player);
+        self.broadcast_message(
+            update,
+            MessageRetention::ForLateJoiners,
+            MessageRecording::Include,
+        );
+        Some(player_id)
+    }
+
     /// Returns the player if the player is admin, otherwise sends a message telling the user to log in first.
     pub(crate) fn check_admin_or_deny<'p>(
         &mut self,
@@ -453,7 +471,22 @@ impl ServerPlayersAndMessages {
     }
 
     pub(crate) fn add_user_team_message(&mut self, message: &str, sender_id: PlayerId) {
-        if let Some(player) = self.players.get_player(sender_id) {
+        self.messages
+            .add_user_team_message(&mut self.players, message.to_owned(), sender_id);
+    }
+}
+
+impl ServerMessages {
+    /// Sends a chat message from a player to the players on the sender's team, with the sender's
+    /// name tagged with the team. Nothing is sent if the sender is not on the ice.
+    pub(crate) fn add_user_team_message(
+        &mut self,
+        players: &mut PlayerSlots,
+        message: impl Into<Cow<'static, str>>,
+        sender_id: PlayerId,
+    ) {
+        let message = message.into();
+        if let Some(player) = players.get_player(sender_id) {
             let team = if let Some((_, team)) = player.object {
                 Some(team)
             } else {
@@ -490,19 +523,19 @@ impl ServerPlayersAndMessages {
                 });
                 let chat = Rc::new(HQMMessage::Chat {
                     player_index: Some(sender_id.index),
-                    message: Cow::Owned(message.to_owned()),
+                    message,
                 });
 
-                self.send_to_team(team, &[change1, chat, change2]);
+                self.send_to_team(players, team, &[change1, chat, change2]);
             }
         }
     }
 
-    fn send_to_team(&mut self, team: Team, messages: &[Rc<HQMMessage>]) {
+    fn send_to_team(&mut self, players: &mut PlayerSlots, team: Team, messages: &[Rc<HQMMessage>]) {
         // Team membership is decided when the message is sent, so earlier messages must be
         // delivered first to keep the order.
-        self.flush_messages();
-        for (_, player) in self.players.iter_players_mut() {
+        self.flush(players);
+        for (_, player) in players.iter_players_mut() {
             if player.team().is_some_and(|player_team| player_team == team) {
                 for message in messages {
                     player.add_message(message.clone());
@@ -510,7 +543,9 @@ impl ServerPlayersAndMessages {
             }
         }
     }
+}
 
+impl ServerPlayersAndMessages {
     pub(crate) fn add_player(&mut self, player_name: &str, addr: SocketAddr) -> Option<PlayerId> {
         if self.players.find_player_by_addr(addr).is_some() {
             return None;
@@ -527,28 +562,6 @@ impl ServerPlayersAndMessages {
                     addr,
                     &self.messages.persistent_messages,
                 );
-                let update = new_player.get_update_message(player_index);
-
-                let player_id = self.players.insert(player_index, new_player);
-
-                self.broadcast_message(
-                    update,
-                    MessageRetention::ForLateJoiners,
-                    MessageRecording::Include,
-                );
-
-                Some(player_id)
-            }
-            _ => None,
-        }
-    }
-
-    pub(crate) fn add_bot(&mut self, player_name: &str) -> Option<PlayerId> {
-        self.flush_messages();
-        let player_index = self.players.find_empty_slot();
-        match player_index {
-            Some(player_index) => {
-                let new_player = ServerPlayer::new_bot(player_name);
                 let update = new_player.get_update_message(player_index);
 
                 let player_id = self.players.insert(player_index, new_player);
