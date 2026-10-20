@@ -13,7 +13,7 @@ impl StandardMatchGameMode {
         let Some(admin_name) = ctx.require_admin(player) else {
             return;
         };
-        let old_config = self.config;
+        let old_config = self.settings.config;
         let old_team_max = self.teams.team_max;
         let old_state_values = match &self.state {
             StandardMatchState::Game(game) => (
@@ -63,7 +63,7 @@ impl StandardMatchGameMode {
             }
             "periodnum" => {
                 if let Ok(periods) = value.parse() {
-                    self.set_config(|config| config.periods = periods);
+                    self.settings.config.periods = periods;
                 }
             }
             "clock" => {
@@ -74,73 +74,71 @@ impl StandardMatchGameMode {
                 }
             }
             "icing" => match value {
-                "on" | "touch" => self.set_config(|c| c.icing = IcingConfiguration::Touch),
-                "notouch" => self.set_config(|c| c.icing = IcingConfiguration::NoTouch),
-                "off" => self.set_config(|c| c.icing = IcingConfiguration::Off),
+                "on" | "touch" => self.settings.config.icing = IcingConfiguration::Touch,
+                "notouch" => self.settings.config.icing = IcingConfiguration::NoTouch,
+                "off" => self.settings.config.icing = IcingConfiguration::Off,
                 _ => {}
             },
             "offside" => match value {
-                "on" | "delayed" => self.set_config(|c| c.offside = OffsideConfiguration::Delayed),
+                "on" | "delayed" => self.settings.config.offside = OffsideConfiguration::Delayed,
                 "imm" | "immediate" => {
-                    self.set_config(|c| c.offside = OffsideConfiguration::Immediate)
+                    self.settings.config.offside = OffsideConfiguration::Immediate
                 }
-                "off" => self.set_config(|c| c.offside = OffsideConfiguration::Off),
+                "off" => self.settings.config.offside = OffsideConfiguration::Off,
                 _ => {}
             },
             "twolinepass" => match value {
-                "off" => self.set_config(|c| c.twoline_pass = TwoLinePassConfiguration::Off),
-                "on" => self.set_config(|c| c.twoline_pass = TwoLinePassConfiguration::On),
-                "forward" => {
-                    self.set_config(|c| c.twoline_pass = TwoLinePassConfiguration::Forward)
-                }
+                "off" => self.settings.config.twoline_pass = TwoLinePassConfiguration::Off,
+                "on" => self.settings.config.twoline_pass = TwoLinePassConfiguration::On,
+                "forward" => self.settings.config.twoline_pass = TwoLinePassConfiguration::Forward,
                 "double" | "both" => {
-                    self.set_config(|c| c.twoline_pass = TwoLinePassConfiguration::Double)
+                    self.settings.config.twoline_pass = TwoLinePassConfiguration::Double
                 }
                 "blue" | "three" | "threeline" => {
-                    self.set_config(|c| c.twoline_pass = TwoLinePassConfiguration::ThreeLine)
+                    self.settings.config.twoline_pass = TwoLinePassConfiguration::ThreeLine
                 }
                 _ => {}
             },
             "offsideline" => match value {
                 "blue" => {
-                    self.set_config(|c| c.offside_line = OffsideLineConfiguration::OffensiveBlue)
+                    self.settings.config.offside_line = OffsideLineConfiguration::OffensiveBlue
                 }
-                "center" => self.set_config(|c| c.offside_line = OffsideLineConfiguration::Center),
+                "center" => self.settings.config.offside_line = OffsideLineConfiguration::Center,
                 _ => {}
             },
             "mercy" => {
                 if let Ok(goals) = value.parse() {
-                    self.set_config(|c| c.mercy = goals);
+                    self.settings.config.mercy = goals;
                 }
             }
             "first" => {
                 if let Ok(goals) = value.parse() {
-                    self.set_config(|c| c.first_to = goals);
+                    self.settings.config.first_to = goals;
                 }
             }
             "goalreplay" => match value {
-                "on" => self.set_config(|c| c.goal_replay = true),
-                "off" => self.set_config(|c| c.goal_replay = false),
+                "on" => self.settings.config.goal_replay = true,
+                "off" => self.settings.config.goal_replay = false,
                 _ => {}
             },
             "spawnoffset" => {
                 if let Ok(offset) = value.parse() {
-                    self.set_config(|c| c.spawn_point_offset = offset);
+                    self.settings.config.spawn_point_offset = offset;
                 }
             }
             "spawnplayeraltitude" => {
                 if let Ok(altitude) = value.parse() {
-                    self.set_config(|c| c.spawn_player_altitude = altitude);
+                    self.settings.config.spawn_player_altitude = altitude;
                 }
             }
             "spawnpuckaltitude" => {
                 if let Ok(altitude) = value.parse() {
-                    self.set_config(|c| c.spawn_puck_altitude = altitude);
+                    self.settings.config.spawn_puck_altitude = altitude;
                 }
             }
             "spawnplayerkeepstick" => match value {
-                "on" | "true" => self.set_config(|c| c.spawn_keep_stick_position = true),
-                "off" | "false" => self.set_config(|c| c.spawn_keep_stick_position = false),
+                "on" | "true" => self.settings.config.spawn_keep_stick_position = true,
+                "off" | "false" => self.settings.config.spawn_keep_stick_position = false,
                 _ => {}
             },
             "teamsize" => {
@@ -160,7 +158,7 @@ impl StandardMatchGameMode {
             ),
             StandardMatchState::WaitingForGame(warmup) => (warmup.score, 0, warmup.time),
         };
-        if self.config != old_config
+        if self.settings.config != old_config
             || self.teams.team_max != old_team_max
             || new_state_values != old_state_values
         {

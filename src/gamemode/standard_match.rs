@@ -300,28 +300,40 @@ pub struct Match {
     pub(crate) game_state: MatchGameState,
 }
 pub(crate) struct MatchGameState {
-    pub(crate) config: MatchConfiguration,
     pub(crate) score: (u32, u32),
     pub(crate) period: u32,
     pub(crate) time: u32,
     replay: Option<(u32, u32, Option<PlayerId>)>,
-    preferred_positions: HashMap<PlayerId, &'static str>,
 }
 impl MatchGameState {
-    fn game_over(&self) -> bool {
-        (self.period > self.config.periods && self.score.0 != self.score.1)
-            || (self.config.mercy > 0 && self.score.0.abs_diff(self.score.1) >= self.config.mercy)
-            || (self.config.first_to > 0
-                && (self.score.0 >= self.config.first_to || self.score.1 >= self.config.first_to))
+    fn game_over(&self, config: &MatchConfiguration) -> bool {
+        (self.period > config.periods && self.score.0 != self.score.1)
+            || (config.mercy > 0 && self.score.0.abs_diff(self.score.1) >= config.mercy)
+            || (config.first_to > 0
+                && (self.score.0 >= config.first_to || self.score.1 >= config.first_to))
+    }
+}
+
+/// Settings of the standard match game mode that last across games.
+///
+/// The game mode owns these, and passes them to the running [Match] on every call.
+pub struct MatchSettings {
+    pub config: MatchConfiguration,
+    /// Preferred faceoff position of each player.
+    preferred_positions: HashMap<PlayerId, &'static str>,
+}
+
+impl MatchSettings {
+    pub fn new(config: MatchConfiguration) -> Self {
+        Self {
+            config,
+            preferred_positions: HashMap::new(),
+        }
     }
 }
 
 impl Match {
-    fn start(
-        config: MatchConfiguration,
-        preferred_positions: HashMap<PlayerId, &'static str>,
-        score: (u32, u32),
-    ) -> Self {
+    fn start(config: &MatchConfiguration, score: (u32, u32)) -> Self {
         Self {
             state: MatchState::Break(BreakState {
                 timer: config.time_intermission * 100,
@@ -332,11 +344,9 @@ impl Match {
             }),
             game_state: MatchGameState {
                 time: 0,
-                config,
                 score,
                 period: 1,
                 replay: None,
-                preferred_positions,
             },
         }
     }
@@ -523,6 +533,7 @@ impl PlayingState {
     }
     fn goal(
         game_state: &mut MatchGameState,
+        config: &MatchConfiguration,
         ctx: &mut GameContext,
         playing: &mut PlayingState,
         team: Team,
@@ -531,7 +542,7 @@ impl PlayingState {
         if let Offside::Warning(warning) = playing.offside {
             if warning.offending_team == team {
                 return Self::call_offside(
-                    &game_state.config,
+                    config,
                     ctx,
                     team,
                     warning.side,
@@ -576,16 +587,8 @@ impl PlayingState {
             Team::Blue => game_state.score.1 += 1,
         };
         ctx.add_goal_message(team, goal_scorer, assist);
-        let unit = if game_state.config.use_mph {
-            "mph"
-        } else {
-            "km/h"
-        };
-        let speed_factor = if game_state.config.use_mph {
-            223.693
-        } else {
-            360.0
-        };
+        let unit = if config.use_mph { "mph" } else { "km/h" };
+        let speed_factor = if config.use_mph { 223.693 } else { 360.0 };
         let from_stick = puck_speed_from_stick
             .map(|speed| format!(", {:.1} {unit} from stick", speed * speed_factor))
             .unwrap_or_default();
@@ -600,7 +603,7 @@ impl PlayingState {
                 game_state.time % 100,
             ));
         }
-        let replay_length = game_state.config.goal_replay.then(|| {
+        let replay_length = config.goal_replay.then(|| {
             let now = ctx.replay.game_step();
             let start = playing
                 .faceoff_step
@@ -609,11 +612,12 @@ impl PlayingState {
             game_state.replay = Some((start, end, goal_scorer.or(last_touch)));
             end - start + 1
         });
-        let stoppage_time = goal_stoppage_time(game_state.config.time_break, replay_length);
+        let stoppage_time = goal_stoppage_time(config.time_break, replay_length);
         Self::stoppage(stoppage_time, StoppageCause::Goal, Faceoff::Center)
     }
     fn touch(
         game_state: &MatchGameState,
+        config: &MatchConfiguration,
         ctx: &mut GameContext,
         playing: &mut PlayingState,
         player: PlayerId,
@@ -651,7 +655,7 @@ impl PlayingState {
         if let Offside::Warning(warning) = playing.offside {
             if warning.offending_team == team {
                 return Some(Self::call_offside(
-                    &game_state.config,
+                    config,
                     ctx,
                     team,
                     warning.side,
@@ -663,7 +667,7 @@ impl PlayingState {
         if let TwoLine::Warning(warning) = playing.twoline.clone() {
             if warning.passing_team == team && warning.twoline_offside_players.contains(&player) {
                 return Some(Self::call_twoline(
-                    &game_state.config,
+                    config,
                     ctx,
                     team,
                     warning.side,
@@ -677,7 +681,7 @@ impl PlayingState {
         if let Icing::Warning(warning) = playing.icing {
             if team != warning.icing_team && !playing.started_goalies.contains(&player) {
                 return Some(Self::call_icing(
-                    &game_state.config,
+                    config,
                     ctx,
                     warning.icing_team,
                     warning.side,
@@ -778,6 +782,7 @@ impl PlayingState {
     }
     fn events(
         game_state: &mut MatchGameState,
+        config: &MatchConfiguration,
         ctx: &mut GameContext,
         events: &[PhysicsEvent],
         playing: &mut PlayingState,
@@ -785,13 +790,16 @@ impl PlayingState {
         for event in events {
             match *event {
                 PhysicsEvent::PuckTouch { player, puck } => {
-                    if let Some(stoppage) = Self::touch(game_state, ctx, playing, player, puck) {
+                    if let Some(stoppage) =
+                        Self::touch(game_state, config, ctx, playing, player, puck)
+                    {
                         return MatchTransition::Break(stoppage);
                     }
                 }
                 PhysicsEvent::PuckEnteredNet { team, puck } => {
                     return MatchTransition::Break(Self::goal(
                         game_state,
+                        config,
                         ctx,
                         playing,
                         team.get_other_team(),
@@ -803,7 +811,7 @@ impl PlayingState {
                         if pass.team == team.get_other_team()
                             && pass.from.is_some_and(|p| p <= PassLocation::ReachedCenter)
                         {
-                            match game_state.config.icing {
+                            match config.icing {
                                 IcingConfiguration::Touch => {
                                     playing.icing = Icing::Warning(IcingWarning {
                                         icing_team: pass.team,
@@ -813,10 +821,7 @@ impl PlayingState {
                                 }
                                 IcingConfiguration::NoTouch => {
                                     return MatchTransition::Break(Self::call_icing(
-                                        &game_state.config,
-                                        ctx,
-                                        pass.team,
-                                        pass.side,
+                                        config, ctx, pass.team, pass.side,
                                     ));
                                 }
                                 IcingConfiguration::Off => {}
@@ -830,7 +835,7 @@ impl PlayingState {
                 }
                 PhysicsEvent::PuckPassedDefensiveLine { team, .. } => {
                     Self::update_pass(playing, team, PassLocation::PassedOwnBlue);
-                    if game_state.config.offside_line == OffsideLineConfiguration::OffensiveBlue {
+                    if config.offside_line == OffsideLineConfiguration::OffensiveBlue {
                         if let Offside::Warning(warning) = playing.offside {
                             if team.get_other_team() == warning.offending_team {
                                 ctx.messages.add_server_chat_message("Offside waved off");
@@ -845,9 +850,7 @@ impl PlayingState {
                 }
                 PhysicsEvent::PuckPassedCenterLine { team, .. } => {
                     Self::update_pass(playing, team, PassLocation::PassedCenter);
-                    if let Some(stoppage) =
-                        Self::enter_zone(&game_state.config, ctx, playing, team, false)
-                    {
+                    if let Some(stoppage) = Self::enter_zone(config, ctx, playing, team, false) {
                         return MatchTransition::Break(stoppage);
                     }
                     if let Offside::Warning(warning) = playing.offside {
@@ -861,9 +864,7 @@ impl PlayingState {
                 }
                 PhysicsEvent::PuckEnteredOffensiveZone { team, .. } => {
                     Self::update_pass(playing, team, PassLocation::PassedOffensive);
-                    if let Some(stoppage) =
-                        Self::enter_zone(&game_state.config, ctx, playing, team, true)
-                    {
+                    if let Some(stoppage) = Self::enter_zone(config, ctx, playing, team, true) {
                         return MatchTransition::Break(stoppage);
                     }
                 }
@@ -881,7 +882,7 @@ impl PlayingState {
 }
 
 impl Match {
-    fn before_tick(&mut self, ctx: &mut GameContext) -> GameProgress {
+    fn before_tick(&mut self, ctx: &mut GameContext, settings: &MatchSettings) -> GameProgress {
         // Both the period clock and the stoppage timer stand still while a replay is shown, so
         // a goal replay neither uses up game time nor the pause before the next faceoff.
         if ctx.replay.is_in_replay() {
@@ -896,22 +897,28 @@ impl Match {
                     MatchTransition::Continue
                 }
             }
-            MatchState::Break(state) => {
-                state.before_tick(&self.game_state.config, self.game_state.game_over())
-            }
+            MatchState::Break(state) => state.before_tick(
+                &settings.config,
+                self.game_state.game_over(&settings.config),
+            ),
         };
-        self.apply(ctx, transition)
+        self.apply(ctx, settings, transition)
     }
     /// Carries out a transition. This is the only place where a running match changes state.
-    fn apply(&mut self, ctx: &mut GameContext, transition: MatchTransition) -> GameProgress {
+    fn apply(
+        &mut self,
+        ctx: &mut GameContext,
+        settings: &MatchSettings,
+        transition: MatchTransition,
+    ) -> GameProgress {
         match transition {
             MatchTransition::Continue => {}
             MatchTransition::Break(state) => self.state = MatchState::Break(state),
             MatchTransition::EndPeriod => {
                 self.game_state.period += 1;
                 self.state = MatchState::Break(BreakState {
-                    timer: self.game_state.config.time_intermission * 100,
-                    kind: if self.game_state.game_over() {
+                    timer: settings.config.time_intermission * 100,
+                    kind: if self.game_state.game_over(&settings.config) {
                         BreakKind::GameOver
                     } else {
                         BreakKind::Intermission {
@@ -926,12 +933,12 @@ impl Match {
                 reset_clock,
             } => {
                 if reset_clock {
-                    self.game_state.time = self.game_state.config.time_period * 100;
+                    self.game_state.time = settings.config.time_period * 100;
                 }
                 self.state = MatchState::Playing(Self::setup_faceoff(
                     ctx,
-                    &self.game_state.config,
-                    &self.game_state.preferred_positions,
+                    &settings.config,
+                    &settings.preferred_positions,
                     faceoff,
                 ));
             }
@@ -962,17 +969,22 @@ impl Match {
             game_over,
         }
     }
-    fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> GameProgress {
+    fn after_tick(
+        &mut self,
+        ctx: &mut GameContext,
+        settings: &MatchSettings,
+        events: &[PhysicsEvent],
+    ) -> GameProgress {
         let transition = match &mut self.state {
             MatchState::Playing(playing) => {
-                PlayingState::events(&mut self.game_state, ctx, events, playing)
+                PlayingState::events(&mut self.game_state, &settings.config, ctx, events, playing)
             }
             MatchState::Break(state) => {
                 state.handle_events(ctx, events);
                 MatchTransition::Continue
             }
         };
-        let progress = self.apply(ctx, transition);
+        let progress = self.apply(ctx, settings, transition);
         if let Some((start_step, end_step, force_view)) = self.game_state.replay {
             if end_step <= ctx.replay.game_step() {
                 ctx.replay
@@ -1024,20 +1036,18 @@ impl WarmupState {
     }
 }
 pub struct StandardMatchGameMode {
-    pub config: MatchConfiguration,
+    pub settings: MatchSettings,
     pub state: StandardMatchState,
     pub spawn_point: SpawnPoint,
     pub teams: TeamSelection,
-    preferred_positions: HashMap<PlayerId, &'static str>,
 }
 impl StandardMatchGameMode {
     pub fn new(config: MatchConfiguration, team_max: usize, spawn_point: SpawnPoint) -> Self {
         Self {
-            config,
+            settings: MatchSettings::new(config),
             state: StandardMatchState::WaitingForGame(WarmupState::new()),
             spawn_point,
             teams: TeamSelection::new(team_max),
-            preferred_positions: HashMap::new(),
         }
     }
     fn update_players(&mut self, ctx: &mut GameContext) -> (usize, usize) {
@@ -1056,17 +1066,8 @@ impl StandardMatchGameMode {
         self.reset_state();
     }
     fn start_game(&mut self, preliminary_score: (u32, u32)) {
-        self.state = StandardMatchState::Game(Match::start(
-            self.config,
-            self.preferred_positions.clone(),
-            preliminary_score,
-        ));
-    }
-    pub(crate) fn set_config(&mut self, update: impl Fn(&mut MatchConfiguration)) {
-        update(&mut self.config);
-        if let StandardMatchState::Game(game) = &mut self.state {
-            update(&mut game.game_state.config);
-        }
+        self.state =
+            StandardMatchState::Game(Match::start(&self.settings.config, preliminary_score));
     }
 }
 impl GameMode for StandardMatchGameMode {
@@ -1083,7 +1084,7 @@ impl GameMode for StandardMatchGameMode {
                 }
             }
             StandardMatchState::Game(game) => {
-                if game.before_tick(ctx) == GameProgress::Finished {
+                if game.before_tick(ctx, &self.settings) == GameProgress::Finished {
                     self.finish_game(ctx);
                 }
             }
@@ -1091,7 +1092,7 @@ impl GameMode for StandardMatchGameMode {
     }
     fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues {
         if let StandardMatchState::Game(game) = &mut self.state
-            && game.after_tick(ctx, events) == GameProgress::Finished
+            && game.after_tick(ctx, &self.settings, events) == GameProgress::Finished
         {
             self.finish_game(ctx);
         }
@@ -1115,10 +1116,7 @@ impl GameMode for StandardMatchGameMode {
                     .iter()
                     .find(|position| **position == requested)
                 {
-                    self.preferred_positions.insert(player, position);
-                    if let StandardMatchState::Game(game) = &mut self.state {
-                        game.game_state.preferred_positions.insert(player, position);
-                    }
+                    self.settings.preferred_positions.insert(player, position);
                     ctx.messages.add_directed_server_chat_message(
                         format!("Preferred faceoff position set to {position}"),
                         player,
@@ -1144,12 +1142,13 @@ impl GameMode for StandardMatchGameMode {
     fn game_started(&mut self, ctx: &mut GameContext) {
         self.reset_state();
         let (width, length) = (ctx.rink.width, ctx.rink.length);
-        let first_x = width / 2.0 - 0.4 * self.config.warmup_pucks.saturating_sub(1) as f32;
-        for index in 0..self.config.warmup_pucks {
+        let first_x =
+            width / 2.0 - 0.4 * self.settings.config.warmup_pucks.saturating_sub(1) as f32;
+        for index in 0..self.settings.config.warmup_pucks {
             ctx.objects.spawn_puck(Puck::new(
                 Vec3::new(
                     first_x + 0.8 * index as f32,
-                    self.config.spawn_puck_altitude,
+                    self.settings.config.spawn_puck_altitude,
                     length / 2.0,
                 ),
                 Rot3::IDENTITY,
@@ -1166,10 +1165,7 @@ impl GameMode for StandardMatchGameMode {
         _reason: ExitReason,
     ) {
         self.teams.remove_player(player);
-        self.preferred_positions.remove(&player);
-        if let StandardMatchState::Game(game) = &mut self.state {
-            game.game_state.preferred_positions.remove(&player);
-        }
+        self.settings.preferred_positions.remove(&player);
     }
     fn server_list_team_size(&self) -> u32 {
         self.teams.team_max as u32
@@ -1291,10 +1287,11 @@ mod tests {
         let mut server = crate::server::test_server();
         let mut ctx = server.context();
         let config = MatchConfiguration::default();
+        let settings = MatchSettings::new(config);
 
-        let mut tied = Match::start(config, HashMap::new(), (1, 1));
+        let mut tied = Match::start(&config, (1, 1));
         assert_eq!(
-            tied.apply(&mut ctx, MatchTransition::EndPeriod),
+            tied.apply(&mut ctx, &settings, MatchTransition::EndPeriod),
             GameProgress::Continue
         );
         assert_eq!(tied.game_state.period, 2);
@@ -1309,9 +1306,9 @@ mod tests {
             })
         ));
 
-        let mut decided = Match::start(config, HashMap::new(), (2, 1));
+        let mut decided = Match::start(&config, (2, 1));
         decided.game_state.period = config.periods;
-        decided.apply(&mut ctx, MatchTransition::EndPeriod);
+        decided.apply(&mut ctx, &settings, MatchTransition::EndPeriod);
         assert!(matches!(
             decided.state,
             MatchState::Break(BreakState {
@@ -1356,9 +1353,11 @@ mod tests {
         let step = server.state.replay.game_step();
         let mut ctx = server.context();
         let config = MatchConfiguration::default();
-        let mut game = Match::start(config, HashMap::new(), (0, 0));
+        let settings = MatchSettings::new(config);
+        let mut game = Match::start(&config, (0, 0));
         game.apply(
             &mut ctx,
+            &settings,
             MatchTransition::StartPlaying {
                 faceoff: Faceoff::Center,
                 reset_clock: true,
@@ -1366,12 +1365,12 @@ mod tests {
         );
         let period_time = game.game_state.time;
 
-        game.before_tick(&mut ctx);
+        game.before_tick(&mut ctx, &settings);
         assert_eq!(game.game_state.time, period_time - 1);
 
         ctx.replay.add_replay_to_queue(step, step, None);
         assert!(ctx.replay.is_in_replay());
-        game.before_tick(&mut ctx);
+        game.before_tick(&mut ctx, &settings);
         assert_eq!(game.game_state.time, period_time - 1);
 
         game.state = MatchState::Break(BreakState {
@@ -1381,11 +1380,57 @@ mod tests {
                 next_faceoff: Faceoff::Center,
             }),
         });
-        game.before_tick(&mut ctx);
+        game.before_tick(&mut ctx, &settings);
         assert!(matches!(
             game.state,
             MatchState::Break(BreakState { timer: 5, .. })
         ));
+    }
+
+    #[test]
+    fn position_set_during_a_match_is_used_at_the_next_faceoff() {
+        let mut server = crate::server::test_server();
+        let player = server
+            .state
+            .player_message_state
+            .add_player("goalie", "127.0.0.1:1".parse().unwrap())
+            .unwrap();
+        // A team needs a center, so the goalie needs a teammate to keep their position.
+        let teammate = server
+            .state
+            .player_message_state
+            .add_player("teammate", "127.0.0.1:2".parse().unwrap())
+            .unwrap();
+        let mut ctx = server.context();
+        assert!(ctx.spawn_skater(player, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false));
+        assert!(ctx.spawn_skater(teammate, Team::Red, Vec3::X, Rot3::IDENTITY, false));
+        let config = MatchConfiguration::default();
+        let mut mode = StandardMatchGameMode::new(config, 5, SpawnPoint::Center);
+        mode.state = StandardMatchState::Game(Match::start(&config, (0, 0)));
+
+        mode.handle_command(&mut ctx, "sp", "g", player);
+        let StandardMatchState::Game(game) = &mut mode.state else {
+            panic!("expected a running match");
+        };
+        game.apply(
+            &mut ctx,
+            &mode.settings,
+            MatchTransition::StartPlaying {
+                faceoff: Faceoff::Center,
+                reset_clock: true,
+            },
+        );
+
+        let spot = faceoff_spot(
+            ctx.rink,
+            Faceoff::Center,
+            config.spawn_point_offset,
+            config.spawn_player_altitude,
+        );
+        assert_eq!(
+            ctx.objects.skater(player).unwrap().body.pos,
+            spot.red["G"].0
+        );
     }
 
     #[test]
@@ -1394,7 +1439,7 @@ mod tests {
         let mut ctx = server.context();
         let config = MatchConfiguration::default();
         let mut mode = StandardMatchGameMode::new(config, 5, SpawnPoint::Center);
-        let mut game = Match::start(config, HashMap::new(), (2, 1));
+        let mut game = Match::start(&config, (2, 1));
         game.state = MatchState::Break(BreakState {
             timer: 1,
             kind: BreakKind::GameOver,
@@ -1418,7 +1463,7 @@ mod tests {
     #[test]
     fn match_start_enters_an_opening_break() {
         let config = MatchConfiguration::default();
-        let game = Match::start(config, HashMap::new(), (0, 0));
+        let game = Match::start(&config, (0, 0));
 
         assert_eq!(game.game_state.period, 1);
         assert_eq!(game.game_state.time, 0);

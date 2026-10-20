@@ -41,7 +41,6 @@ struct ShootoutGame {
 
 #[derive(Debug, Clone)]
 struct ShootoutGameState {
-    config: ShootoutGameConfiguration,
     round: u32,
     team: Team,
     red_score: u32,
@@ -49,7 +48,7 @@ struct ShootoutGameState {
 }
 
 impl ShootoutGameState {
-    fn finish_attempt(&mut self, goal_scored: bool) -> bool {
+    fn finish_attempt(&mut self, config: &ShootoutGameConfiguration, goal_scored: bool) -> bool {
         if goal_scored {
             match self.team {
                 Team::Red => self.red_score += 1,
@@ -63,7 +62,7 @@ impl ShootoutGameState {
                 Team::Red => 0,
                 Team::Blue => 1,
             };
-        let attempts = self.config.attempts.max(red_attempts_taken);
+        let attempts = config.attempts.max(red_attempts_taken);
         let remaining_red_attempts = attempts - red_attempts_taken;
         let remaining_blue_attempts = attempts - blue_attempts_taken;
 
@@ -158,11 +157,15 @@ enum ShootoutTransition {
 }
 
 impl AttackState {
-    fn setup_attempt(ctx: &mut GameContext, game_state: &ShootoutGameState) -> AttackState {
+    fn setup_attempt(
+        ctx: &mut GameContext,
+        config: &ShootoutGameConfiguration,
+        game_state: &ShootoutGameState,
+    ) -> AttackState {
         let team = game_state.team;
         let defending_team = team.get_other_team();
 
-        let remaining_attempts = game_state.config.attempts.saturating_sub(game_state.round);
+        let remaining_attempts = config.attempts.saturating_sub(game_state.round);
         let msg = if remaining_attempts >= 2 {
             format!("{remaining_attempts} attempts left for {team}")
         } else if remaining_attempts == 1 {
@@ -331,15 +334,14 @@ impl OverState {
 }
 
 impl ShootoutGame {
-    fn start(ctx: &mut GameContext, config: ShootoutGameConfiguration) -> Self {
+    fn start(ctx: &mut GameContext, config: &ShootoutGameConfiguration) -> Self {
         let game_state = ShootoutGameState {
-            config: config.clone(),
             round: 0,
             team: Team::Red,
             red_score: 0,
             blue_score: 0,
         };
-        let attack = AttackState::setup_attempt(ctx, &game_state);
+        let attack = AttackState::setup_attempt(ctx, config, &game_state);
         ShootoutGame {
             state: ShootoutAttemptState::Attack(attack),
             game_state,
@@ -364,28 +366,42 @@ impl ShootoutGame {
 }
 
 impl ShootoutGame {
-    fn before_tick(&mut self, ctx: &mut GameContext) -> GameProgress {
+    fn before_tick(
+        &mut self,
+        ctx: &mut GameContext,
+        config: &ShootoutGameConfiguration,
+    ) -> GameProgress {
         let transition = match &mut self.state {
             ShootoutAttemptState::Attack(state) => state.before_tick(),
             ShootoutAttemptState::Over(state) => state.before_tick(),
         };
-        self.apply(ctx, transition)
+        self.apply(ctx, config, transition)
     }
 
-    fn tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> GameProgress {
+    fn tick(
+        &mut self,
+        ctx: &mut GameContext,
+        config: &ShootoutGameConfiguration,
+        events: &[PhysicsEvent],
+    ) -> GameProgress {
         let transition = match &mut self.state {
             ShootoutAttemptState::Attack(state) => state.tick(ctx, self.game_state.team, events),
             ShootoutAttemptState::Over(_) => ShootoutTransition::Continue,
         };
-        self.apply(ctx, transition)
+        self.apply(ctx, config, transition)
     }
 
     /// Carries out a transition. This is the only place where a running shootout changes state.
-    fn apply(&mut self, ctx: &mut GameContext, transition: ShootoutTransition) -> GameProgress {
+    fn apply(
+        &mut self,
+        ctx: &mut GameContext,
+        config: &ShootoutGameConfiguration,
+        transition: ShootoutTransition,
+    ) -> GameProgress {
         match transition {
             ShootoutTransition::Continue => {}
             ShootoutTransition::EndAttempt { time, goal_scored } => {
-                let game_over = self.game_state.finish_attempt(goal_scored);
+                let game_over = self.game_state.finish_attempt(config, goal_scored);
                 if goal_scored {
                     ctx.add_goal_message(self.game_state.team, None, None);
                 } else {
@@ -400,8 +416,11 @@ impl ShootoutGame {
             }
             ShootoutTransition::StartNextAttempt => {
                 self.game_state.start_next_attempt();
-                self.state =
-                    ShootoutAttemptState::Attack(AttackState::setup_attempt(ctx, &self.game_state));
+                self.state = ShootoutAttemptState::Attack(AttackState::setup_attempt(
+                    ctx,
+                    config,
+                    &self.game_state,
+                ));
             }
             ShootoutTransition::Finish => return GameProgress::Finished,
         }
@@ -426,7 +445,7 @@ impl ShootoutGameMode {
     }
 
     fn start_game(&mut self, ctx: &mut GameContext) {
-        let game = ShootoutGame::start(ctx, self.config.clone());
+        let game = ShootoutGame::start(ctx, &self.config);
         self.status = ServerStatus::Game(game);
     }
 
@@ -491,7 +510,7 @@ impl GameMode for ShootoutGameMode {
                 }
             }
             ServerStatus::Game(game) => {
-                if game.before_tick(ctx) == GameProgress::Finished {
+                if game.before_tick(ctx, &self.config) == GameProgress::Finished {
                     self.finish_game(ctx);
                 }
             }
@@ -500,7 +519,7 @@ impl GameMode for ShootoutGameMode {
 
     fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues {
         if let ServerStatus::Game(game) = &mut self.status
-            && game.tick(ctx, events) == GameProgress::Finished
+            && game.tick(ctx, &self.config, events) == GameProgress::Finished
         {
             self.finish_game(ctx);
         }
@@ -570,6 +589,8 @@ mod tests {
     use super::*;
     use crate::players::PlayerListExt;
 
+    const CONFIG: ShootoutGameConfiguration = ShootoutGameConfiguration { attempts: 3 };
+
     fn finished_game() -> ShootoutGame {
         ShootoutGame {
             state: ShootoutAttemptState::Over(OverState {
@@ -579,7 +600,6 @@ mod tests {
                 game_over: true,
             }),
             game_state: ShootoutGameState {
-                config: ShootoutGameConfiguration { attempts: 3 },
                 round: 2,
                 team: Team::Blue,
                 red_score: 2,
@@ -613,7 +633,7 @@ mod tests {
             puck: None,
         });
 
-        assert_eq!(game.before_tick(&mut ctx), GameProgress::Continue);
+        assert_eq!(game.before_tick(&mut ctx, &CONFIG), GameProgress::Continue);
         let ShootoutAttemptState::Over(over) = &mut game.state else {
             panic!("the attempt should have ended");
         };
@@ -621,7 +641,7 @@ mod tests {
         assert!(!over.game_over);
         over.timer_until_next_round = 1;
 
-        assert_eq!(game.before_tick(&mut ctx), GameProgress::Continue);
+        assert_eq!(game.before_tick(&mut ctx, &CONFIG), GameProgress::Continue);
         assert!(matches!(game.state, ShootoutAttemptState::Attack(_)));
         assert_eq!(game.game_state.team, Team::Blue);
         assert_eq!(ctx.objects.pucks().count(), 1);
@@ -633,7 +653,7 @@ mod tests {
         let mut ctx = server.context();
         let mut game = finished_game();
 
-        assert_eq!(game.before_tick(&mut ctx), GameProgress::Finished);
+        assert_eq!(game.before_tick(&mut ctx, &CONFIG), GameProgress::Finished);
     }
 
     #[test]
