@@ -348,6 +348,9 @@ impl Replay<'_> {
             .add_replay_to_queue(start_step, end_step, force_view)
     }
 
+    /// Whether the current tick shows a replay instead of the live game.
+    ///
+    /// This is true in [GameMode::before_tick] on every tick that will show a replay tick.
     pub fn is_in_replay(&self) -> bool {
         self.replay.is_in_replay()
     }

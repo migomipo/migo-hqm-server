@@ -580,6 +580,9 @@ impl PlayingState {
                 now + 200,
                 goal_scorer.or(last_touch),
             ));
+            // The replay of up to 8 seconds is part of the pause, and the stoppage timer stands
+            // still while it is shown. The timer still runs for the 2 seconds of play before the
+            // replay starts, so 4 seconds at least leaves 2 seconds after the replay.
             stoppage_time = stoppage_time.saturating_sub(800).max(400);
         }
         Self::stoppage(stoppage_time, StoppageCause::Goal, Faceoff::Center)
@@ -854,6 +857,11 @@ impl PlayingState {
 
 impl Match {
     fn before_tick(&mut self, ctx: &mut GameContext) -> GameProgress {
+        // Both the period clock and the stoppage timer stand still while a replay is shown, so
+        // a goal replay neither uses up game time nor the pause before the next faceoff.
+        if ctx.replay.is_in_replay() {
+            return GameProgress::Continue;
+        }
         let transition = match &mut self.state {
             MatchState::Playing(_) => {
                 self.game_state.time = self.game_state.time.saturating_sub(1);
@@ -1284,6 +1292,50 @@ mod tests {
                 kind: BreakKind::GameOver,
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn match_clocks_stand_still_during_replays() {
+        let mut server = crate::server::test_server();
+        server.state.replay.set_history_capacity(10);
+        server.state.replay.advance_step();
+        server
+            .state
+            .replay
+            .record_tick(std::array::from_fn(|_| crate::protocol::ObjectPacket::None));
+        let step = server.state.replay.game_step();
+        let mut ctx = server.context();
+        let config = MatchConfiguration::default();
+        let mut game = Match::start(config, HashMap::new(), (0, 0));
+        game.apply(
+            &mut ctx,
+            MatchTransition::StartPlaying {
+                faceoff: Faceoff::Center,
+                reset_clock: true,
+            },
+        );
+        let period_time = game.game_state.time;
+
+        game.before_tick(&mut ctx);
+        assert_eq!(game.game_state.time, period_time - 1);
+
+        ctx.replay.add_replay_to_queue(step, step, None);
+        assert!(ctx.replay.is_in_replay());
+        game.before_tick(&mut ctx);
+        assert_eq!(game.game_state.time, period_time - 1);
+
+        game.state = MatchState::Break(BreakState {
+            timer: 5,
+            kind: BreakKind::Stoppage(Stoppage {
+                cause: StoppageCause::Goal,
+                next_faceoff: Faceoff::Center,
+            }),
+        });
+        game.before_tick(&mut ctx);
+        assert!(matches!(
+            game.state,
+            MatchState::Break(BreakState { timer: 5, .. })
         ));
     }
 
