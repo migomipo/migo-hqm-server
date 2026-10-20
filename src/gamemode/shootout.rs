@@ -8,6 +8,15 @@ use crate::game::{PlayerIndex, Puck, PuckId, ScoreboardValues, Team};
 use crate::gamemode::util::{GameProgress, SpawnPoint, TeamSelection, get_spawnpoint};
 use crate::gamemode::{ExitReason, GameContext, GameMode};
 
+/// Ticks of warmup once both teams have players, before the countdown to the first attempt.
+const WARMUP_TIME: u32 = 1000;
+/// Ticks between the end of warmup and the first attempt.
+const START_DELAY: u32 = 500;
+/// Ticks the attacker has for an attempt.
+const ATTEMPT_TIME: u32 = 2000;
+/// Ticks between the end of an attempt and the next one.
+const PAUSE_BETWEEN_ATTEMPTS: u32 = 500;
+
 #[derive(Debug, Clone)]
 enum ServerStatus {
     WaitingForGame { time: u32, time_until_start: u32 },
@@ -18,8 +27,8 @@ impl ServerStatus {
     /// Waiting for players, with the countdown to the first attempt not yet started.
     fn waiting() -> Self {
         ServerStatus::WaitingForGame {
-            time: 1000,
-            time_until_start: 500,
+            time: WARMUP_TIME,
+            time_until_start: START_DELAY,
         }
     }
 }
@@ -223,7 +232,7 @@ impl AttackState {
             ctx.spawn_skater(player_index, defending_team, pos, defending_rot, false);
         }
         Self {
-            time: 2000,
+            time: ATTEMPT_TIME,
             progress: 0.0,
             no_more_touch: false,
             puck,
@@ -383,7 +392,7 @@ impl ShootoutGame {
                     ctx.messages.add_server_chat_message("Miss");
                 }
                 self.state = ShootoutAttemptState::Over(OverState {
-                    timer_until_next_round: 500,
+                    timer_until_next_round: PAUSE_BETWEEN_ATTEMPTS,
                     time_at_end: time,
                     goal_scored,
                     game_over,
@@ -583,8 +592,8 @@ mod tests {
         matches!(
             status,
             ServerStatus::WaitingForGame {
-                time: 1000,
-                time_until_start: 500,
+                time: WARMUP_TIME,
+                time_until_start: START_DELAY,
             }
         )
     }

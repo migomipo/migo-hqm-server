@@ -14,6 +14,18 @@ mod faceoff;
 
 use faceoff::{assign_team_positions, faceoff_spot};
 
+/// Ticks of play before a goal that the goal replay shows, at most. The replay never starts
+/// before the last faceoff.
+const REPLAY_BEFORE_GOAL: u32 = 600;
+/// Ticks of play after a goal that the goal replay shows. Play goes on live during these
+/// ticks, and the replay starts after them.
+const REPLAY_AFTER_GOAL: u32 = 200;
+/// Minimum ticks between the end of a goal replay and the next faceoff.
+const MIN_PAUSE_AFTER_REPLAY: u32 = 300;
+/// Ticks of game history kept for replays. Must cover the longest goal replay.
+const REPLAY_HISTORY_LENGTH: u32 = 1000;
+const _: () = assert!(REPLAY_BEFORE_GOAL + REPLAY_AFTER_GOAL < REPLAY_HISTORY_LENGTH);
+
 pub const ALLOWED_POSITIONS: [&str; 18] = [
     "C", "LW", "RW", "LD", "RD", "G", "LM", "RM", "LLM", "RRM", "LLD", "RRD", "CM", "CD", "LW2",
     "RW2", "LLW", "RRW",
@@ -384,6 +396,22 @@ impl Match {
     }
 }
 
+/// Ticks of stoppage timer after a goal.
+///
+/// The stoppage timer stands still while a replay is shown, so with a replay the pause from the
+/// goal to the faceoff is the timer plus the replay length. The timer is chosen so that the pause
+/// is at least `time_break` seconds, and so that at least [MIN_PAUSE_AFTER_REPLAY] ticks are left
+/// after the replay, which starts [REPLAY_AFTER_GOAL] ticks after the goal.
+fn goal_stoppage_time(time_break: u32, replay_length: Option<u32>) -> u32 {
+    let break_time = time_break * 100;
+    match replay_length {
+        None => break_time,
+        Some(replay_length) => break_time
+            .saturating_sub(replay_length)
+            .max(REPLAY_AFTER_GOAL + MIN_PAUSE_AFTER_REPLAY),
+    }
+}
+
 impl PlayingState {
     fn players_past(
         ctx: &GameContext,
@@ -572,19 +600,16 @@ impl PlayingState {
                 game_state.time % 100,
             ));
         }
-        let mut stoppage_time = game_state.config.time_break * 100;
-        if game_state.config.goal_replay {
+        let replay_length = game_state.config.goal_replay.then(|| {
             let now = ctx.replay.game_step();
-            game_state.replay = Some((
-                playing.faceoff_step.max(now.saturating_sub(600)),
-                now + 200,
-                goal_scorer.or(last_touch),
-            ));
-            // The replay of up to 8 seconds is part of the pause, and the stoppage timer stands
-            // still while it is shown. The timer still runs for the 2 seconds of play before the
-            // replay starts, so 4 seconds at least leaves 2 seconds after the replay.
-            stoppage_time = stoppage_time.saturating_sub(800).max(400);
-        }
+            let start = playing
+                .faceoff_step
+                .max(now.saturating_sub(REPLAY_BEFORE_GOAL));
+            let end = now + REPLAY_AFTER_GOAL;
+            game_state.replay = Some((start, end, goal_scorer.or(last_touch)));
+            end - start + 1
+        });
+        let stoppage_time = goal_stoppage_time(game_state.config.time_break, replay_length);
         Self::stoppage(stoppage_time, StoppageCause::Goal, Faceoff::Center)
     }
     fn touch(
@@ -1046,7 +1071,8 @@ impl StandardMatchGameMode {
 }
 impl GameMode for StandardMatchGameMode {
     fn init(&mut self, ctx: &mut GameContext) {
-        ctx.replay.set_history_length(1000);
+        ctx.replay
+            .set_history_length(REPLAY_HISTORY_LENGTH as usize);
     }
     fn before_tick(&mut self, ctx: &mut GameContext) {
         let (red, blue) = self.update_players(ctx);
@@ -1293,6 +1319,29 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn goal_pause_without_replay_is_the_break_time() {
+        assert_eq!(goal_stoppage_time(10, None), 1000);
+    }
+
+    #[test]
+    fn goal_pause_with_replay_keeps_the_break_time_and_a_pause_after_the_replay() {
+        let longest_replay = REPLAY_BEFORE_GOAL + REPLAY_AFTER_GOAL + 1;
+        for time_break in [0, 5, 10, 20] {
+            for replay_length in [REPLAY_AFTER_GOAL + 1, 300, 500, longest_replay] {
+                let timer = goal_stoppage_time(time_break, Some(replay_length));
+                // The timer runs before and after the replay, but not during it.
+                assert!(timer + replay_length >= time_break * 100);
+                assert!(timer - REPLAY_AFTER_GOAL >= MIN_PAUSE_AFTER_REPLAY);
+            }
+        }
+
+        // With the default 10 second break, a full replay leaves 3 seconds after it, and a
+        // short replay leaves the rest of the break.
+        assert_eq!(goal_stoppage_time(10, Some(longest_replay)), 500);
+        assert_eq!(goal_stoppage_time(10, Some(300)), 700);
     }
 
     #[test]
