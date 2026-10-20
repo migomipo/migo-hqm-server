@@ -1725,6 +1725,116 @@ mod tests {
         assert_eq!(chats, ["after"]);
     }
 
+    fn describe_message(message: &HQMMessage) -> String {
+        match message {
+            HQMMessage::PlayerUpdate {
+                player_index,
+                data: Some(data),
+            } => {
+                let team = data.object.map(|(_, team)| team.to_string());
+                format!(
+                    "update {player_index} {} {}",
+                    data.player_name,
+                    team.as_deref().unwrap_or("-")
+                )
+            }
+            HQMMessage::PlayerUpdate {
+                player_index,
+                data: None,
+            } => format!("update {player_index} removed"),
+            HQMMessage::Goal {
+                team,
+                goal_player_index,
+                ..
+            } => format!(
+                "goal {team} {}",
+                goal_player_index.map_or("-".to_owned(), |index| index.to_string())
+            ),
+            HQMMessage::Chat { message, .. } => format!("chat {message}"),
+        }
+    }
+
+    #[test]
+    fn all_message_kinds_keep_their_order_per_player() {
+        let mut state = HQMServerState::new();
+        let red = state
+            .player_message_state
+            .add_player("red", "127.0.0.1:1".parse().unwrap())
+            .unwrap();
+        let blue = state
+            .player_message_state
+            .add_player("blue", "127.0.0.1:2".parse().unwrap())
+            .unwrap();
+        let spectator = state
+            .player_message_state
+            .add_player("spectator", "127.0.0.1:3".parse().unwrap())
+            .unwrap();
+        state.player_message_state.flush_messages();
+        let queue_length = |state: &HQMServerState, player_id| {
+            let player = state
+                .player_message_state
+                .players
+                .get_player(player_id)
+                .unwrap();
+            let ServerPlayerData::NetworkPlayer { data } = &player.data else {
+                panic!("expected a network player");
+            };
+            data.messages.len()
+        };
+        let start = [red, blue].map(|id| queue_length(&state, id));
+
+        let links = &mut state.skater_links();
+        assert!(links.spawn_skater(red, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false));
+        links
+            .messages
+            .add_goal_message(links.players, Team::Red, Some(red), None);
+        links.messages.add_server_chat_message("a");
+        links.messages.add_directed_server_chat_message("b", red);
+        state.player_message_state.add_user_team_message("c", red);
+        state.player_message_state.add_server_chat_message("d");
+        assert!(state.skater_links().remove_player(spectator, true));
+        state.player_message_state.flush_messages();
+
+        let messages_since = |state: &HQMServerState, player_id, start: usize| -> Vec<String> {
+            let player = state
+                .player_message_state
+                .players
+                .get_player(player_id)
+                .unwrap();
+            let ServerPlayerData::NetworkPlayer { data } = &player.data else {
+                panic!("expected a network player");
+            };
+            data.messages[start..]
+                .iter()
+                .map(|message| describe_message(message))
+                .collect()
+        };
+        assert_eq!(
+            messages_since(&state, red, start[0]),
+            [
+                "update 0 red Red",
+                "goal Red 0",
+                "chat a",
+                "chat b",
+                "update 0 [Red] red Red",
+                "chat c",
+                "update 0 red Red",
+                "chat d",
+                "update 2 removed",
+            ]
+        );
+        assert_eq!(
+            messages_since(&state, blue, start[1]),
+            [
+                "update 0 red Red",
+                "goal Red 0",
+                "chat a",
+                "chat d",
+                "update 2 removed",
+            ]
+        );
+    }
+
     #[test]
     fn game_abandoned_is_called_before_the_game_is_reset() {
         #[derive(Default)]
