@@ -190,16 +190,22 @@ enum StoppageCause {
     Offside,
     Icing,
 }
+/// A change to the state of a running match.
+///
+/// The current state decides which transition to make, and [Match::apply] carries it out.
 #[derive(Debug, Clone)]
-enum PlayingTransition {
+enum MatchTransition {
     Continue,
+    /// Stops play, or replaces the current break with another one.
     Break(BreakState),
-}
-#[derive(Debug, Clone)]
-enum BreakTransition {
-    Continue,
-    StartPlaying { faceoff: Faceoff, reset_clock: bool },
-    NewGame,
+    /// The period clock has run out.
+    EndPeriod,
+    StartPlaying {
+        faceoff: Faceoff,
+        reset_clock: bool,
+    },
+    /// The game is over and a new one should start.
+    Finish,
 }
 #[derive(Debug)]
 struct PlayingState {
@@ -212,26 +218,25 @@ struct PlayingState {
     faceoff_step: u32,
 }
 impl BreakState {
-    fn before_tick(&mut self, config: &MatchConfiguration, game_over: bool) -> BreakTransition {
+    fn before_tick(&mut self, config: &MatchConfiguration, game_over: bool) -> MatchTransition {
         self.timer = self.timer.saturating_sub(1);
         if self.timer != 0 {
-            return BreakTransition::Continue;
+            return MatchTransition::Continue;
         }
         match &self.kind {
-            BreakKind::Stoppage(_) if game_over => {
-                self.timer = config.time_intermission * 100;
-                self.kind = BreakKind::GameOver;
-                BreakTransition::Continue
-            }
-            BreakKind::Stoppage(stoppage) => BreakTransition::StartPlaying {
+            BreakKind::Stoppage(_) if game_over => MatchTransition::Break(BreakState {
+                timer: config.time_intermission * 100,
+                kind: BreakKind::GameOver,
+            }),
+            BreakKind::Stoppage(stoppage) => MatchTransition::StartPlaying {
                 faceoff: stoppage.next_faceoff,
                 reset_clock: false,
             },
-            BreakKind::Intermission { .. } => BreakTransition::StartPlaying {
+            BreakKind::Intermission { .. } => MatchTransition::StartPlaying {
                 faceoff: Faceoff::Center,
                 reset_clock: true,
             },
-            BreakKind::GameOver => BreakTransition::NewGame,
+            BreakKind::GameOver => MatchTransition::Finish,
         }
     }
     fn scoreboard(&self) -> (RulesState, u32, bool) {
@@ -748,16 +753,16 @@ impl PlayingState {
         ctx: &mut GameContext,
         events: &[PhysicsEvent],
         playing: &mut PlayingState,
-    ) -> PlayingTransition {
+    ) -> MatchTransition {
         for event in events {
             match *event {
                 PhysicsEvent::PuckTouch { player, puck } => {
                     if let Some(stoppage) = Self::touch(game_state, ctx, playing, player, puck) {
-                        return PlayingTransition::Break(stoppage);
+                        return MatchTransition::Break(stoppage);
                     }
                 }
                 PhysicsEvent::PuckEnteredNet { team, puck } => {
-                    return PlayingTransition::Break(Self::goal(
+                    return MatchTransition::Break(Self::goal(
                         game_state,
                         ctx,
                         playing,
@@ -779,7 +784,7 @@ impl PlayingState {
                                     ctx.messages.add_server_chat_message("Icing warning");
                                 }
                                 IcingConfiguration::NoTouch => {
-                                    return PlayingTransition::Break(Self::call_icing(
+                                    return MatchTransition::Break(Self::call_icing(
                                         &game_state.config,
                                         ctx,
                                         pass.team,
@@ -815,7 +820,7 @@ impl PlayingState {
                     if let Some(stoppage) =
                         Self::enter_zone(&game_state.config, ctx, playing, team, false)
                     {
-                        return PlayingTransition::Break(stoppage);
+                        return MatchTransition::Break(stoppage);
                     }
                     if let Offside::Warning(warning) = playing.offside {
                         if warning.offending_team != team {
@@ -831,7 +836,7 @@ impl PlayingState {
                     if let Some(stoppage) =
                         Self::enter_zone(&game_state.config, ctx, playing, team, true)
                     {
-                        return PlayingTransition::Break(stoppage);
+                        return MatchTransition::Break(stoppage);
                     }
                 }
                 _ => {}
@@ -843,52 +848,61 @@ impl PlayingState {
                 ctx.messages.add_server_chat_message("Offside waved off");
             }
         }
-        PlayingTransition::Continue
+        MatchTransition::Continue
     }
 }
 
 impl Match {
     fn before_tick(&mut self, ctx: &mut GameContext) -> GameProgress {
-        match &mut self.state {
+        let transition = match &mut self.state {
             MatchState::Playing(_) => {
                 self.game_state.time = self.game_state.time.saturating_sub(1);
                 if self.game_state.time == 0 {
-                    self.game_state.period += 1;
-                    self.state = MatchState::Break(BreakState {
-                        timer: self.game_state.config.time_intermission * 100,
-                        kind: if self.game_state.game_over() {
-                            BreakKind::GameOver
-                        } else {
-                            BreakKind::Intermission {
-                                period_end_step: Some(ctx.replay.game_step()),
-                                too_late_printed: false,
-                            }
-                        },
-                    });
+                    MatchTransition::EndPeriod
+                } else {
+                    MatchTransition::Continue
                 }
             }
             MatchState::Break(state) => {
-                let transition =
-                    state.before_tick(&self.game_state.config, self.game_state.game_over());
-                match transition {
-                    BreakTransition::Continue => {}
-                    BreakTransition::StartPlaying {
-                        faceoff,
-                        reset_clock,
-                    } => {
-                        if reset_clock {
-                            self.game_state.time = self.game_state.config.time_period * 100;
-                        }
-                        self.state = MatchState::Playing(Self::setup_faceoff(
-                            ctx,
-                            &self.game_state.config,
-                            &self.game_state.preferred_positions,
-                            faceoff,
-                        ));
-                    }
-                    BreakTransition::NewGame => return GameProgress::Finished,
-                }
+                state.before_tick(&self.game_state.config, self.game_state.game_over())
             }
+        };
+        self.apply(ctx, transition)
+    }
+    /// Carries out a transition. This is the only place where a running match changes state.
+    fn apply(&mut self, ctx: &mut GameContext, transition: MatchTransition) -> GameProgress {
+        match transition {
+            MatchTransition::Continue => {}
+            MatchTransition::Break(state) => self.state = MatchState::Break(state),
+            MatchTransition::EndPeriod => {
+                self.game_state.period += 1;
+                self.state = MatchState::Break(BreakState {
+                    timer: self.game_state.config.time_intermission * 100,
+                    kind: if self.game_state.game_over() {
+                        BreakKind::GameOver
+                    } else {
+                        BreakKind::Intermission {
+                            period_end_step: Some(ctx.replay.game_step()),
+                            too_late_printed: false,
+                        }
+                    },
+                });
+            }
+            MatchTransition::StartPlaying {
+                faceoff,
+                reset_clock,
+            } => {
+                if reset_clock {
+                    self.game_state.time = self.game_state.config.time_period * 100;
+                }
+                self.state = MatchState::Playing(Self::setup_faceoff(
+                    ctx,
+                    &self.game_state.config,
+                    &self.game_state.preferred_positions,
+                    faceoff,
+                ));
+            }
+            MatchTransition::Finish => return GameProgress::Finished,
         }
         GameProgress::Continue
     }
@@ -915,21 +929,17 @@ impl Match {
             game_over,
         }
     }
-    fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues {
-        let transition = {
-            match &mut self.state {
-                MatchState::Playing(playing) => {
-                    PlayingState::events(&mut self.game_state, ctx, events, playing)
-                }
-                MatchState::Break(state) => {
-                    state.handle_events(ctx, events);
-                    PlayingTransition::Continue
-                }
+    fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> GameProgress {
+        let transition = match &mut self.state {
+            MatchState::Playing(playing) => {
+                PlayingState::events(&mut self.game_state, ctx, events, playing)
+            }
+            MatchState::Break(state) => {
+                state.handle_events(ctx, events);
+                MatchTransition::Continue
             }
         };
-        if let PlayingTransition::Break(state) = transition {
-            self.state = MatchState::Break(state);
-        }
+        let progress = self.apply(ctx, transition);
         if let Some((start_step, end_step, force_view)) = self.game_state.replay {
             if end_step <= ctx.replay.game_step() {
                 ctx.replay
@@ -938,7 +948,7 @@ impl Match {
                 self.game_state.replay = None;
             }
         }
-        self.scoreboard()
+        progress
     }
 }
 
@@ -1046,9 +1056,14 @@ impl GameMode for StandardMatchGameMode {
         }
     }
     fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues {
-        match &mut self.state {
+        if let StandardMatchState::Game(game) = &mut self.state
+            && game.after_tick(ctx, events) == GameProgress::Finished
+        {
+            self.finish_game(ctx);
+        }
+        match &self.state {
             StandardMatchState::WaitingForGame(warmup) => warmup.scoreboard(),
-            StandardMatchState::Game(game) => game.after_tick(ctx, events),
+            StandardMatchState::Game(game) => game.scoreboard(),
         }
     }
     fn handle_command(
@@ -1189,7 +1204,7 @@ mod tests {
 
         assert!(matches!(
             state.before_tick(&MatchConfiguration::default(), false),
-            BreakTransition::StartPlaying {
+            MatchTransition::StartPlaying {
                 faceoff: Faceoff::Center,
                 reset_clock: false,
             }
@@ -1208,10 +1223,67 @@ mod tests {
 
         assert!(matches!(
             state.before_tick(&MatchConfiguration::default(), false),
-            BreakTransition::StartPlaying {
+            MatchTransition::StartPlaying {
                 faceoff: Faceoff::Center,
                 reset_clock: true,
             }
+        ));
+    }
+
+    #[test]
+    fn stoppage_after_a_deciding_goal_turns_into_game_over() {
+        let config = MatchConfiguration::default();
+        let mut state = BreakState {
+            timer: 1,
+            kind: BreakKind::Stoppage(Stoppage {
+                cause: StoppageCause::Goal,
+                next_faceoff: Faceoff::Center,
+            }),
+        };
+
+        let transition = state.before_tick(&config, true);
+
+        assert!(matches!(
+            transition,
+            MatchTransition::Break(BreakState {
+                kind: BreakKind::GameOver,
+                timer,
+            }) if timer == config.time_intermission * 100
+        ));
+    }
+
+    #[test]
+    fn period_end_starts_an_intermission_or_ends_the_game() {
+        let mut server = crate::server::test_server();
+        let mut ctx = server.context();
+        let config = MatchConfiguration::default();
+
+        let mut tied = Match::start(config, HashMap::new(), (1, 1));
+        assert_eq!(
+            tied.apply(&mut ctx, MatchTransition::EndPeriod),
+            GameProgress::Continue
+        );
+        assert_eq!(tied.game_state.period, 2);
+        assert!(matches!(
+            tied.state,
+            MatchState::Break(BreakState {
+                kind: BreakKind::Intermission {
+                    period_end_step: Some(_),
+                    ..
+                },
+                ..
+            })
+        ));
+
+        let mut decided = Match::start(config, HashMap::new(), (2, 1));
+        decided.game_state.period = config.periods;
+        decided.apply(&mut ctx, MatchTransition::EndPeriod);
+        assert!(matches!(
+            decided.state,
+            MatchState::Break(BreakState {
+                kind: BreakKind::GameOver,
+                ..
+            })
         ));
     }
 

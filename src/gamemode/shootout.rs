@@ -110,46 +110,6 @@ enum ShootoutAttemptState {
 }
 
 impl ShootoutAttemptState {
-    fn before_tick(
-        &mut self,
-        ctx: &mut GameContext,
-        game_state: &mut ShootoutGameState,
-    ) -> GameProgress {
-        match self {
-            Self::Attack(state) => {
-                if let Some(end) = state.before_tick() {
-                    *self = Self::Over(state.end_attempt(ctx, game_state, end));
-                }
-            }
-            Self::Over(state) => match state.before_tick() {
-                Some(OverTransition::StartNewGame) => return GameProgress::Finished,
-                Some(OverTransition::StartNextAttempt) => {
-                    let attack = state.start_next_attempt(ctx, game_state);
-                    *self = Self::Attack(attack);
-                }
-                None => {}
-            },
-        }
-        GameProgress::Continue
-    }
-
-    fn tick(
-        &mut self,
-        ctx: &mut GameContext,
-        attacking_team: Team,
-        events: &[PhysicsEvent],
-        game_state: &mut ShootoutGameState,
-    ) {
-        match self {
-            Self::Attack(state) => {
-                if let Some(end) = state.tick(ctx, attacking_team, events) {
-                    *self = Self::Over(state.end_attempt(ctx, game_state, end));
-                }
-            }
-            Self::Over(_) => {}
-        }
-    }
-
     fn scoreboard_values(&self) -> (u32, u32, bool) {
         match self {
             Self::Attack(AttackState { time, .. }) => (*time, 0, false),
@@ -171,16 +131,21 @@ impl ShootoutAttemptState {
     }
 }
 
+/// A change to the state of a running shootout.
+///
+/// The current attempt state decides which transition to make, and [ShootoutGame::apply]
+/// carries it out.
 #[derive(Debug, Clone, Copy)]
-struct AttackTransition {
-    time: u32,
-    goal_scored: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum OverTransition {
+enum ShootoutTransition {
+    Continue,
+    /// The attempt has ended, with the time that was left on the clock.
+    EndAttempt {
+        time: u32,
+        goal_scored: bool,
+    },
     StartNextAttempt,
-    StartNewGame,
+    /// The shootout is over and a new game should start.
+    Finish,
 }
 
 impl AttackState {
@@ -265,12 +230,16 @@ impl AttackState {
         }
     }
 
-    fn before_tick(&mut self) -> Option<AttackTransition> {
+    fn before_tick(&mut self) -> ShootoutTransition {
         self.time = self.time.saturating_sub(1);
-        (self.time == 0).then_some(AttackTransition {
-            time: 0,
-            goal_scored: false,
-        })
+        if self.time == 0 {
+            ShootoutTransition::EndAttempt {
+                time: 0,
+                goal_scored: false,
+            }
+        } else {
+            ShootoutTransition::Continue
+        }
     }
 
     fn tick(
@@ -278,30 +247,30 @@ impl AttackState {
         ctx: &mut GameContext,
         attacking_team: Team,
         events: &[PhysicsEvent],
-    ) -> Option<AttackTransition> {
+    ) -> ShootoutTransition {
         for event in events {
             match event {
                 PhysicsEvent::PuckEnteredNet { team: net_team, .. } => {
-                    return Some(AttackTransition {
+                    return ShootoutTransition::EndAttempt {
                         time: self.time,
                         goal_scored: net_team.get_other_team() == attacking_team,
-                    });
+                    };
                 }
                 PhysicsEvent::PuckPassedGoalLine { .. } => {
-                    return Some(AttackTransition {
+                    return ShootoutTransition::EndAttempt {
                         time: self.time,
                         goal_scored: false,
-                    });
+                    };
                 }
                 PhysicsEvent::PuckTouch { player, .. } => {
                     if let Some(touching_team) =
                         ctx.players.get(*player).and_then(|player| player.team())
                     {
                         if touching_team == attacking_team && self.no_more_touch {
-                            return Some(AttackTransition {
+                            return ShootoutTransition::EndAttempt {
                                 time: self.time,
                                 goal_scored: false,
-                            });
+                            };
                         } else if touching_team != attacking_team {
                             self.no_more_touch = true;
                         }
@@ -321,59 +290,34 @@ impl AttackState {
             Team::Red => Vec3::NEG_Z,
             Team::Blue => Vec3::Z,
         };
-        let progress = (ctx.objects.get_puck(self.puck?)?.body.pos - center_pos).dot(normal);
+        let Some(puck) = self.puck.and_then(|puck| ctx.objects.get_puck(puck)) else {
+            return ShootoutTransition::Continue;
+        };
+        let progress = (puck.body.pos - center_pos).dot(normal);
         if !self.no_more_touch && progress > self.progress {
             self.progress = progress;
-            None
+            ShootoutTransition::Continue
         } else if progress - self.progress < if self.no_more_touch { -5.0 } else { -0.5 } {
-            Some(AttackTransition {
+            ShootoutTransition::EndAttempt {
                 time: self.time,
                 goal_scored: false,
-            })
+            }
         } else {
-            None
-        }
-    }
-
-    fn end_attempt(
-        &mut self,
-        ctx: &mut GameContext,
-        game_state: &mut ShootoutGameState,
-        end: AttackTransition,
-    ) -> OverState {
-        let game_over = game_state.finish_attempt(end.goal_scored);
-        if end.goal_scored {
-            ctx.add_goal_message(game_state.team, None, None);
-        } else {
-            ctx.messages.add_server_chat_message("Miss");
-        }
-
-        OverState {
-            timer_until_next_round: 500,
-            time_at_end: end.time,
-            goal_scored: end.goal_scored,
-            game_over,
+            ShootoutTransition::Continue
         }
     }
 }
 
 impl OverState {
-    fn before_tick(&mut self) -> Option<OverTransition> {
+    fn before_tick(&mut self) -> ShootoutTransition {
         self.timer_until_next_round = self.timer_until_next_round.saturating_sub(1);
-        (self.timer_until_next_round == 0).then_some(if self.game_over {
-            OverTransition::StartNewGame
+        if self.timer_until_next_round != 0 {
+            ShootoutTransition::Continue
+        } else if self.game_over {
+            ShootoutTransition::Finish
         } else {
-            OverTransition::StartNextAttempt
-        })
-    }
-
-    fn start_next_attempt(
-        &self,
-        ctx: &mut GameContext,
-        game_state: &mut ShootoutGameState,
-    ) -> AttackState {
-        game_state.start_next_attempt();
-        AttackState::setup_attempt(ctx, game_state)
+            ShootoutTransition::StartNextAttempt
+        }
     }
 }
 
@@ -412,12 +356,47 @@ impl ShootoutGame {
 
 impl ShootoutGame {
     fn before_tick(&mut self, ctx: &mut GameContext) -> GameProgress {
-        self.state.before_tick(ctx, &mut self.game_state)
+        let transition = match &mut self.state {
+            ShootoutAttemptState::Attack(state) => state.before_tick(),
+            ShootoutAttemptState::Over(state) => state.before_tick(),
+        };
+        self.apply(ctx, transition)
     }
 
-    fn tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) {
-        self.state
-            .tick(ctx, self.game_state.team, events, &mut self.game_state);
+    fn tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> GameProgress {
+        let transition = match &mut self.state {
+            ShootoutAttemptState::Attack(state) => state.tick(ctx, self.game_state.team, events),
+            ShootoutAttemptState::Over(_) => ShootoutTransition::Continue,
+        };
+        self.apply(ctx, transition)
+    }
+
+    /// Carries out a transition. This is the only place where a running shootout changes state.
+    fn apply(&mut self, ctx: &mut GameContext, transition: ShootoutTransition) -> GameProgress {
+        match transition {
+            ShootoutTransition::Continue => {}
+            ShootoutTransition::EndAttempt { time, goal_scored } => {
+                let game_over = self.game_state.finish_attempt(goal_scored);
+                if goal_scored {
+                    ctx.add_goal_message(self.game_state.team, None, None);
+                } else {
+                    ctx.messages.add_server_chat_message("Miss");
+                }
+                self.state = ShootoutAttemptState::Over(OverState {
+                    timer_until_next_round: 500,
+                    time_at_end: time,
+                    goal_scored,
+                    game_over,
+                });
+            }
+            ShootoutTransition::StartNextAttempt => {
+                self.game_state.start_next_attempt();
+                self.state =
+                    ShootoutAttemptState::Attack(AttackState::setup_attempt(ctx, &self.game_state));
+            }
+            ShootoutTransition::Finish => return GameProgress::Finished,
+        }
+        GameProgress::Continue
     }
 }
 
@@ -511,8 +490,13 @@ impl GameMode for ShootoutGameMode {
     }
 
     fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues {
-        match self.status {
-            ServerStatus::WaitingForGame { time, .. } => ScoreboardValues {
+        if let ServerStatus::Game(game) = &mut self.status
+            && game.tick(ctx, events) == GameProgress::Finished
+        {
+            self.finish_game(ctx);
+        }
+        match &self.status {
+            &ServerStatus::WaitingForGame { time, .. } => ScoreboardValues {
                 rules_state: RulesState::default(),
                 red_score: 0,
                 blue_score: 0,
@@ -521,10 +505,7 @@ impl GameMode for ShootoutGameMode {
                 goal_message_timer: 0,
                 game_over: false,
             },
-            ServerStatus::Game(ref mut game) => {
-                game.tick(ctx, events);
-                game.scoreboard()
-            }
+            ServerStatus::Game(game) => game.scoreboard(),
         }
     }
 
@@ -606,6 +587,44 @@ mod tests {
                 time_until_start: 500,
             }
         )
+    }
+
+    #[test]
+    fn attempts_end_and_the_next_one_starts_for_the_other_team() {
+        let mut server = crate::server::test_server();
+        let mut ctx = server.context();
+        let mut game = finished_game();
+        game.game_state.round = 0;
+        game.game_state.team = Team::Red;
+        game.game_state.red_score = 0;
+        game.state = ShootoutAttemptState::Attack(AttackState {
+            time: 1,
+            progress: 0.0,
+            no_more_touch: false,
+            puck: None,
+        });
+
+        assert_eq!(game.before_tick(&mut ctx), GameProgress::Continue);
+        let ShootoutAttemptState::Over(over) = &mut game.state else {
+            panic!("the attempt should have ended");
+        };
+        assert!(!over.goal_scored);
+        assert!(!over.game_over);
+        over.timer_until_next_round = 1;
+
+        assert_eq!(game.before_tick(&mut ctx), GameProgress::Continue);
+        assert!(matches!(game.state, ShootoutAttemptState::Attack(_)));
+        assert_eq!(game.game_state.team, Team::Blue);
+        assert_eq!(ctx.objects.pucks().count(), 1);
+    }
+
+    #[test]
+    fn last_attempt_finishes_the_game() {
+        let mut server = crate::server::test_server();
+        let mut ctx = server.context();
+        let mut game = finished_game();
+
+        assert_eq!(game.before_tick(&mut ctx), GameProgress::Finished);
     }
 
     #[test]
