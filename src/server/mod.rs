@@ -1451,31 +1451,31 @@ pub async fn run_server<B: GameMode>(
     }
 }
 
+/// A server with default settings and recording turned off, for tests.
+#[cfg(test)]
+pub(crate) fn test_server() -> HQMServer {
+    HQMServer::new(
+        ServerConfiguration {
+            welcome: vec![],
+            password: None,
+            player_max: 16,
+            recording_enabled: ReplayRecording::Off,
+            server_name: "test".to_owned(),
+            server_service: None,
+        },
+        PhysicsConfiguration::default(),
+        Box::new(ban::InMemoryBanCheck::new()),
+        Box::new(recording::RecordingSaveToFile::new(".".into())),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio_util::codec::Encoder;
 
-    use crate::ban::InMemoryBanCheck;
     use crate::game::PhysicsEvent;
     use crate::players::ServerPlayer;
-    use crate::record::RecordingSaveToFile;
-
-    fn test_server() -> HQMServer {
-        HQMServer::new(
-            ServerConfiguration {
-                welcome: vec![],
-                password: None,
-                player_max: 16,
-                recording_enabled: ReplayRecording::Off,
-                server_name: "test".to_owned(),
-                server_service: None,
-            },
-            PhysicsConfiguration::default(),
-            Box::new(InMemoryBanCheck::new()),
-            Box::new(RecordingSaveToFile::new(".".into())),
-        )
-    }
 
     fn network_player() -> ServerPlayer {
         ServerPlayer::new_network_player(

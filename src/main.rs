@@ -65,7 +65,6 @@ struct ServerSection {
 struct GameSection {
     periods: Option<u32>,
     time_period: Option<u32>,
-    time_warmup: Option<u32>,
     time_break: Option<u32>,
     time_intermission: Option<u32>,
     warmup_pucks: Option<usize>,
@@ -226,7 +225,6 @@ async fn main() -> anyhow::Result<()> {
                 let periods = game_section.periods.unwrap_or(3);
 
                 let rules_time_period = game_section.time_period.unwrap_or(300);
-                let rules_time_warmup = game_section.time_warmup.unwrap_or(300);
                 let rule_time_break = game_section.time_break.unwrap_or(10);
                 let rule_time_intermission = game_section.time_intermission.unwrap_or(20);
                 let warmup_pucks = game_section.warmup_pucks.unwrap_or(1);
@@ -280,7 +278,6 @@ async fn main() -> anyhow::Result<()> {
 
                 let match_config = MatchConfiguration {
                     time_period: rules_time_period,
-                    time_warmup: rules_time_warmup,
                     time_break: rule_time_break,
                     time_intermission: rule_time_intermission,
                     mercy,

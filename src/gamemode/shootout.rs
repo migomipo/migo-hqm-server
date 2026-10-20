@@ -5,13 +5,23 @@ use tracing::info;
 
 use crate::game::{PhysicsEvent, PlayerId, RulesState};
 use crate::game::{PlayerIndex, Puck, PuckId, ScoreboardValues, Team};
-use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
+use crate::gamemode::util::{GameProgress, SpawnPoint, TeamSelection, get_spawnpoint};
 use crate::gamemode::{ExitReason, GameContext, GameMode};
 
 #[derive(Debug, Clone)]
 enum ServerStatus {
     WaitingForGame { time: u32, time_until_start: u32 },
     Game(ShootoutGame),
+}
+
+impl ServerStatus {
+    /// Waiting for players, with the countdown to the first attempt not yet started.
+    fn waiting() -> Self {
+        ServerStatus::WaitingForGame {
+            time: 1000,
+            time_until_start: 500,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -100,24 +110,27 @@ enum ShootoutAttemptState {
 }
 
 impl ShootoutAttemptState {
-    fn before_tick(&mut self, ctx: &mut GameContext, game_state: &mut ShootoutGameState) -> bool {
+    fn before_tick(
+        &mut self,
+        ctx: &mut GameContext,
+        game_state: &mut ShootoutGameState,
+    ) -> GameProgress {
         match self {
             Self::Attack(state) => {
                 if let Some(end) = state.before_tick() {
                     *self = Self::Over(state.end_attempt(ctx, game_state, end));
                 }
-                false
             }
             Self::Over(state) => match state.before_tick() {
-                Some(OverTransition::StartNewGame) => true,
+                Some(OverTransition::StartNewGame) => return GameProgress::Finished,
                 Some(OverTransition::StartNextAttempt) => {
                     let attack = state.start_next_attempt(ctx, game_state);
                     *self = Self::Attack(attack);
-                    false
                 }
-                None => false,
+                None => {}
             },
         }
+        GameProgress::Continue
     }
 
     fn tick(
@@ -398,10 +411,8 @@ impl ShootoutGame {
 }
 
 impl ShootoutGame {
-    fn before_tick(&mut self, ctx: &mut GameContext) {
-        if self.state.before_tick(ctx, &mut self.game_state) {
-            ctx.new_game();
-        }
+    fn before_tick(&mut self, ctx: &mut GameContext) -> GameProgress {
+        self.state.before_tick(ctx, &mut self.game_state)
     }
 
     fn tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) {
@@ -414,12 +425,16 @@ impl ShootoutGameMode {
     pub fn new(config: ShootoutGameConfiguration) -> Self {
         ShootoutGameMode {
             config,
-            status: ServerStatus::WaitingForGame {
-                time: 1000,
-                time_until_start: 500,
-            },
+            status: ServerStatus::waiting(),
             teams: TeamSelection::new(1),
         }
+    }
+
+    /// Ends the current game and resets the game mode with it, so that the rest of this tick
+    /// does not run the finished game's logic on the cleared server state.
+    fn finish_game(&mut self, ctx: &mut GameContext) {
+        ctx.new_game();
+        self.status = ServerStatus::waiting();
     }
 
     fn start_game(&mut self, ctx: &mut GameContext) {
@@ -436,7 +451,7 @@ impl ShootoutGameMode {
     fn reset_game(&mut self, ctx: &mut GameContext, player_id: PlayerId) {
         if let Some(name) = ctx.require_admin(player_id) {
             info!("{} ({}) reset game", name, player_id);
-            ctx.new_game();
+            self.finish_game(ctx);
             ctx.messages
                 .add_server_chat_message(format!("Game reset by {name}"));
         }
@@ -484,11 +499,14 @@ impl GameMode for ShootoutGameMode {
                         }
                     }
                 } else {
-                    *time = 1000;
-                    *time_until_start = 500;
+                    self.status = ServerStatus::waiting();
                 }
             }
-            ServerStatus::Game(game) => game.before_tick(ctx),
+            ServerStatus::Game(game) => {
+                if game.before_tick(ctx) == GameProgress::Finished {
+                    self.finish_game(ctx);
+                }
+            }
         }
     }
 
@@ -525,10 +543,7 @@ impl GameMode for ShootoutGameMode {
     }
 
     fn game_started(&mut self, ctx: &mut GameContext) {
-        self.status = ServerStatus::WaitingForGame {
-            time: 1000,
-            time_until_start: 500,
-        };
+        self.status = ServerStatus::waiting();
         let rink = &*ctx.rink;
         let width = rink.width;
         let length = rink.length;
@@ -536,6 +551,10 @@ impl GameMode for ShootoutGameMode {
         let pos = Vec3::new(width / 2.0, 1.5, length / 2.0);
         let rot = Rot3::IDENTITY;
         ctx.objects.spawn_puck(Puck::new(pos, rot));
+    }
+
+    fn game_abandoned(&mut self, _ctx: &mut GameContext) {
+        self.status = ServerStatus::waiting();
     }
 
     fn before_player_exit(
@@ -553,5 +572,77 @@ impl GameMode for ShootoutGameMode {
 
     fn include_tick_in_recording(&self) -> bool {
         !matches!(self.status, ServerStatus::WaitingForGame { .. })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::players::PlayerListExt;
+
+    fn finished_game() -> ShootoutGame {
+        ShootoutGame {
+            state: ShootoutAttemptState::Over(OverState {
+                timer_until_next_round: 1,
+                time_at_end: 0,
+                goal_scored: false,
+                game_over: true,
+            }),
+            game_state: ShootoutGameState {
+                config: ShootoutGameConfiguration { attempts: 3 },
+                round: 2,
+                team: Team::Blue,
+                red_score: 2,
+                blue_score: 0,
+            },
+        }
+    }
+
+    fn is_waiting(status: &ServerStatus) -> bool {
+        matches!(
+            status,
+            ServerStatus::WaitingForGame {
+                time: 1000,
+                time_until_start: 500,
+            }
+        )
+    }
+
+    #[test]
+    fn finished_game_returns_to_waiting_in_the_same_tick() {
+        let mut server = crate::server::test_server();
+        let mut ctx = server.context();
+        let mut mode = ShootoutGameMode::new(ShootoutGameConfiguration { attempts: 3 });
+        mode.status = ServerStatus::Game(finished_game());
+        ctx.objects
+            .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+
+        mode.before_tick(&mut ctx);
+
+        assert_eq!(ctx.objects.pucks().count(), 0);
+        assert!(is_waiting(&mode.status));
+    }
+
+    #[test]
+    fn reset_command_returns_to_waiting() {
+        let mut server = crate::server::test_server();
+        let admin = server
+            .state
+            .player_message_state
+            .add_player("admin", "127.0.0.1:1".parse().unwrap())
+            .unwrap();
+        server
+            .state
+            .player_message_state
+            .players
+            .get_player_mut(admin)
+            .unwrap()
+            .is_admin = true;
+        let mut mode = ShootoutGameMode::new(ShootoutGameConfiguration { attempts: 3 });
+        mode.status = ServerStatus::Game(finished_game());
+
+        mode.handle_command(&mut server.context(), "reset", "", admin);
+
+        assert!(is_waiting(&mode.status));
     }
 }

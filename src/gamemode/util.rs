@@ -138,6 +138,13 @@ impl TeamSelection {
     }
 }
 
+/// Whether a game goes on after a tick, or has finished and should be replaced by a new one.
+#[derive(Eq, PartialEq, Debug, Copy, Clone)]
+pub(crate) enum GameProgress {
+    Continue,
+    Finished,
+}
+
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub enum SpawnPoint {
     Center,

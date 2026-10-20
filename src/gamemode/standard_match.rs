@@ -6,7 +6,7 @@ use glamx::Rot3;
 use crate::game::{
     PhysicsEvent, PlayerId, PlayerIndex, Puck, PuckId, RulesState, ScoreboardValues, Team,
 };
-use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
+use crate::gamemode::util::{GameProgress, SpawnPoint, TeamSelection, get_spawnpoint};
 use crate::gamemode::{ExitReason, GameContext, GameMode};
 
 mod commands;
@@ -48,7 +48,6 @@ pub enum OffsideLineConfiguration {
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub struct MatchConfiguration {
     pub time_period: u32,
-    pub time_warmup: u32,
     pub time_break: u32,
     pub time_intermission: u32,
     pub mercy: u32,
@@ -70,7 +69,6 @@ impl Default for MatchConfiguration {
     fn default() -> Self {
         Self {
             time_period: 300,
-            time_warmup: 300,
             time_break: 10,
             time_intermission: 20,
             mercy: 0,
@@ -850,7 +848,7 @@ impl PlayingState {
 }
 
 impl Match {
-    fn before_tick(&mut self, ctx: &mut GameContext) {
+    fn before_tick(&mut self, ctx: &mut GameContext) -> GameProgress {
         match &mut self.state {
             MatchState::Playing(_) => {
                 self.game_state.time = self.game_state.time.saturating_sub(1);
@@ -888,10 +886,11 @@ impl Match {
                             faceoff,
                         ));
                     }
-                    BreakTransition::NewGame => ctx.new_game(),
+                    BreakTransition::NewGame => return GameProgress::Finished,
                 }
             }
         }
+        GameProgress::Continue
     }
     fn scoreboard(&self) -> ScoreboardValues {
         let (rules_state, goal_message_timer, game_over) = match &self.state {
@@ -952,15 +951,18 @@ pub struct WarmupState {
     pub(crate) score: (u32, u32),
 }
 impl WarmupState {
-    fn new(time: u32) -> Self {
+    /// Ticks of warmup once both teams have players, before the game starts.
+    const TIME: u32 = 2000;
+
+    fn new() -> Self {
         Self {
-            time,
+            time: Self::TIME,
             score: (0, 0),
         }
     }
     fn before_tick(&mut self, red_players: usize, blue_players: usize) -> Option<(u32, u32)> {
         if red_players == 0 || blue_players == 0 {
-            self.time = 2000;
+            self.time = Self::TIME;
             return None;
         }
         self.time = self.time.saturating_sub(1);
@@ -989,7 +991,7 @@ impl StandardMatchGameMode {
     pub fn new(config: MatchConfiguration, team_max: usize, spawn_point: SpawnPoint) -> Self {
         Self {
             config,
-            state: StandardMatchState::WaitingForGame(WarmupState::new(2000)),
+            state: StandardMatchState::WaitingForGame(WarmupState::new()),
             spawn_point,
             teams: TeamSelection::new(team_max),
             preferred_positions: HashMap::new(),
@@ -999,6 +1001,16 @@ impl StandardMatchGameMode {
         let point = self.spawn_point;
         self.teams
             .update(ctx, |rink, team, _| get_spawnpoint(rink, team, point))
+    }
+    /// Puts the game mode back into warmup, as at the start of a new game.
+    fn reset_state(&mut self) {
+        self.state = StandardMatchState::WaitingForGame(WarmupState::new());
+    }
+    /// Ends the current game and resets the game mode with it, so that the rest of this tick
+    /// does not run the finished game's logic on the cleared server state.
+    fn finish_game(&mut self, ctx: &mut GameContext) {
+        ctx.new_game();
+        self.reset_state();
     }
     fn start_game(&mut self, preliminary_score: (u32, u32)) {
         self.state = StandardMatchState::Game(Match::start(
@@ -1020,15 +1032,17 @@ impl GameMode for StandardMatchGameMode {
     }
     fn before_tick(&mut self, ctx: &mut GameContext) {
         let (red, blue) = self.update_players(ctx);
-        let mut preliminary_score = None;
         match &mut self.state {
             StandardMatchState::WaitingForGame(warmup) => {
-                preliminary_score = warmup.before_tick(red, blue);
+                if let Some(score) = warmup.before_tick(red, blue) {
+                    self.start_game(score);
+                }
             }
-            StandardMatchState::Game(game) => game.before_tick(ctx),
-        }
-        if let Some(score) = preliminary_score {
-            self.start_game(score);
+            StandardMatchState::Game(game) => {
+                if game.before_tick(ctx) == GameProgress::Finished {
+                    self.finish_game(ctx);
+                }
+            }
         }
     }
     fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues {
@@ -1079,9 +1093,7 @@ impl GameMode for StandardMatchGameMode {
         }
     }
     fn game_started(&mut self, ctx: &mut GameContext) {
-        self.state = StandardMatchState::WaitingForGame(WarmupState::new(
-            self.config.time_warmup.saturating_mul(100),
-        ));
+        self.reset_state();
         let (width, length) = (ctx.rink.width, ctx.rink.length);
         let first_x = width / 2.0 - 0.4 * self.config.warmup_pucks.saturating_sub(1) as f32;
         for index in 0..self.config.warmup_pucks {
@@ -1094,6 +1106,9 @@ impl GameMode for StandardMatchGameMode {
                 Rot3::IDENTITY,
             ));
         }
+    }
+    fn game_abandoned(&mut self, _ctx: &mut GameContext) {
+        self.reset_state();
     }
     fn before_player_exit(
         &mut self,
@@ -1197,6 +1212,33 @@ mod tests {
                 faceoff: Faceoff::Center,
                 reset_clock: true,
             }
+        ));
+    }
+
+    #[test]
+    fn finished_game_returns_to_warmup_in_the_same_tick() {
+        let mut server = crate::server::test_server();
+        let mut ctx = server.context();
+        let config = MatchConfiguration::default();
+        let mut mode = StandardMatchGameMode::new(config, 5, SpawnPoint::Center);
+        let mut game = Match::start(config, HashMap::new(), (2, 1));
+        game.state = MatchState::Break(BreakState {
+            timer: 1,
+            kind: BreakKind::GameOver,
+        });
+        mode.state = StandardMatchState::Game(game);
+        ctx.objects
+            .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+
+        mode.before_tick(&mut ctx);
+
+        assert_eq!(ctx.objects.pucks().count(), 0);
+        assert!(matches!(
+            mode.state,
+            StandardMatchState::WaitingForGame(WarmupState {
+                time: WarmupState::TIME,
+                score: (0, 0),
+            })
         ));
     }
 
