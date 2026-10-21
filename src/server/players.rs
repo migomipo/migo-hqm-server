@@ -238,6 +238,15 @@ pub(crate) struct ServerMessages {
     pending: Vec<(MessageRecipients, Rc<HQMMessage>)>,
     persistent_messages: Vec<Rc<HQMMessage>>,
     recording_messages: Vec<Rc<HQMMessage>>,
+    /// Messages sent after a new game was asked for, which are sent in the new game. `None` while
+    /// no new game has been asked for.
+    next_game: Option<Vec<NextGameMessage>>,
+}
+
+/// A message held back for the next game by [ServerMessages::defer_to_next_game].
+enum NextGameMessage {
+    Broadcast(HQMMessage, MessageRetention, MessageRecording),
+    Directed(PlayerId, HQMMessage),
 }
 
 impl ServerMessages {
@@ -246,7 +255,14 @@ impl ServerMessages {
             pending: vec![],
             persistent_messages: vec![],
             recording_messages: vec![],
+            next_game: None,
         }
+    }
+
+    /// Holds back messages sent from now on until [ServerMessages::new_game], which sends them in
+    /// the new game. Team chat is not held back.
+    pub(crate) fn defer_to_next_game(&mut self) {
+        self.next_game.get_or_insert_with(Vec::new);
     }
 
     pub(crate) fn add_server_chat_message(&mut self, message: impl Into<Cow<'static, str>>) {
@@ -279,6 +295,10 @@ impl ServerMessages {
             player_index: sender_index,
             message: message.into(),
         };
+        if let Some(next_game) = &mut self.next_game {
+            next_game.push(NextGameMessage::Directed(receiver_id, chat));
+            return;
+        }
         self.pending
             .push((MessageRecipients::Player(receiver_id), Rc::new(chat)));
     }
@@ -297,6 +317,10 @@ impl ServerMessages {
         retention: MessageRetention,
         recording: MessageRecording,
     ) {
+        if let Some(next_game) = &mut self.next_game {
+            next_game.push(NextGameMessage::Broadcast(message, retention, recording));
+            return;
+        }
         let rc = Rc::new(message);
         if matches!(recording, MessageRecording::Include) {
             self.recording_messages.push(rc.clone());
@@ -326,8 +350,10 @@ impl ServerMessages {
     }
 
     /// Clears all messages and the players' message queues, removes the bots that belong to the
-    /// game, and announces the remaining players again.
+    /// game, and announces the remaining players again. Messages held back for the new game are
+    /// sent after that.
     pub(crate) fn new_game(&mut self, players: &mut PlayerSlots) {
+        let next_game = self.next_game.take().unwrap_or_default();
         self.flush(players);
         self.recording_messages.clear();
         self.persistent_messages.clear();
@@ -364,6 +390,17 @@ impl ServerMessages {
                 MessageRetention::ForLateJoiners,
                 MessageRecording::Include,
             );
+        }
+
+        for message in next_game {
+            match message {
+                NextGameMessage::Broadcast(message, retention, recording) => {
+                    self.broadcast_message(message, retention, recording)
+                }
+                NextGameMessage::Directed(receiver_id, message) => self
+                    .pending
+                    .push((MessageRecipients::Player(receiver_id), Rc::new(message))),
+            }
         }
     }
 

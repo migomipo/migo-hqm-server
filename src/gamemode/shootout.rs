@@ -437,13 +437,6 @@ impl ShootoutGameMode {
         }
     }
 
-    /// Ends the current game and resets the game mode with it, so that the rest of this tick
-    /// does not run the finished game's logic on the cleared server state.
-    fn finish_game(&mut self, ctx: &mut GameContext) {
-        ctx.new_game();
-        self.status = ServerStatus::waiting();
-    }
-
     fn start_game(&mut self, ctx: &mut GameContext) {
         let game = ShootoutGame::start(ctx, &self.config);
         self.status = ServerStatus::Game(game);
@@ -458,7 +451,7 @@ impl ShootoutGameMode {
     fn reset_game(&mut self, ctx: &mut GameContext, player_id: PlayerId) {
         if let Some(name) = ctx.require_admin(player_id) {
             info!("{} ({}) reset game", name, player_id);
-            self.finish_game(ctx);
+            ctx.new_game();
             ctx.messages
                 .add_server_chat_message(format!("Game reset by {name}"));
         }
@@ -511,7 +504,7 @@ impl GameMode for ShootoutGameMode {
             }
             ServerStatus::Game(game) => {
                 if game.before_tick(ctx, &self.config) == GameProgress::Finished {
-                    self.finish_game(ctx);
+                    ctx.new_game();
                 }
             }
         }
@@ -521,7 +514,7 @@ impl GameMode for ShootoutGameMode {
         if let ServerStatus::Game(game) = &mut self.status
             && game.tick(ctx, &self.config, events) == GameProgress::Finished
         {
-            self.finish_game(ctx);
+            ctx.new_game();
         }
         match &self.status {
             &ServerStatus::WaitingForGame { time, .. } => ScoreboardValues {
@@ -567,10 +560,6 @@ impl GameMode for ShootoutGameMode {
         let pos = Vec3::new(width / 2.0, 1.5, length / 2.0);
         let rot = Rot3::IDENTITY;
         ctx.objects.spawn_puck(Puck::new(pos, rot));
-    }
-
-    fn game_abandoned(&mut self, _ctx: &mut GameContext) {
-        self.status = ServerStatus::waiting();
     }
 
     fn before_player_exit(
@@ -664,18 +653,18 @@ mod tests {
     }
 
     #[test]
-    fn finished_game_returns_to_waiting_in_the_same_tick() {
-        let mut server = crate::server::test_server();
-        let mut ctx = server.context();
-        let mut mode = ShootoutGameMode::new(ShootoutGameConfiguration { attempts: 3 });
-        mode.status = ServerStatus::Game(finished_game());
-        ctx.objects
-            .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+    fn finished_game_is_replaced_by_a_new_one_in_the_same_tick() {
+        let mut t = TestServer::new(ShootoutGameMode::new(CONFIG));
+        t.join("player");
+        t.tick();
+        t.mode.status = ServerStatus::Game(finished_game());
+        t.ctx().objects.remove_all_pucks();
 
-        mode.before_tick(&mut ctx);
+        t.tick();
 
-        assert_eq!(ctx.objects.pucks().count(), 0);
-        assert!(is_waiting(&mode.status));
+        // game_started has reset the game mode and put the warmup puck on the ice.
+        assert!(is_waiting(&t.mode.status));
+        assert_eq!(t.ctx().objects.pucks().count(), 1);
     }
 
     #[test]

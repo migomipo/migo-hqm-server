@@ -1079,16 +1079,6 @@ impl StandardMatchGameMode {
         self.teams
             .update(ctx, |rink, team, _| get_spawnpoint(rink, team, point))
     }
-    /// Puts the game mode back into warmup, as at the start of a new game.
-    fn reset_state(&mut self) {
-        self.state = StandardMatchState::WaitingForGame(WarmupState::new());
-    }
-    /// Ends the current game and resets the game mode with it, so that the rest of this tick
-    /// does not run the finished game's logic on the cleared server state.
-    fn finish_game(&mut self, ctx: &mut GameContext) {
-        ctx.new_game();
-        self.reset_state();
-    }
     fn start_game(&mut self, preliminary_score: (u32, u32)) {
         self.state =
             StandardMatchState::Game(Match::start(&self.settings.config, preliminary_score));
@@ -1109,7 +1099,7 @@ impl GameMode for StandardMatchGameMode {
             }
             StandardMatchState::Game(game) => {
                 if game.before_tick(ctx, &self.settings) == GameProgress::Finished {
-                    self.finish_game(ctx);
+                    ctx.new_game();
                 }
             }
         }
@@ -1118,7 +1108,7 @@ impl GameMode for StandardMatchGameMode {
         if let StandardMatchState::Game(game) = &mut self.state
             && game.after_tick(ctx, &self.settings, events) == GameProgress::Finished
         {
-            self.finish_game(ctx);
+            ctx.new_game();
         }
         match &self.state {
             StandardMatchState::WaitingForGame(warmup) => warmup.scoreboard(),
@@ -1165,7 +1155,7 @@ impl GameMode for StandardMatchGameMode {
         CommandResult::Handled
     }
     fn game_started(&mut self, ctx: &mut GameContext) {
-        self.reset_state();
+        self.state = StandardMatchState::WaitingForGame(WarmupState::new());
         // Players can leave without before_player_exit, such as bots removed by the game mode
         // or at the end of a game, so forget everyone who is gone.
         self.settings
@@ -1184,9 +1174,6 @@ impl GameMode for StandardMatchGameMode {
                 Rot3::IDENTITY,
             ));
         }
-    }
-    fn game_abandoned(&mut self, _ctx: &mut GameContext) {
-        self.reset_state();
     }
     fn before_player_exit(
         &mut self,
@@ -1465,25 +1452,32 @@ mod tests {
     }
 
     #[test]
-    fn finished_game_returns_to_warmup_in_the_same_tick() {
-        let mut server = crate::server::test_server();
-        let mut ctx = server.context();
-        let config = MatchConfiguration::default();
-        let mut mode = StandardMatchGameMode::new(config, 5, SpawnPoint::Center);
+    fn finished_game_is_replaced_by_a_new_one_in_the_same_tick() {
+        let config = MatchConfiguration {
+            warmup_pucks: 3,
+            ..MatchConfiguration::default()
+        };
+        let mut t = TestServer::new(StandardMatchGameMode::new(config, 5, SpawnPoint::Center));
+        t.join("player");
+        t.tick();
         let mut game = Match::start(&config, (2, 1));
         game.state = MatchState::Break(BreakState {
             timer: 1,
             kind: BreakKind::GameOver,
         });
-        mode.state = StandardMatchState::Game(game);
+        t.mode.state = StandardMatchState::Game(game);
+        let mut ctx = t.ctx();
+        ctx.objects.remove_all_pucks();
         ctx.objects
             .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
 
-        mode.before_tick(&mut ctx);
+        t.tick();
 
-        assert_eq!(ctx.objects.pucks().count(), 0);
+        // The old game's puck is gone, and game_started has reset the game mode and put the
+        // warmup pucks on the ice.
+        assert_eq!(t.ctx().objects.pucks().count(), 3);
         assert!(matches!(
-            mode.state,
+            t.mode.state,
             StandardMatchState::WaitingForGame(WarmupState {
                 time: WarmupState::TIME,
                 score: (0, 0),

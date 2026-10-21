@@ -7,9 +7,7 @@ use crate::players::{
     PlayerListExt, PlayerSlots, ServerMessages, ServerPlayer as InternalServerPlayer,
     ServerPlayerData,
 };
-use crate::server::{
-    GameObject, HQMTickHistory, ObjectExt, ServerInternals, ServerSplit, SkaterLinks,
-};
+use crate::server::{GameObject, HQMTickHistory, ObjectExt, ServerSplit, SkaterLinks};
 use glam::Vec3;
 use glamx::Rot3;
 use std::borrow::Cow;
@@ -69,9 +67,10 @@ pub trait GameMode {
     /// Called when a new game begins, before the first [GameMode::before_tick] of that game.
     ///
     /// A new game begins on the first tick with a player on the server after the server has
-    /// started, after [GameContext::new_game] was called, or after the previous game was
-    /// abandoned. The server state, such as pucks and skaters, has been cleared at this point, so
-    /// this is the place to reset game mode state and set up the new game.
+    /// started or after the previous game was abandoned, and once the server is done with the
+    /// event in which [GameContext::new_game] was called. The server state, such as pucks and
+    /// skaters, has been cleared at this point, so this is the one place to reset game mode state
+    /// and set up the new game.
     fn game_started(&mut self, _ctx: &mut GameContext) {}
 
     /// Called when the last player has left the server during a game, right before the game is
@@ -79,9 +78,9 @@ pub trait GameMode {
     ///
     /// Bots do not count as players here. Bots added with [BotLifetime::Game] are removed when
     /// the game is reset, right after this. The server state of the abandoned game can still be
-    /// read here. [GameMode::game_started] is called once a player joins again. Games that end
-    /// through [GameContext::new_game] do not call this, as the game mode already knows about
-    /// them.
+    /// read here. Game mode state does not need to be reset here, as [GameMode::game_started] is
+    /// called once a player joins again. Games that end through [GameContext::new_game] do not
+    /// call this, as the game mode already knows about them.
     fn game_abandoned(&mut self, _ctx: &mut GameContext) {}
 
     /// Called right before a player is removed from the server.
@@ -127,7 +126,7 @@ pub struct GameContext<'a> {
     pub config: &'a mut ServerConfiguration,
     /// Physics configuration. Changes take effect from the next physics simulation step.
     pub physics_config: &'a mut PhysicsConfiguration,
-    internals: ServerInternals<'a>,
+    new_game_requested: &'a mut bool,
 }
 
 impl<'a> From<ServerSplit<'a>> for GameContext<'a> {
@@ -149,7 +148,7 @@ impl<'a> From<ServerSplit<'a>> for GameContext<'a> {
             rink: split.rink,
             config: split.config,
             physics_config: split.physics_config,
-            internals: split.internals,
+            new_game_requested: split.new_game_requested,
         }
     }
 }
@@ -163,21 +162,22 @@ impl GameContext<'_> {
         }
     }
 
-    /// Ends the current game and resets the server state.
+    /// Ends the current game and starts a new one.
     ///
-    /// Pucks, skaters, bots added with [BotLifetime::Game] and replay history are cleared
-    /// immediately, and the recording of the game is saved if recording is enabled.
-    /// [GameMode::game_started] is called on the next tick with a player on the server, so game
-    /// mode state should be reset there.
+    /// The current game goes on until the server is done with the event this hook is called for,
+    /// such as a tick's [GameMode::before_tick], a chat command or a player leaving. Then the
+    /// recording of the game is saved if recording is enabled, pucks, skaters, bots added with
+    /// [BotLifetime::Game] and replay history are cleared, and [GameMode::game_started] is called
+    /// for the new game, so game mode state should be reset there. If no players are left,
+    /// `game_started` is called on the first tick with a player instead.
+    ///
+    /// A new game asked for in [GameMode::after_tick] starts at the beginning of the next tick, so
+    /// the tick it was asked for in is still sent and recorded as part of the current game.
+    ///
+    /// Messages sent after this call are delivered in the new game, apart from team chat.
     pub fn new_game(&mut self) {
-        crate::server::new_game(
-            &mut self.internals,
-            self.config,
-            self.players.players,
-            self.messages.messages,
-            self.objects.objects,
-            self.replay.replay,
-        );
+        *self.new_game_requested = true;
+        self.messages.messages.defer_to_next_game();
     }
 
     /// Puts a player on the ice, or moves their skater if they are already on the ice.

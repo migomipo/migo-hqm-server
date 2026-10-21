@@ -361,17 +361,8 @@ impl SkaterLinks<'_> {
     }
 }
 
-/// Server state that game modes can not access directly, but that is needed to start a new game.
-pub(crate) struct ServerInternals<'a> {
-    replication: &'a mut ReplicationState,
-    recording: &'a mut RecordingState,
-    game_id: &'a mut u32,
-    has_current_game_been_active: &'a mut bool,
-    start_time: Timestamp,
-    save_recording: &'a mut dyn RecordingSaveMethod,
-}
-
-/// All server state, split into parts that can be borrowed independently.
+/// The server state that game modes can reach, split into parts that can be borrowed
+/// independently.
 pub(crate) struct ServerSplit<'a> {
     pub(crate) players: &'a mut PlayerSlots,
     pub(crate) messages: &'a mut ServerMessages,
@@ -381,43 +372,7 @@ pub(crate) struct ServerSplit<'a> {
     pub(crate) rink: &'a mut Rink,
     pub(crate) config: &'a mut ServerConfiguration,
     pub(crate) physics_config: &'a mut PhysicsConfiguration,
-    pub(crate) internals: ServerInternals<'a>,
-}
-
-/// Ends the current game and resets the server state.
-pub(crate) fn new_game(
-    internals: &mut ServerInternals,
-    config: &ServerConfiguration,
-    players: &mut PlayerSlots,
-    messages: &mut ServerMessages,
-    objects: &mut [Option<GameObject>],
-    replay: &mut HQMTickHistory,
-) {
-    *internals.game_id += 1;
-
-    *internals.has_current_game_been_active = false;
-
-    let old_recording_data = internals.recording.take_data();
-
-    if config.recording_enabled == ReplayRecording::On && !old_recording_data.is_empty() {
-        let size = old_recording_data.len();
-        let mut recording_data = BytesMut::with_capacity(size + 8);
-        recording_data.put_u32_le(0u32);
-        recording_data.put_u32_le(size as u32);
-        recording_data.put_slice(&old_recording_data);
-        let recording_data = recording_data.freeze();
-        internals
-            .save_recording
-            .save_recording_data(config, recording_data, internals.start_time);
-    }
-
-    messages.new_game(players);
-
-    replay.clear();
-    internals.replication.new_game();
-    internals.recording.new_game();
-
-    objects.fill(None);
+    pub(crate) new_game_requested: &'a mut bool,
 }
 
 pub(crate) struct HQMServer {
@@ -433,6 +388,9 @@ pub(crate) struct HQMServer {
     pub start_time: Timestamp,
 
     has_current_game_been_active: bool,
+    /// Whether a game mode asked for a new game with [GameContext::new_game], which
+    /// [HQMServer::start_requested_game] carries out.
+    new_game_requested: bool,
 
     pub(crate) ban: Box<dyn BanCheck>,
     pub(crate) save_recording: Box<dyn RecordingSaveMethod>,
@@ -453,6 +411,7 @@ impl HQMServer {
             game_id: 1,
 
             has_current_game_been_active: false,
+            new_game_requested: false,
             ban,
             save_recording,
 
@@ -638,6 +597,7 @@ impl HQMServer {
             );
             let msg = format!("{name} joined");
             self.state.player_message_state.add_server_chat_message(msg);
+            self.start_requested_game(behaviour);
         }
     }
 
@@ -974,6 +934,7 @@ impl HQMServer {
                 let command = &split[0][1..];
                 let arg = if split.len() < 2 { "" } else { split[1] };
                 self.process_command(command, arg, player_id, behaviour);
+                self.start_requested_game(behaviour);
             } else if !self.is_muted {
                 match player.is_muted {
                     MuteStatus::NotMuted => {
@@ -1009,6 +970,7 @@ impl HQMServer {
             let msg = format!("{player_name} exited");
             self.state.player_message_state.add_server_chat_message(msg);
         }
+        self.start_requested_game(behaviour);
     }
 
     fn disconnect_player<B: GameMode>(
@@ -1114,6 +1076,10 @@ impl HQMServer {
     }
 
     fn advance_tick<B: GameMode>(&mut self, behaviour: &mut B) -> Option<TickOutput> {
+        // A new game asked for in after_tick starts here, so that the tick it was asked for in
+        // is still sent and recorded as part of the old game.
+        self.start_requested_game(behaviour);
+
         if self.real_player_count() == 0 {
             if self.has_current_game_been_active {
                 info!("Game {} abandoned", self.game_id);
@@ -1124,14 +1090,13 @@ impl HQMServer {
         }
 
         if !self.has_current_game_been_active {
-            self.start_time = Timestamp::now();
-            self.has_current_game_been_active = true;
-            behaviour.game_started(&mut self.context());
-            info!("New game {} started", self.game_id);
+            self.start_game(behaviour);
         }
 
         self.remove_inactive_players(behaviour);
+        self.start_requested_game(behaviour);
         behaviour.before_tick(&mut self.context());
+        self.start_requested_game(behaviour);
 
         let (game_step, forced_view, scoreboard) =
             if let Some((forced_view, tick)) = self.state.replay.pop_replay_tick() {
@@ -1180,15 +1145,15 @@ impl HQMServer {
         GameContext::from(self.split())
     }
 
-    /// Splits the server into parts that can be borrowed independently.
+    /// Splits the server state that game modes can reach into parts that can be borrowed
+    /// independently.
     pub(crate) fn split(&mut self) -> ServerSplit<'_> {
         let HQMServerState {
             player_message_state: ServerPlayersAndMessages { players, messages },
             objects,
             puck_counter,
             replay,
-            replication,
-            recording,
+            ..
         } = &mut self.state;
         ServerSplit {
             players,
@@ -1199,28 +1164,61 @@ impl HQMServer {
             rink: &mut self.rink,
             config: &mut self.config,
             physics_config: &mut self.physics_config,
-            internals: ServerInternals {
-                replication,
-                recording,
-                game_id: &mut self.game_id,
-                has_current_game_been_active: &mut self.has_current_game_been_active,
-                start_time: self.start_time,
-                save_recording: self.save_recording.as_mut(),
-            },
+            new_game_requested: &mut self.new_game_requested,
         }
     }
 
+    /// Starts a game and calls [GameMode::game_started].
+    fn start_game<B: GameMode>(&mut self, behaviour: &mut B) {
+        self.start_time = Timestamp::now();
+        self.has_current_game_been_active = true;
+        behaviour.game_started(&mut self.context());
+        info!("New game {} started", self.game_id);
+    }
+
+    /// Carries out a new game that a game mode asked for with [GameContext::new_game].
+    ///
+    /// This is called once the server is done with the event in which the game mode asked for it,
+    /// such as a tick's [GameMode::before_tick], a chat command or a player leaving. The new game
+    /// starts right away if there are players, and otherwise on the first tick with a player.
+    pub(crate) fn start_requested_game<B: GameMode>(&mut self, behaviour: &mut B) {
+        if !self.new_game_requested {
+            return;
+        }
+        info!("Game {} ended", self.game_id);
+        self.new_game();
+        if self.real_player_count() > 0 {
+            self.start_game(behaviour);
+        }
+    }
+
+    /// Ends the current game and resets the server state.
     pub fn new_game(&mut self) {
-        let ServerSplit {
-            players,
-            messages,
-            objects,
-            replay,
-            config,
-            mut internals,
-            ..
-        } = self.split();
-        new_game(&mut internals, config, players, messages, objects, replay);
+        self.game_id += 1;
+        self.has_current_game_been_active = false;
+        self.new_game_requested = false;
+
+        let old_recording_data = self.state.recording.take_data();
+        if self.config.recording_enabled == ReplayRecording::On && !old_recording_data.is_empty() {
+            let size = old_recording_data.len();
+            let mut recording_data = BytesMut::with_capacity(size + 8);
+            recording_data.put_u32_le(0u32);
+            recording_data.put_u32_le(size as u32);
+            recording_data.put_slice(&old_recording_data);
+            let recording_data = recording_data.freeze();
+            self.save_recording
+                .save_recording_data(&self.config, recording_data, self.start_time);
+        }
+
+        let state = &mut self.state;
+        let player_message_state = &mut state.player_message_state;
+        player_message_state
+            .messages
+            .new_game(&mut player_message_state.players);
+        state.replay.clear();
+        state.replication.new_game();
+        state.recording.new_game();
+        state.objects.fill(None);
     }
 
     fn write_recording_tick(&mut self, scoreboard: &ScoreboardValues) {
@@ -1394,6 +1392,7 @@ pub async fn run_server<B: GameMode>(
     info!("Server started");
 
     behaviour.init(&mut server.context());
+    server.start_requested_game(&mut behaviour);
 
     // Set up timers
     let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
@@ -1696,7 +1695,7 @@ mod tests {
     }
 
     #[test]
-    fn context_new_game_resets_state_and_keeps_later_messages() {
+    fn context_new_game_resets_state_once_requested_and_keeps_later_messages() {
         let mut server = test_server();
         let player_id = server
             .state
@@ -1714,8 +1713,15 @@ mod tests {
         ctx.new_game();
         ctx.messages.add_server_chat_message("after");
 
+        // The current game goes on until the server carries out the request.
+        assert_eq!(server.game_id, game_id);
+        assert!(server.state.objects.iter().any(Option::is_some));
+
+        server.start_requested_game(&mut EmptyGameMode);
+
         assert_eq!(server.game_id, game_id + 1);
-        assert!(!server.has_current_game_been_active);
+        // A player is on the server, so the new game has started right away.
+        assert!(server.has_current_game_been_active);
         assert!(server.state.objects.iter().all(Option::is_none));
         server.state.player_message_state.flush_messages();
         let player = server
@@ -1979,7 +1985,9 @@ mod tests {
         let server_bot = ctx.add_bot("server bot", BotLifetime::Server).unwrap();
 
         ctx.new_game();
+        t.server.start_requested_game(&mut t.mode);
 
+        let ctx = t.ctx();
         assert!(ctx.players.get(game_bot).is_none());
         assert!(ctx.players.get(server_bot).is_some());
         let messages = t.take_messages(player);
@@ -1991,6 +1999,82 @@ mod tests {
             name: "server bot".to_owned(),
             team: None,
         }));
+    }
+
+    #[test]
+    fn a_requested_new_game_starts_once_the_event_is_handled() {
+        #[derive(Default)]
+        struct RestartsOnRequest {
+            events: Vec<String>,
+        }
+
+        impl GameMode for RestartsOnRequest {
+            fn before_tick(&mut self, _ctx: &mut GameContext) {}
+
+            fn after_tick(
+                &mut self,
+                _ctx: &mut GameContext,
+                _events: &[PhysicsEvent],
+            ) -> ScoreboardValues {
+                ScoreboardValues::default()
+            }
+
+            fn handle_command(
+                &mut self,
+                ctx: &mut GameContext,
+                _cmd: &str,
+                _arg: &str,
+                _player_id: PlayerId,
+            ) -> CommandResult {
+                ctx.new_game();
+                // The current game is still there for the rest of the hook.
+                let pucks = ctx.objects.pucks().count();
+                self.events.push(format!("restart with {pucks} puck"));
+                ctx.messages.add_server_chat_message("Restarting");
+                CommandResult::Handled
+            }
+
+            fn game_started(&mut self, ctx: &mut GameContext) {
+                self.events.push("started".to_owned());
+                ctx.objects
+                    .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+            }
+
+            fn game_abandoned(&mut self, _ctx: &mut GameContext) {
+                self.events.push("abandoned".to_owned());
+            }
+
+            fn before_player_exit(
+                &mut self,
+                ctx: &mut GameContext,
+                _player_id: PlayerId,
+                _reason: ExitReason,
+            ) {
+                ctx.new_game();
+            }
+        }
+
+        let mut t = TestServer::new(RestartsOnRequest::default());
+        let player = t.join("player");
+        t.tick();
+        assert_eq!(t.mode.events, ["started"]);
+        t.take_messages(player);
+
+        t.chat(player, "/restart");
+        assert_eq!(t.mode.events, ["started", "restart with 1 puck", "started"]);
+        assert_eq!(t.ctx().objects.pucks().count(), 1);
+        assert_eq!(t.take_chats(player), ["Restarting"]);
+
+        // The last player leaving asks for a new game, which waits for a player to join, and
+        // the game it ended is not abandoned.
+        t.leave(player);
+        t.tick();
+        assert_eq!(t.ctx().objects.pucks().count(), 0);
+        assert_eq!(t.mode.events.len(), 3);
+        t.join("next");
+        t.tick();
+        assert_eq!(t.mode.events.last().unwrap(), "started");
+        assert!(!t.mode.events.contains(&"abandoned".to_owned()));
     }
 
     #[test]

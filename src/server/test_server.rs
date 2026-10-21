@@ -132,6 +132,7 @@ impl<M: GameMode> TestServer<M> {
     pub(crate) fn new(mut mode: M) -> Self {
         let mut server = test_server();
         mode.init(&mut server.context());
+        server.start_requested_game(&mut mode);
         Self {
             server,
             mode,
