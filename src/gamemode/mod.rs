@@ -376,13 +376,18 @@ pub struct Replay<'a> {
 }
 
 impl Replay<'_> {
-    /// Adds a replay to the replay queue.
+    /// Adds the ticks from `start_step` to `end_step` to the replay queue, and returns how many
+    /// ticks were added.
+    ///
+    /// Only ticks that are still in the replay history can be added, so fewer ticks are added than
+    /// requested if part of the range has not been played yet, or is older than the history
+    /// length set with [Replay::set_history_length]. The history length is 0 until it is set.
     pub fn add_replay_to_queue(
         &mut self,
         start_step: u32,
         end_step: u32,
         force_view: Option<PlayerId>,
-    ) {
+    ) -> u32 {
         self.replay
             .add_replay_to_queue(start_step, end_step, force_view)
     }

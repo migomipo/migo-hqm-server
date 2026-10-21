@@ -985,15 +985,36 @@ impl Match {
             }
         };
         let progress = self.apply(ctx, settings, transition);
-        if let Some((start_step, end_step, force_view)) = self.game_state.replay {
-            if end_step <= ctx.replay.game_step() {
-                ctx.replay
-                    .add_replay_to_queue(start_step, end_step, force_view);
-                ctx.messages.add_server_chat_message("Goal replay");
-                self.game_state.replay = None;
-            }
+        if let Some((start_step, end_step, force_view)) = self.game_state.replay
+            && end_step <= ctx.replay.game_step()
+        {
+            self.game_state.replay = None;
+            self.queue_goal_replay(ctx, start_step, end_step, force_view);
         }
         progress
+    }
+    /// Queues the goal replay once all of its ticks have been played.
+    ///
+    /// The goal stoppage was shortened by the full replay length, so if part of the replay is
+    /// missing from the history, the stoppage is lengthened by the missing ticks to keep the pause
+    /// before the faceoff.
+    fn queue_goal_replay(
+        &mut self,
+        ctx: &mut GameContext,
+        start_step: u32,
+        end_step: u32,
+        force_view: Option<PlayerId>,
+    ) {
+        let queued = ctx
+            .replay
+            .add_replay_to_queue(start_step, end_step, force_view);
+        if queued > 0 {
+            ctx.messages.add_server_chat_message("Goal replay");
+        }
+        let missing = (end_step - start_step + 1).saturating_sub(queued);
+        if let MatchState::Break(state) = &mut self.state {
+            state.timer += missing;
+        }
     }
 }
 
@@ -1179,7 +1200,7 @@ impl GameMode for StandardMatchGameMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::test_server::TestServer;
+    use crate::server::test_server::{EmptyGameMode, TestServer};
 
     fn player(index: usize) -> PlayerId {
         PlayerId {
@@ -1500,5 +1521,47 @@ mod tests {
                 "Unknown command /reset"
             ]
         );
+    }
+
+    #[test]
+    fn goal_replay_missing_from_the_history_lengthens_the_stoppage() {
+        let mut t = TestServer::new(EmptyGameMode);
+        let player = t.join("player");
+        let history = &mut t.server.state.replay;
+        history.set_history_capacity(3);
+        for _ in 0..5 {
+            history.advance_step();
+            history.record_tick(std::array::from_fn(|_| crate::protocol::ObjectPacket::None));
+        }
+        t.take_messages(player);
+        let config = MatchConfiguration::default();
+        let goal_stoppage = |timer| {
+            let mut game = Match::start(&config, (0, 0));
+            game.state = MatchState::Break(BreakState {
+                timer,
+                kind: BreakKind::Stoppage(Stoppage {
+                    cause: StoppageCause::Goal,
+                    next_faceoff: Faceoff::Center,
+                }),
+            });
+            game
+        };
+        let timer = |game: &Match| match &game.state {
+            MatchState::Break(state) => state.timer,
+            MatchState::Playing(_) => panic!("expected a stoppage"),
+        };
+
+        // Steps 2 to 4 are in the history, so 2 of the 5 replay ticks are missing.
+        let mut game = goal_stoppage(100);
+        game.queue_goal_replay(&mut t.ctx(), 0, 4, None);
+        assert_eq!(timer(&game), 102);
+        assert!(t.ctx().replay.is_in_replay());
+        assert_eq!(t.take_chats(player), ["Goal replay"]);
+
+        // None of these steps have been played, so there is no replay to announce.
+        let mut game = goal_stoppage(100);
+        game.queue_goal_replay(&mut t.ctx(), 10, 12, None);
+        assert_eq!(timer(&game), 103);
+        assert_eq!(t.take_chats(player), Vec::<String>::new());
     }
 }

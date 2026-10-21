@@ -1619,12 +1619,14 @@ mod tests {
             history.record_tick([const { ObjectPacket::None }; 32]);
         }
 
-        history.add_replay_to_queue(0, 3, None);
+        assert_eq!(history.add_replay_to_queue(0, 3, None), 2);
         let queued_steps: Vec<_> = std::iter::from_fn(|| history.pop_replay_tick())
             .map(|(_, tick)| tick.game_step)
             .collect();
 
         assert_eq!(queued_steps, vec![1, 2]);
+        assert_eq!(history.add_replay_to_queue(2, 1, None), 0);
+        assert!(!history.is_in_replay());
     }
 
     #[test]
