@@ -44,6 +44,8 @@ pub(crate) mod players;
 pub mod recording;
 mod replay;
 mod replication;
+#[cfg(test)]
+pub(crate) mod test_server;
 
 pub use replay::HQMTickHistory;
 use replication::ReplicationState;
@@ -1477,6 +1479,7 @@ mod tests {
     use crate::game::PhysicsEvent;
     use crate::gamemode::ServerPlayerType;
     use crate::players::{MAX_PLAYERS, ServerPlayer};
+    use crate::server::test_server::{EmptyGameMode, Received, TestServer};
 
     fn network_player() -> ServerPlayer {
         ServerPlayer::new_network_player(
@@ -1950,20 +1953,13 @@ mod tests {
             (pos - start).with_y(0.0).length()
         }
 
-        let mut server = test_server();
-        let mut behaviour = DrivesBots::default();
-        let player_id = server
-            .state
-            .player_message_state
-            .add_player("test", "127.0.0.1:12345".parse().unwrap())
-            .unwrap();
-        for _ in 0..100 {
-            server.advance_tick(&mut behaviour);
-        }
+        let mut t = TestServer::new(DrivesBots::default());
+        let player = t.join("test");
+        t.ticks(100);
 
-        let skating = behaviour.skating.unwrap();
-        let standing = behaviour.standing.unwrap();
-        let ctx = server.context();
+        let skating = t.mode.skating.unwrap();
+        let standing = t.mode.standing.unwrap();
+        let ctx = t.ctx();
         for bot in [skating, standing] {
             let bot = ctx.players.get(bot).unwrap();
             assert!(bot.player_type() == ServerPlayerType::Bot);
@@ -1975,35 +1971,23 @@ mod tests {
             skated > 0.1 && skated > 10.0 * stood,
             "skated {skated} m, stood {stood} m"
         );
+        assert!(t.take_messages(player).contains(&Received::PlayerUpdate {
+            index: skating.index,
+            name: "skating".to_owned(),
+            team: Some(Team::Red),
+        }));
 
-        server.state.player_message_state.flush_messages();
-        let player = server
-            .state
-            .player_message_state
-            .players
-            .get_player(player_id)
-            .unwrap();
-        let ServerPlayerData::NetworkPlayer { data } = &player.data else {
-            panic!("expected a network player");
-        };
-        assert!(data.messages.iter().any(|message| matches!(
-            message.as_ref(),
-            HQMMessage::PlayerUpdate { player_index, data: Some(data) }
-                if *player_index == skating.index && &*data.player_name == "skating"
-        )));
-
-        server.state.remove_player(player_id, true);
-        server.advance_tick(&mut behaviour);
-        assert_eq!(behaviour.abandoned, 1);
-        let players = &server.state.player_message_state.players;
-        assert_eq!(players.iter_players().count(), 0);
-        assert!(server.state.objects.iter().all(Option::is_none));
+        t.leave(player);
+        t.tick();
+        assert_eq!(t.mode.abandoned, 1);
+        assert_eq!(t.ctx().players.iter().count(), 0);
+        assert!(t.server.state.objects.iter().all(Option::is_none));
     }
 
     #[test]
     fn add_bot_returns_none_when_all_player_slots_are_taken() {
-        let mut server = test_server();
-        let mut ctx = server.context();
+        let mut t = TestServer::new(EmptyGameMode);
+        let mut ctx = t.ctx();
         let bots: Vec<_> = (0..MAX_PLAYERS)
             .map(|i| ctx.add_bot(&format!("bot {i}")).unwrap())
             .collect();
@@ -2017,64 +2001,41 @@ mod tests {
 
     #[test]
     fn bots_can_chat_to_everyone_and_to_their_team() {
-        let mut server = test_server();
-        let [red, blue] =
-            [("red", "127.0.0.1:1"), ("blue", "127.0.0.1:2")].map(|(name, address)| {
-                server
-                    .state
-                    .player_message_state
-                    .add_player(name, address.parse().unwrap())
-                    .unwrap()
-            });
-        let mut ctx = server.context();
+        let mut t = TestServer::new(EmptyGameMode);
+        let red = t.join("red");
+        let blue = t.join("blue");
+        let mut ctx = t.ctx();
         let bot = ctx.add_bot("bot").unwrap();
         let benched_bot = ctx.add_bot("benched").unwrap();
         for (player, team) in [(red, Team::Red), (blue, Team::Blue), (bot, Team::Red)] {
             assert!(ctx.spawn_skater(player, team, Vec3::ZERO, Rot3::IDENTITY, false));
         }
-        server.state.player_message_state.flush_messages();
-        let messages = |server: &HQMServer, player_id| {
-            let player = server
-                .state
-                .player_message_state
-                .players
-                .get_player(player_id)
-                .unwrap();
-            let ServerPlayerData::NetworkPlayer { data } = &player.data else {
-                panic!("expected a network player");
-            };
-            data.messages.clone()
-        };
-        let start = [red, blue].map(|id| messages(&server, id).len());
+        t.take_messages(red);
+        t.take_messages(blue);
 
-        let mut ctx = server.context();
+        let mut ctx = t.ctx();
         ctx.add_user_chat_message("hello everyone", bot);
         ctx.add_user_team_message("hello red", bot);
         ctx.add_user_team_message("not on the ice", benched_bot);
-        server.state.player_message_state.flush_messages();
 
-        let received = |player_id, start| {
-            let messages = messages(&server, player_id);
-            for message in &messages[start..] {
-                if let HQMMessage::Chat { player_index, .. } = message.as_ref() {
-                    assert_eq!(*player_index, Some(bot.index));
-                }
-            }
-            messages[start..]
-                .iter()
-                .map(|message| describe_message(message))
-                .collect::<Vec<_>>()
+        let chat = |text: &str| Received::Chat {
+            from: Some(bot.index),
+            text: text.to_owned(),
         };
-        let i = bot.index;
+        let update = |name: &str| Received::PlayerUpdate {
+            index: bot.index,
+            name: name.to_owned(),
+            team: Some(Team::Red),
+        };
         assert_eq!(
-            received(red, start[0]),
+            t.take_messages(red),
             [
-                "chat hello everyone".to_owned(),
-                format!("update {i} [Red] bot Red"),
-                "chat hello red".to_owned(),
-                format!("update {i} bot Red"),
+                chat("hello everyone"),
+                update("[Red] bot"),
+                chat("hello red"),
+                update("bot"),
             ]
         );
-        assert_eq!(received(blue, start[1]), ["chat hello everyone"]);
+        assert_eq!(t.take_messages(blue), [chat("hello everyone")]);
     }
 }

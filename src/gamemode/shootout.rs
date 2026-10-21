@@ -587,7 +587,7 @@ impl GameMode for ShootoutGameMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::players::PlayerListExt;
+    use crate::server::test_server::{Received, TestServer};
 
     const CONFIG: ShootoutGameConfiguration = ShootoutGameConfiguration { attempts: 3 };
 
@@ -673,24 +673,84 @@ mod tests {
 
     #[test]
     fn reset_command_returns_to_waiting() {
-        let mut server = crate::server::test_server();
-        let admin = server
-            .state
-            .player_message_state
-            .add_player("admin", "127.0.0.1:1".parse().unwrap())
-            .unwrap();
-        server
-            .state
-            .player_message_state
-            .players
-            .get_player_mut(admin)
-            .unwrap()
-            .is_admin = true;
-        let mut mode = ShootoutGameMode::new(ShootoutGameConfiguration { attempts: 3 });
-        mode.status = ServerStatus::Game(finished_game());
+        let mut t = TestServer::new(ShootoutGameMode::new(CONFIG));
+        let admin = t.join_admin("admin");
+        t.mode.status = ServerStatus::Game(finished_game());
+        t.take_messages(admin);
 
-        mode.handle_command(&mut server.context(), "reset", "", admin);
+        t.chat(admin, "/reset");
 
-        assert!(is_waiting(&mode.status));
+        assert!(is_waiting(&t.mode.status));
+        assert_eq!(t.take_chats(admin), ["Game reset by admin"]);
+    }
+
+    fn attempt_over(t: &TestServer<ShootoutGameMode>) -> bool {
+        matches!(
+            &t.mode.status,
+            ServerStatus::Game(ShootoutGame {
+                state: ShootoutAttemptState::Over(_),
+                ..
+            })
+        )
+    }
+
+    fn attacking(t: &TestServer<ShootoutGameMode>, team: Team) -> bool {
+        matches!(
+            &t.mode.status,
+            ServerStatus::Game(game)
+                if game.game_state.team == team
+                    && matches!(game.state, ShootoutAttemptState::Attack(_))
+        )
+    }
+
+    #[test]
+    fn a_shootout_runs_from_joining_teams_to_the_next_game() {
+        let config = ShootoutGameConfiguration { attempts: 1 };
+        let mut t = TestServer::new(ShootoutGameMode::new(config));
+        let red = t.join("red");
+        let blue = t.join("blue");
+        t.press_join(red, Team::Red);
+        t.press_join(blue, Team::Blue);
+        t.tick();
+        assert_eq!(t.ctx().players.count_team_members(), (1, 1));
+        t.take_messages(red);
+
+        // Warmup runs out and the first attempt starts.
+        t.tick_until(WARMUP_TIME + START_DELAY, |t| attacking(t, Team::Red));
+        assert_eq!(t.take_chats(red), ["Last attempt for Red"]);
+
+        // Move the defender aside and slide the puck into the blue net.
+        let mut ctx = t.ctx();
+        let center_x = ctx.rink.width / 2.0;
+        let defender = ctx.objects.skater_mut(blue).unwrap();
+        defender.teleport(Vec3::new(1.0, 1.5, 5.0), Rot3::IDENTITY);
+        let (_, puck) = ctx.objects.pucks_mut().next().unwrap();
+        puck.body.pos = Vec3::new(center_x, 0.5, 15.0);
+        puck.body.linear_velocity = Vec3::new(0.0, 0.0, -0.3);
+        t.tick_until(500, attempt_over);
+        assert_eq!(
+            t.take_messages(red),
+            [Received::Goal {
+                team: Team::Red,
+                scorer: None,
+                assist: None,
+            }]
+        );
+        let scoreboard = t.tick().unwrap();
+        assert_eq!((scoreboard.red_score, scoreboard.blue_score), (1, 0));
+        assert!(!scoreboard.game_over);
+
+        // Blue's attempt runs out of time without a shot, and Red wins.
+        t.tick_until(PAUSE_BETWEEN_ATTEMPTS, |t| attacking(t, Team::Blue));
+        assert_eq!(t.take_chats(red), ["Last attempt for Blue"]);
+        t.tick_until(ATTEMPT_TIME, attempt_over);
+        assert_eq!(t.take_chats(red), ["Miss"]);
+        assert!(t.tick().unwrap().game_over);
+
+        // After the pause a new game starts, and the players are back on their teams.
+        t.tick_until(PAUSE_BETWEEN_ATTEMPTS, |t| is_waiting(&t.mode.status));
+        t.tick();
+        assert_eq!(t.ctx().players.count_team_members(), (1, 1));
+        assert_eq!(t.ctx().objects.pucks().count(), 1);
     }
 }
