@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use glam::Vec3;
 use glamx::Rot3;
 
+use crate::game::RinkSideOfLine::{BlueSide, RedSide};
 use crate::game::{
     PhysicsEvent, PlayerId, PlayerIndex, Puck, PuckId, RulesState, ScoreboardValues, Team,
 };
@@ -372,6 +373,16 @@ impl Match {
             config.spawn_player_altitude,
         );
         let puck_pos = spot.center + Vec3::Y * config.spawn_puck_altitude;
+        // The puck starts inside the zone at a zone faceoff, so the attacking team is already in
+        // it. Without this, the puck touching the blue line and coming back in would count as
+        // entering the zone, and could be called offside.
+        let offside = if rink.blue_zone_blue_line.side_of_line(puck_pos, 0.0) == BlueSide {
+            Offside::InZone(Team::Red)
+        } else if rink.red_zone_blue_line.side_of_line(puck_pos, 0.0) == RedSide {
+            Offside::InZone(Team::Blue)
+        } else {
+            Offside::Neutral
+        };
         ctx.objects.spawn_puck(Puck::new(puck_pos, Rot3::IDENTITY));
         let mut started_goalies = HashSet::new();
         let mut red_players = Vec::new();
@@ -403,7 +414,7 @@ impl Match {
         }
         PlayingState {
             icing: Icing::No,
-            offside: Offside::Neutral,
+            offside,
             twoline: TwoLine::No,
             pass: None,
             started_goalies,
@@ -774,20 +785,24 @@ impl PlayingState {
                 playing.offside = Offside::InZone(team);
             }
         }
-        if let Some(pass) = playing.pass {
-            if pass.team == team && Self::twoline_is_active(config, blue_line, pass.from) {
-                let twoline_offside_players =
-                    Self::players_past(ctx, team, Some(pass.player), !blue_line);
-                if !twoline_offside_players.is_empty() {
-                    playing.twoline = TwoLine::Warning(TwoLineWarning {
-                        passing_team: team,
-                        side: pass.side,
-                        pass_origin: pass.from.unwrap(),
-                        twoline_offside_players,
-                    });
-                    ctx.messages
-                        .add_server_chat_message("Two-line pass warning");
-                }
+        // A two-line pass warning stays as it is until it is called or waved off, so a pass that
+        // crosses two lines keeps the players that were offside at the first one.
+        if let Some(pass) = playing.pass
+            && matches!(playing.twoline, TwoLine::No)
+            && pass.team == team
+            && Self::twoline_is_active(config, blue_line, pass.from)
+        {
+            let twoline_offside_players =
+                Self::players_past(ctx, team, Some(pass.player), !blue_line);
+            if !twoline_offside_players.is_empty() {
+                playing.twoline = TwoLine::Warning(TwoLineWarning {
+                    passing_team: team,
+                    side: pass.side,
+                    pass_origin: pass.from.unwrap(),
+                    twoline_offside_players,
+                });
+                ctx.messages
+                    .add_server_chat_message("Two-line pass warning");
             }
         }
         None
@@ -1123,6 +1138,17 @@ impl GameMode for StandardMatchGameMode {
             .set_history_length(REPLAY_HISTORY_LENGTH as usize);
     }
     fn before_tick(&mut self, ctx: &mut GameContext) {
+        // A goalie who has left the ice is no longer the goalie when they come back. This runs
+        // before players join, so it sees everyone who left since the last tick.
+        if let StandardMatchState::Game(Match {
+            state: MatchState::Playing(playing),
+            ..
+        }) = &mut self.state
+        {
+            playing
+                .started_goalies
+                .retain(|&player| ctx.objects.skater(player).is_some());
+        }
         let (red, blue) = self.update_players(ctx);
         match &mut self.state {
             StandardMatchState::WaitingForGame(warmup) => {
@@ -1518,6 +1544,166 @@ mod tests {
                 score: (0, 0),
             })
         ));
+    }
+
+    fn add_player(server: &mut crate::server::HQMServer, name: &str, port: u16) -> PlayerId {
+        server
+            .state
+            .player_message_state
+            .add_player(name, ([127, 0, 0, 1], port).into())
+            .unwrap()
+    }
+
+    #[test]
+    fn zone_faceoffs_count_as_already_inside_the_zone() {
+        let mut server = crate::server::test_server();
+        let passer = add_player(&mut server, "passer", 1);
+        let teammate = add_player(&mut server, "teammate", 2);
+        let mut ctx = server.context();
+        for player in [passer, teammate] {
+            assert!(ctx.spawn_skater(player, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false));
+        }
+        let config = MatchConfiguration {
+            offside: OffsideConfiguration::Delayed,
+            ..MatchConfiguration::default()
+        };
+        let positions = HashMap::new();
+        let offside_after = |ctx: &mut GameContext, faceoff| {
+            Match::setup_faceoff(ctx, &config, &positions, faceoff).offside
+        };
+
+        assert!(matches!(
+            offside_after(&mut ctx, Faceoff::Center),
+            Offside::Neutral
+        ));
+        assert!(matches!(
+            offside_after(&mut ctx, Faceoff::Offside(Team::Red, RinkSide::Lower)),
+            Offside::Neutral
+        ));
+        assert!(matches!(
+            offside_after(&mut ctx, Faceoff::Defensive(Team::Red, RinkSide::Higher)),
+            Offside::InZone(Team::Blue)
+        ));
+
+        // A faceoff in Blue's zone. The puck touching the blue line and coming back in is not
+        // offside, even though Red's players are in the zone.
+        let mut playing = Match::setup_faceoff(
+            &mut ctx,
+            &config,
+            &positions,
+            Faceoff::Defensive(Team::Blue, RinkSide::Lower),
+        );
+        assert!(matches!(playing.offside, Offside::InZone(Team::Red)));
+        let (puck, _) = ctx.objects.pucks().next().unwrap();
+        playing.pass = Some(Pass {
+            team: Team::Red,
+            side: RinkSide::Lower,
+            from: None,
+            player: passer,
+        });
+        let mut game_state = Match::start(&config, (0, 0)).game_state;
+        let transition = PlayingState::events(
+            &mut game_state,
+            &config,
+            &mut ctx,
+            &[PhysicsEvent::PuckEnteredOffensiveZone {
+                team: Team::Red,
+                puck,
+            }],
+            &mut playing,
+        );
+        assert!(matches!(transition, MatchTransition::Continue));
+        assert!(matches!(playing.offside, Offside::InZone(Team::Red)));
+    }
+
+    #[test]
+    fn goalie_who_leaves_the_ice_is_not_the_goalie_on_return() {
+        let mut server = crate::server::test_server();
+        let goalie = add_player(&mut server, "goalie", 1);
+        let center = add_player(&mut server, "center", 2);
+        let mut ctx = server.context();
+        for player in [goalie, center] {
+            assert!(ctx.spawn_skater(player, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false));
+        }
+        let config = MatchConfiguration::default();
+        let mut mode = StandardMatchGameMode::new(config, 5, SpawnPoint::Center);
+        mode.settings.preferred_positions.insert(goalie, "G");
+        let mut game = Match::start(&config, (0, 0));
+        game.apply(
+            &mut ctx,
+            &mode.settings,
+            MatchTransition::StartPlaying {
+                faceoff: Faceoff::Center,
+                reset_clock: true,
+            },
+        );
+        mode.state = StandardMatchState::Game(game);
+        let is_goalie = |mode: &StandardMatchGameMode| match &mode.state {
+            StandardMatchState::Game(Match {
+                state: MatchState::Playing(playing),
+                ..
+            }) => playing.started_goalies.contains(&goalie),
+            _ => panic!("expected play to be on"),
+        };
+
+        mode.before_tick(&mut ctx);
+        assert!(is_goalie(&mode));
+
+        assert!(ctx.move_to_spectator(goalie));
+        mode.before_tick(&mut ctx);
+        assert!(ctx.spawn_skater(goalie, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false));
+        mode.before_tick(&mut ctx);
+        assert!(!is_goalie(&mode));
+    }
+
+    #[test]
+    fn two_line_pass_warning_keeps_the_players_offside_at_the_first_line() {
+        let mut server = crate::server::test_server();
+        let passer = add_player(&mut server, "passer", 1);
+        let past_center = add_player(&mut server, "past center", 2);
+        let past_blue_line = add_player(&mut server, "past blue line", 3);
+        let mut ctx = server.context();
+        // Red attacks towards the blue zone, at low z.
+        let length = ctx.rink.length;
+        let center_z = ctx.rink.center_line.z;
+        let blue_line_z = ctx.rink.blue_zone_blue_line.z;
+        for (player, z) in [
+            (passer, length - 15.0),
+            (past_center, center_z - 3.0),
+            (past_blue_line, blue_line_z - 3.0),
+        ] {
+            let pos = Vec3::new(15.0, 1.5, z);
+            assert!(ctx.spawn_skater(player, Team::Red, pos, Rot3::IDENTITY, false));
+        }
+        let config = MatchConfiguration {
+            twoline_pass: TwoLinePassConfiguration::Double,
+            ..MatchConfiguration::default()
+        };
+        let mut playing = PlayingState {
+            icing: Icing::No,
+            offside: Offside::Neutral,
+            twoline: TwoLine::No,
+            pass: Some(Pass {
+                team: Team::Red,
+                side: RinkSide::Lower,
+                from: Some(PassLocation::ReachedOwnBlue),
+                player: passer,
+            }),
+            started_goalies: HashSet::new(),
+            puck_touches: HashMap::new(),
+            faceoff_step: 0,
+        };
+
+        // The pass crosses the center line, and then the offensive blue line.
+        PlayingState::enter_zone(&config, &mut ctx, &mut playing, Team::Red, false);
+        PlayingState::enter_zone(&config, &mut ctx, &mut playing, Team::Red, true);
+
+        let TwoLine::Warning(warning) = &playing.twoline else {
+            panic!("expected a two-line pass warning");
+        };
+        let mut offside_players = warning.twoline_offside_players.clone();
+        offside_players.sort_by_key(|player| player.index.0);
+        assert_eq!(offside_players, [past_center, past_blue_line]);
     }
 
     #[test]
