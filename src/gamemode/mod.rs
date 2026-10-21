@@ -96,7 +96,7 @@ pub trait GameMode {
     }
 
     /// Called right after a new player has joined the server.
-    fn after_player_join(&mut self, _ctx: &mut GameContext, _player_index: PlayerId) {}
+    fn after_player_join(&mut self, _ctx: &mut GameContext, _player_id: PlayerId) {}
 
     /// Gets the server team size that will be shown in the server list.
     fn server_list_team_size(&self) -> u32 {

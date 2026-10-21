@@ -186,12 +186,12 @@ impl AttackState {
         let mut blue_players = vec![];
 
         for player in ctx.players.iter() {
-            let player_index = player.id;
+            let player_id = player.id;
             if let Some(team) = player.team() {
                 if team == Team::Red {
-                    red_players.push(player_index);
+                    red_players.push(player_id);
                 } else if team == Team::Blue {
-                    blue_players.push(player_index);
+                    blue_players.push(player_id);
                 }
             }
         }
@@ -214,7 +214,7 @@ impl AttackState {
                 Team::Blue => (blue_players, red_players, blue_rot, red_rot, red_goalie_pos),
             };
         let center_pos = Vec3::new(width / 2.0, 1.5, length / 2.0);
-        for (index, player_index) in attacking_players.into_iter().enumerate() {
+        for (index, player_id) in attacking_players.into_iter().enumerate() {
             let mut pos = center_pos + attacking_rot * Vec3::new(0.0, 0.0, 3.0);
             if index > 0 {
                 let dist = ((index / 2) + 1) as f32;
@@ -222,9 +222,9 @@ impl AttackState {
                 let side = Vec3::new(-1.5 * dist, 0.0, 0.0);
                 pos += attacking_rot * side;
             }
-            ctx.spawn_skater(player_index, team, pos, attacking_rot, false);
+            ctx.spawn_skater(player_id, team, pos, attacking_rot, false);
         }
-        for (index, player_index) in defending_players.into_iter().enumerate() {
+        for (index, player_id) in defending_players.into_iter().enumerate() {
             let mut pos = goalie_pos;
             if index > 0 {
                 let dist = ((index / 2) + 1) as f32;
@@ -232,7 +232,7 @@ impl AttackState {
                 let side = Vec3::new(-1.5 * dist, 0.0, 0.0);
                 pos += defending_rot * side;
             }
-            ctx.spawn_skater(player_index, defending_team, pos, defending_rot, false);
+            ctx.spawn_skater(player_id, defending_team, pos, defending_rot, false);
         }
         Self {
             time: ATTEMPT_TIME,

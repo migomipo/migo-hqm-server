@@ -630,11 +630,11 @@ impl HQMServer {
             return;
         }
 
-        if let Some(player_index) = self.add_player(&name, addr) {
-            behaviour.after_player_join(&mut self.context(), player_index);
+        if let Some(player_id) = self.add_player(&name, addr) {
+            behaviour.after_player_join(&mut self.context(), player_id);
             info!(
                 "{} ({}) joined server from address {:?}",
-                name, player_index, addr
+                name, player_id, addr
             );
             let msg = format!("{name} joined");
             self.state.player_message_state.add_server_chat_message(msg);

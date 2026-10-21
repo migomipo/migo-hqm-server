@@ -40,7 +40,7 @@ impl GameMode for PermanentWarmup {
         let rink = &*ctx.rink;
         let width = rink.width;
         let length = rink.length;
-        let puck_line_start = width / 2.0 - 0.4 * ((warmup_pucks - 1) as f32);
+        let puck_line_start = width / 2.0 - 0.4 * warmup_pucks.saturating_sub(1) as f32;
 
         for i in 0..warmup_pucks {
             let pos = Vec3::new(puck_line_start + 0.8 * (i as f32), 1.5, length / 2.0);
@@ -77,5 +77,24 @@ mod tests {
         t.chat(player, "/sp c");
 
         assert_eq!(t.take_chats(player), ["Unknown command /sp"]);
+    }
+
+    #[test]
+    fn warmup_pucks_are_centered_and_zero_pucks_is_allowed() {
+        for pucks in [0, 1, 3] {
+            let mut t = TestServer::new(PermanentWarmup::new(pucks, SpawnPoint::Center));
+            t.join("player");
+            t.tick();
+
+            let ctx = t.ctx();
+            let center_x = ctx.rink.width / 2.0;
+            let offsets: Vec<f32> = ctx
+                .objects
+                .pucks()
+                .map(|(_, puck)| puck.body.pos.x - center_x)
+                .collect();
+            assert_eq!(offsets.len(), pucks);
+            assert!(offsets.iter().sum::<f32>().abs() < 1e-4, "{offsets:?}");
+        }
     }
 }
