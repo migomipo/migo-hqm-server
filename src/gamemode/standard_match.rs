@@ -468,16 +468,17 @@ impl PlayingState {
                 Team::Blue => &ctx.rink.red_zone_blue_line,
             }
         };
+        // Red attacks towards the blue end of the rink, and Blue towards the red end.
+        let past_side = match team {
+            Team::Red => BlueSide,
+            Team::Blue => RedSide,
+        };
         ctx.objects
             .skaters()
             .filter(|&(id, skater)| {
-                let pos = skater.feet_position();
                 Some(id) != ignore
                     && ctx.players.get(id).and_then(|p| p.team()) == Some(team)
-                    && match team {
-                        Team::Red => pos.z < line.z - line.width,
-                        Team::Blue => pos.z > line.z + line.width / 2.0,
-                    }
+                    && line.side_of_line(skater.feet_position(), 0.0) == past_side
             })
             .map(|(id, _)| id)
             .collect()
@@ -1552,6 +1553,49 @@ mod tests {
             .player_message_state
             .add_player(name, ([127, 0, 0, 1], port).into())
             .unwrap()
+    }
+
+    #[test]
+    fn players_count_as_past_a_line_at_the_same_distance_for_both_teams() {
+        let mut server = crate::server::test_server();
+        let red = add_player(&mut server, "red", 1);
+        let blue = add_player(&mut server, "blue", 2);
+        let mut ctx = server.context();
+        let red_line_z = ctx.rink.blue_zone_blue_line.z;
+        let blue_line_z = ctx.rink.red_zone_blue_line.z;
+        let half_width = ctx.rink.blue_zone_blue_line.width / 2.0;
+
+        for offset in [half_width - 0.01, half_width + 0.01] {
+            // Each skater is the same distance past the middle of the line into the zone they
+            // attack: Red towards low z, Blue towards high z.
+            let at = |z| Vec3::new(15.0, 1.5, z);
+            assert!(ctx.spawn_skater(
+                red,
+                Team::Red,
+                at(red_line_z - offset),
+                Rot3::IDENTITY,
+                false
+            ));
+            assert!(ctx.spawn_skater(
+                blue,
+                Team::Blue,
+                at(blue_line_z + offset),
+                Rot3::IDENTITY,
+                false
+            ));
+
+            let past = offset > half_width;
+            assert_eq!(
+                PlayingState::team_in_zone(&ctx, Team::Red, None),
+                past,
+                "{offset}"
+            );
+            assert_eq!(
+                PlayingState::team_in_zone(&ctx, Team::Blue, None),
+                past,
+                "{offset}"
+            );
+        }
     }
 
     #[test]

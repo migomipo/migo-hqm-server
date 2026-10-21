@@ -85,11 +85,13 @@ pub struct RinkLine {
 }
 
 impl RinkLine {
+    /// Which side of the line a sphere with the given radius is on. It is on the line if any part
+    /// of it touches the line.
     pub fn side_of_line(&self, pos: Vec3, radius: f32) -> RinkSideOfLine {
         let dot = pos.z - self.z;
         if dot > (self.width / 2.0) + radius {
             RedSide
-        } else if dot < (-self.width) - radius {
+        } else if dot < -(self.width / 2.0) - radius {
             BlueSide
         } else {
             On
@@ -781,6 +783,25 @@ pub enum PhysicsEvent {
 mod tests {
     use super::*;
     use std::f32::consts::FRAC_PI_2;
+
+    #[test]
+    fn both_sides_of_a_line_start_at_its_edges() {
+        let line = RinkLine {
+            z: 10.0,
+            width: 0.3,
+        };
+        let at = |z: f32, radius| line.side_of_line(Vec3::new(5.0, 0.0, z), radius);
+
+        // The edges are half the line width from the middle on both sides.
+        for (offset, side) in [(0.16, RedSide), (0.14, On), (-0.14, On), (-0.16, BlueSide)] {
+            assert_eq!(at(10.0 + offset, 0.0), side, "offset {offset}");
+        }
+        // A sphere is on the line while any part of it touches it.
+        assert_eq!(at(10.3, 0.1), RedSide);
+        assert_eq!(at(10.2, 0.1), On);
+        assert_eq!(at(9.8, 0.1), On);
+        assert_eq!(at(9.7, 0.1), BlueSide);
+    }
 
     #[test]
     fn teleport_moves_the_stick_along_and_stops_the_skater() {
