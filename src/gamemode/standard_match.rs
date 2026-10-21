@@ -189,7 +189,10 @@ enum BreakKind {
         period_end_step: Option<u32>,
         too_late_printed: bool,
     },
-    GameOver,
+    GameOver {
+        /// Whether the game was decided by a goal, whose message is shown during the break.
+        after_goal: bool,
+    },
 }
 #[derive(Debug, Clone)]
 struct Stoppage {
@@ -238,7 +241,7 @@ impl BreakState {
         match &self.kind {
             BreakKind::Stoppage(_) if game_over => MatchTransition::Break(BreakState {
                 timer: config.time_intermission * 100,
-                kind: BreakKind::GameOver,
+                kind: BreakKind::GameOver { after_goal: false },
             }),
             BreakKind::Stoppage(stoppage) => MatchTransition::StartPlaying {
                 faceoff: stoppage.next_faceoff,
@@ -248,7 +251,7 @@ impl BreakState {
                 faceoff: Faceoff::Center,
                 reset_clock: true,
             },
-            BreakKind::GameOver => MatchTransition::Finish,
+            BreakKind::GameOver { .. } => MatchTransition::Finish,
         }
     }
     fn scoreboard(&self) -> (RulesState, u32, bool) {
@@ -266,7 +269,11 @@ impl BreakState {
                 ..
             }) => (RulesState::Icing, 0, false),
             BreakKind::Intermission { .. } => (RulesState::default(), 0, false),
-            BreakKind::GameOver => (RulesState::default(), 0, true),
+            BreakKind::GameOver { after_goal } => (
+                RulesState::default(),
+                if after_goal { self.timer } else { 0 },
+                true,
+            ),
         }
     }
     fn handle_events(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) {
@@ -406,17 +413,30 @@ impl Match {
     }
 }
 
-/// Ticks of stoppage timer after a goal.
+/// Seconds of pause after a goal, until the next faceoff or, for a goal that decides the game,
+/// until the next game.
 ///
-/// The stoppage timer stands still while a replay is shown, so with a replay the pause from the
-/// goal to the faceoff is the timer plus the replay length. The timer is chosen so that the pause
-/// is at least `time_break` seconds, and so that at least [MIN_PAUSE_AFTER_REPLAY] ticks are left
-/// after the replay, which starts [REPLAY_AFTER_GOAL] ticks after the goal.
-fn goal_stoppage_time(time_break: u32, replay_length: Option<u32>) -> u32 {
-    let break_time = time_break * 100;
+/// A deciding goal goes straight to game over, so its one pause lasts as long as the longer of
+/// the break and the intermission.
+fn goal_pause(config: &MatchConfiguration, game_over: bool) -> u32 {
+    if game_over {
+        config.time_break.max(config.time_intermission)
+    } else {
+        config.time_break
+    }
+}
+
+/// Ticks of break timer after a goal, for a pause of `pause` seconds.
+///
+/// The break timer stands still while a replay is shown, so with a replay the pause after the
+/// goal is the timer plus the replay length. The timer is chosen so that the pause is at least
+/// `pause` seconds, and so that at least [MIN_PAUSE_AFTER_REPLAY] ticks are left after the
+/// replay, which starts [REPLAY_AFTER_GOAL] ticks after the goal.
+fn goal_stoppage_time(pause: u32, replay_length: Option<u32>) -> u32 {
+    let pause_time = pause * 100;
     match replay_length {
-        None => break_time,
-        Some(replay_length) => break_time
+        None => pause_time,
+        Some(replay_length) => pause_time
             .saturating_sub(replay_length)
             .max(REPLAY_AFTER_GOAL + MIN_PAUSE_AFTER_REPLAY),
     }
@@ -612,8 +632,17 @@ impl PlayingState {
             game_state.replay = Some((start, end, goal_scorer.or(last_touch)));
             end - start + 1
         });
-        let stoppage_time = goal_stoppage_time(config.time_break, replay_length);
-        Self::stoppage(stoppage_time, StoppageCause::Goal, Faceoff::Center)
+        let game_over = game_state.game_over(config);
+        let timer = goal_stoppage_time(goal_pause(config, game_over), replay_length);
+        if game_over {
+            // The game over shows right away, along with the goal message.
+            BreakState {
+                timer,
+                kind: BreakKind::GameOver { after_goal: true },
+            }
+        } else {
+            Self::stoppage(timer, StoppageCause::Goal, Faceoff::Center)
+        }
     }
     fn touch(
         game_state: &MatchGameState,
@@ -919,7 +948,7 @@ impl Match {
                 self.state = MatchState::Break(BreakState {
                     timer: settings.config.time_intermission * 100,
                     kind: if self.game_state.game_over(&settings.config) {
-                        BreakKind::GameOver
+                        BreakKind::GameOver { after_goal: false }
                     } else {
                         BreakKind::Intermission {
                             period_end_step: Some(ctx.replay.game_step()),
@@ -1012,9 +1041,13 @@ impl Match {
         if queued > 0 {
             ctx.messages.add_server_chat_message("Goal replay");
         }
-        let planned = goal_stoppage_time(config.time_break, Some(end_step - start_step + 1));
-        let actual = goal_stoppage_time(config.time_break, (queued > 0).then_some(queued));
         if let MatchState::Break(state) = &mut self.state {
+            let pause = goal_pause(
+                config,
+                matches!(state.kind, BreakKind::GameOver { after_goal: true }),
+            );
+            let planned = goal_stoppage_time(pause, Some(end_step - start_step + 1));
+            let actual = goal_stoppage_time(pause, (queued > 0).then_some(queued));
             // The timer has been running since the goal, so only the difference is applied.
             state.timer = (state.timer + actual).saturating_sub(planned);
         }
@@ -1279,12 +1312,14 @@ mod tests {
     }
 
     #[test]
-    fn stoppage_after_a_deciding_goal_turns_into_game_over() {
+    fn stoppage_ending_with_the_game_decided_turns_into_game_over() {
+        // Deciding goals go to game over right away, but an admin can set a deciding score
+        // during any stoppage.
         let config = MatchConfiguration::default();
         let mut state = BreakState {
             timer: 1,
             kind: BreakKind::Stoppage(Stoppage {
-                cause: StoppageCause::Goal,
+                cause: StoppageCause::Offside,
                 next_faceoff: Faceoff::Center,
             }),
         };
@@ -1294,7 +1329,7 @@ mod tests {
         assert!(matches!(
             transition,
             MatchTransition::Break(BreakState {
-                kind: BreakKind::GameOver,
+                kind: BreakKind::GameOver { after_goal: false },
                 timer,
             }) if timer == config.time_intermission * 100
         ));
@@ -1330,7 +1365,7 @@ mod tests {
         assert!(matches!(
             decided.state,
             MatchState::Break(BreakState {
-                kind: BreakKind::GameOver,
+                kind: BreakKind::GameOver { after_goal: false },
                 ..
             })
         ));
@@ -1463,7 +1498,7 @@ mod tests {
         let mut game = Match::start(&config, (2, 1));
         game.state = MatchState::Break(BreakState {
             timer: 1,
-            kind: BreakKind::GameOver,
+            kind: BreakKind::GameOver { after_goal: false },
         });
         t.mode.state = StandardMatchState::Game(game);
         let mut ctx = t.ctx();
@@ -1482,6 +1517,76 @@ mod tests {
                 time: WarmupState::TIME,
                 score: (0, 0),
             })
+        ));
+    }
+
+    #[test]
+    fn deciding_goal_shows_game_over_at_once_with_a_single_pause() {
+        let mut server = crate::server::test_server();
+        let mut ctx = server.context();
+        let config = MatchConfiguration {
+            first_to: 2,
+            ..MatchConfiguration::default()
+        };
+        let settings = MatchSettings::new(config);
+        let mut game = Match::start(&config, (1, 0));
+        game.apply(
+            &mut ctx,
+            &settings,
+            MatchTransition::StartPlaying {
+                faceoff: Faceoff::Center,
+                reset_clock: true,
+            },
+        );
+        let (puck, _) = ctx.objects.pucks().next().unwrap();
+        let MatchState::Playing(playing) = &mut game.state else {
+            panic!("expected play to be on");
+        };
+
+        // The equalizer does not decide the game, so play goes on after the break.
+        let stoppage = PlayingState::goal(
+            &mut game.game_state,
+            &config,
+            &mut ctx,
+            playing,
+            Team::Blue,
+            puck,
+        );
+        assert!(matches!(
+            stoppage.kind,
+            BreakKind::Stoppage(Stoppage {
+                cause: StoppageCause::Goal,
+                ..
+            })
+        ));
+        assert_eq!(stoppage.timer, config.time_break * 100);
+        assert_eq!(stoppage.scoreboard(), (RulesState::default(), 1000, false));
+
+        // The winner shows game over and the goal message together, for the longer of the break
+        // and the intermission, and then the game ends.
+        let game_over = PlayingState::goal(
+            &mut game.game_state,
+            &config,
+            &mut ctx,
+            playing,
+            Team::Red,
+            puck,
+        );
+        assert_eq!(game.game_state.score, (2, 1));
+        assert!(matches!(
+            game_over.kind,
+            BreakKind::GameOver { after_goal: true }
+        ));
+        let pause = config.time_break.max(config.time_intermission) * 100;
+        assert_eq!(game_over.timer, pause);
+        assert_eq!(game_over.scoreboard(), (RulesState::default(), pause, true));
+        let mut last_tick = BreakState {
+            timer: 1,
+            ..game_over
+        };
+        assert!(matches!(
+            last_tick.before_tick(&config, true),
+            MatchTransition::Finish
         ));
     }
 
