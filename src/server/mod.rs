@@ -18,7 +18,7 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::udp::UdpFramed;
 use tracing::{info, warn};
 
-use crate::gamemode::{ExitReason, GameContext, GameMode};
+use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 
 use self::ban::{BanCheck, BanCheckResponse};
 use self::recording::RecordingSaveMethod;
@@ -747,7 +747,15 @@ impl HQMServer {
             }
             ChatCommand::Builtin(_) => {}
             ChatCommand::GameMode { command, arg } => {
-                behaviour.handle_command(&mut self.context(), command, arg, player_id);
+                let result = behaviour.handle_command(&mut self.context(), command, arg, player_id);
+                if result == CommandResult::Unknown {
+                    self.state
+                        .player_message_state
+                        .add_directed_server_chat_message(
+                            format!("Unknown command /{command}"),
+                            player_id,
+                        );
+                }
             }
         }
     }
@@ -2037,5 +2045,57 @@ mod tests {
             ]
         );
         assert_eq!(t.take_messages(blue), [chat("hello everyone")]);
+    }
+
+    #[test]
+    fn unknown_game_mode_commands_get_a_reply_to_the_sender() {
+        #[derive(Default)]
+        struct KnowsOneCommand {
+            received: Vec<String>,
+        }
+
+        impl GameMode for KnowsOneCommand {
+            fn before_tick(&mut self, _ctx: &mut GameContext) {}
+
+            fn after_tick(
+                &mut self,
+                _ctx: &mut GameContext,
+                _events: &[PhysicsEvent],
+            ) -> ScoreboardValues {
+                ScoreboardValues::default()
+            }
+
+            fn handle_command(
+                &mut self,
+                _ctx: &mut GameContext,
+                cmd: &str,
+                arg: &str,
+                _player_id: PlayerId,
+            ) -> CommandResult {
+                self.received.push(format!("{cmd}({arg})"));
+                if cmd == "known" {
+                    CommandResult::Handled
+                } else {
+                    CommandResult::Unknown
+                }
+            }
+        }
+
+        let mut t = TestServer::new(KnowsOneCommand::default());
+        let player = t.join("player");
+        let other = t.join("other");
+        t.take_messages(player);
+        t.take_messages(other);
+
+        t.chat(player, "/known with args");
+        t.chat(player, "/version");
+        t.chat(player, "/typo");
+
+        assert_eq!(t.mode.received, ["known(with args)", "typo()"]);
+        let chats = t.take_chats(player);
+        assert_eq!(chats.len(), 2, "{chats:?}");
+        assert!(chats[0].starts_with("Migo HQM Server, version"));
+        assert_eq!(chats[1], "Unknown command /typo");
+        assert_eq!(t.take_chats(other), Vec::<String>::new());
     }
 }

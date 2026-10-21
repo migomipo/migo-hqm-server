@@ -35,15 +35,6 @@ impl GameMode for PermanentWarmup {
         ScoreboardValues::default()
     }
 
-    fn handle_command(
-        &mut self,
-        _ctx: &mut GameContext,
-        _cmd: &str,
-        _arg: &str,
-        _player_index: PlayerId,
-    ) {
-    }
-
     fn game_started(&mut self, ctx: &mut GameContext) {
         let warmup_pucks = self.pucks;
         let rink = &*ctx.rink;
@@ -69,5 +60,22 @@ impl GameMode for PermanentWarmup {
 
     fn server_list_team_size(&self) -> u32 {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::test_server::TestServer;
+
+    #[test]
+    fn warmup_has_no_commands() {
+        let mut t = TestServer::new(PermanentWarmup::new(1, SpawnPoint::Center));
+        let player = t.join("player");
+        t.take_messages(player);
+
+        t.chat(player, "/sp c");
+
+        assert_eq!(t.take_chats(player), ["Unknown command /sp"]);
     }
 }

@@ -6,7 +6,7 @@ use tracing::info;
 use crate::game::{PhysicsEvent, PlayerId, RulesState};
 use crate::game::{PlayerIndex, Puck, PuckId, ScoreboardValues, Team};
 use crate::gamemode::util::{GameProgress, SpawnPoint, TeamSelection, get_spawnpoint};
-use crate::gamemode::{ExitReason, GameContext, GameMode};
+use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 
 /// Ticks of warmup once both teams have players, before the countdown to the first attempt.
 const WARMUP_TIME: u32 = 1000;
@@ -537,7 +537,13 @@ impl GameMode for ShootoutGameMode {
         }
     }
 
-    fn handle_command(&mut self, ctx: &mut GameContext, cmd: &str, arg: &str, player_id: PlayerId) {
+    fn handle_command(
+        &mut self,
+        ctx: &mut GameContext,
+        cmd: &str,
+        arg: &str,
+        player_id: PlayerId,
+    ) -> CommandResult {
         match cmd {
             "reset" | "resetgame" => {
                 self.reset_game(ctx, player_id);
@@ -547,8 +553,9 @@ impl GameMode for ShootoutGameMode {
                     self.force_player_off_ice(ctx, player_id, force_player_index);
                 }
             }
-            _ => {}
+            _ => return CommandResult::Unknown,
         }
+        CommandResult::Handled
     }
 
     fn game_started(&mut self, ctx: &mut GameContext) {
@@ -752,5 +759,23 @@ mod tests {
         t.tick();
         assert_eq!(t.ctx().players.count_team_members(), (1, 1));
         assert_eq!(t.ctx().objects.pucks().count(), 1);
+    }
+
+    #[test]
+    fn shootout_commands_are_handled_and_others_are_unknown() {
+        let mut t = TestServer::new(ShootoutGameMode::new(CONFIG));
+        let player = t.join("player");
+        t.take_messages(player);
+
+        t.chat(player, "/reset");
+        t.chat(player, "/sp c");
+
+        assert_eq!(
+            t.take_chats(player),
+            [
+                "Please log in before using that command",
+                "Unknown command /sp"
+            ]
+        );
     }
 }

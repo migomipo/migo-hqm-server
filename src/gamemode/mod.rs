@@ -50,14 +50,20 @@ pub trait GameMode {
     /// tick are shown.
     fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues;
 
-    /// Called when a chat message starting with "/" is received from a user. This method is called between ticks and not during, so you can do anything here.
+    /// Called when a chat message starting with "/" is received from a user, unless it is one of
+    /// the server's built-in commands. This method is called between ticks and not during, so you
+    /// can do anything here.
+    ///
+    /// Returns whether the game mode knows the command. If it returns [CommandResult::Unknown],
+    /// the server tells the user that the command does not exist.
     fn handle_command(
         &mut self,
         _ctx: &mut GameContext,
         _cmd: &str,
         _arg: &str,
-        _player_index: PlayerId,
-    ) {
+        _player_id: PlayerId,
+    ) -> CommandResult {
+        CommandResult::Unknown
     }
 
     /// Called when a new game begins, before the first [GameMode::before_tick] of that game.
@@ -567,6 +573,16 @@ impl<'a> ServerPlayer<'a> {
     pub fn player_type(&self) -> ServerPlayerType {
         player_type(self.player)
     }
+}
+
+/// Whether a game mode knows a chat command, returned from [GameMode::handle_command].
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CommandResult {
+    /// The game mode knows the command, whether or not it succeeded. Telling the user about
+    /// problems, such as invalid arguments or missing admin rights, is up to the game mode.
+    Handled,
+    /// The game mode does not know the command, and the server tells the user so.
+    Unknown,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

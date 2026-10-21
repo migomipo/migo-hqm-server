@@ -7,7 +7,7 @@ use crate::game::{
     PhysicsEvent, PlayerId, PlayerIndex, Puck, PuckId, RulesState, ScoreboardValues, Team,
 };
 use crate::gamemode::util::{GameProgress, SpawnPoint, TeamSelection, get_spawnpoint};
-use crate::gamemode::{ExitReason, GameContext, GameMode};
+use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 
 mod commands;
 mod faceoff;
@@ -1107,7 +1107,7 @@ impl GameMode for StandardMatchGameMode {
         command: &str,
         arg: &str,
         player: PlayerId,
-    ) {
+    ) -> CommandResult {
         match command {
             "set" => self.handle_set(ctx, arg, player),
             "sp" | "setposition" => {
@@ -1136,8 +1136,9 @@ impl GameMode for StandardMatchGameMode {
                     }
                 }
             }
-            _ => {}
+            _ => return CommandResult::Unknown,
         }
+        CommandResult::Handled
     }
     fn game_started(&mut self, ctx: &mut GameContext) {
         self.reset_state();
@@ -1178,6 +1179,7 @@ impl GameMode for StandardMatchGameMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::test_server::TestServer;
 
     fn player(index: usize) -> PlayerId {
         PlayerId {
@@ -1477,5 +1479,26 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn match_commands_are_handled_and_others_are_unknown() {
+        let mode = StandardMatchGameMode::new(MatchConfiguration::default(), 5, SpawnPoint::Center);
+        let mut t = TestServer::new(mode);
+        let player = t.join("player");
+        t.take_messages(player);
+
+        t.chat(player, "/sp lw");
+        t.chat(player, "/sp nowhere");
+        t.chat(player, "/reset");
+
+        assert_eq!(
+            t.take_chats(player),
+            [
+                "Preferred faceoff position set to LW",
+                "Invalid faceoff position",
+                "Unknown command /reset"
+            ]
+        );
     }
 }
