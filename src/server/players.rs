@@ -1,4 +1,5 @@
 use crate::game::{PlayerId, PlayerIndex, PlayerInput, SkaterHand, Team};
+use crate::gamemode::BotLifetime;
 use crate::server::{HQMClientVersion, ObjectSlot, PacketNumber};
 use arraydeque::ArrayDeque;
 use arraydeque::behavior::Wrapping;
@@ -324,11 +325,37 @@ impl ServerMessages {
         }
     }
 
-    /// Clears all messages and the players' message queues, and announces the players again.
+    /// Clears all messages and the players' message queues, removes the bots that belong to the
+    /// game, and announces the remaining players again.
     pub(crate) fn new_game(&mut self, players: &mut PlayerSlots) {
         self.flush(players);
         self.recording_messages.clear();
         self.persistent_messages.clear();
+
+        let game_bots: Vec<PlayerId> = players
+            .iter_players()
+            .filter(|(_, player)| {
+                matches!(
+                    player.data,
+                    ServerPlayerData::Bot {
+                        lifetime: BotLifetime::Game
+                    }
+                )
+            })
+            .map(|(player_id, _)| player_id)
+            .collect();
+        for player_id in game_bots {
+            players.remove(player_id);
+            // Clients knew the bot in the previous game, so tell them it is gone.
+            self.broadcast_message(
+                HQMMessage::PlayerUpdate {
+                    player_index: player_id.index,
+                    data: None,
+                },
+                MessageRetention::Transient,
+                MessageRecording::Exclude,
+            );
+        }
 
         for (player_id, player) in players.iter_players_mut() {
             player.reset(player_id.index);
@@ -345,9 +372,10 @@ impl ServerMessages {
         &mut self,
         players: &mut PlayerSlots,
         player_name: &str,
+        lifetime: BotLifetime,
     ) -> Option<PlayerId> {
         let player_index = players.find_empty_slot()?;
-        let new_player = ServerPlayer::new_bot(player_name);
+        let new_player = ServerPlayer::new_bot(player_name, lifetime);
         let update = new_player.get_update_message(player_index);
         let player_id = players.insert(player_index, new_player);
         self.broadcast_message(
@@ -603,7 +631,7 @@ pub(crate) struct NetworkPlayerData {
 
 pub(crate) enum ServerPlayerData {
     NetworkPlayer { data: NetworkPlayerData },
-    Bot {},
+    Bot { lifetime: BotLifetime },
 }
 
 pub struct ServerPlayer {
@@ -653,13 +681,13 @@ impl ServerPlayer {
         }
     }
 
-    pub fn new_bot(player_name: &str) -> Self {
+    pub fn new_bot(player_name: &str, lifetime: BotLifetime) -> Self {
         ServerPlayer {
             player_name: player_name.into(),
             player_name_red: format!("[Red] {player_name}").into(),
             player_name_blue: format!("[Blue] {player_name}").into(),
             object: None,
-            data: ServerPlayerData::Bot {},
+            data: ServerPlayerData::Bot { lifetime },
             is_admin: false,
             input: Default::default(),
             is_muted: MuteStatus::NotMuted,
@@ -762,44 +790,27 @@ impl ServerPlayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::test_server::{Received, chats, received};
 
     #[test]
     fn reused_player_slot_invalidates_the_previous_player_id() {
         let mut slots = PlayerSlots::new();
         let index = PlayerIndex(0);
-        let previous_id = slots.insert(index, ServerPlayer::new_bot("previous"));
+        let previous_id = slots.insert(
+            index,
+            ServerPlayer::new_bot("previous", BotLifetime::Server),
+        );
 
         assert!(slots.remove(previous_id).is_some());
 
-        let current_id = slots.insert(index, ServerPlayer::new_bot("current"));
+        let current_id = slots.insert(index, ServerPlayer::new_bot("current", BotLifetime::Server));
         assert_ne!(previous_id, current_id);
         assert!(slots.get_player(previous_id).is_none());
         assert!(slots.get_player(current_id).is_some());
     }
 
     fn chat_messages(state: &ServerPlayersAndMessages, player_id: PlayerId) -> Vec<String> {
-        let player = state.players.get_player(player_id).unwrap();
-        let ServerPlayerData::NetworkPlayer { data } = &player.data else {
-            panic!("expected a network player");
-        };
-        data.messages
-            .iter()
-            .filter_map(|message| match message.as_ref() {
-                HQMMessage::Chat { message, .. } => Some(message.to_string()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn goal_message_count(state: &ServerPlayersAndMessages, player_id: PlayerId) -> usize {
-        let player = state.players.get_player(player_id).unwrap();
-        let ServerPlayerData::NetworkPlayer { data } = &player.data else {
-            panic!("expected a network player");
-        };
-        data.messages
-            .iter()
-            .filter(|message| matches!(message.as_ref(), HQMMessage::Goal { .. }))
-            .count()
+        chats(received(&state.players, player_id))
     }
 
     #[test]
@@ -837,7 +848,11 @@ mod tests {
             .add_player("late", "127.0.0.1:2".parse().unwrap())
             .unwrap();
         state.flush_messages();
-        assert_eq!(goal_message_count(&state, late), 1);
+        let goals = received(&state.players, late)
+            .into_iter()
+            .filter(|message| matches!(message, Received::Goal { .. }))
+            .count();
+        assert_eq!(goals, 1);
     }
 
     #[test]

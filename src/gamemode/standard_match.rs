@@ -989,18 +989,19 @@ impl Match {
             && end_step <= ctx.replay.game_step()
         {
             self.game_state.replay = None;
-            self.queue_goal_replay(ctx, start_step, end_step, force_view);
+            self.queue_goal_replay(ctx, &settings.config, start_step, end_step, force_view);
         }
         progress
     }
     /// Queues the goal replay once all of its ticks have been played.
     ///
-    /// The goal stoppage was shortened by the full replay length, so if part of the replay is
-    /// missing from the history, the stoppage is lengthened by the missing ticks to keep the pause
-    /// before the faceoff.
+    /// The goal stoppage timer was set for the full replay length. If part of the replay is
+    /// missing from the history, the timer is changed to what [goal_stoppage_time] gives for the
+    /// ticks that were queued, or for no replay if none were.
     fn queue_goal_replay(
         &mut self,
         ctx: &mut GameContext,
+        config: &MatchConfiguration,
         start_step: u32,
         end_step: u32,
         force_view: Option<PlayerId>,
@@ -1011,9 +1012,11 @@ impl Match {
         if queued > 0 {
             ctx.messages.add_server_chat_message("Goal replay");
         }
-        let missing = (end_step - start_step + 1).saturating_sub(queued);
+        let planned = goal_stoppage_time(config.time_break, Some(end_step - start_step + 1));
+        let actual = goal_stoppage_time(config.time_break, (queued > 0).then_some(queued));
         if let MatchState::Break(state) = &mut self.state {
-            state.timer += missing;
+            // The timer has been running since the goal, so only the difference is applied.
+            state.timer = (state.timer + actual).saturating_sub(planned);
         }
     }
 }
@@ -1163,6 +1166,11 @@ impl GameMode for StandardMatchGameMode {
     }
     fn game_started(&mut self, ctx: &mut GameContext) {
         self.reset_state();
+        // Players can leave without before_player_exit, such as bots removed by the game mode
+        // or at the end of a game, so forget everyone who is gone.
+        self.settings
+            .preferred_positions
+            .retain(|player_id, _| ctx.players.get(*player_id).is_some());
         let (width, length) = (ctx.rink.width, ctx.rink.length);
         let first_x =
             width / 2.0 - 0.4 * self.settings.config.warmup_pucks.saturating_sub(1) as f32;
@@ -1524,7 +1532,7 @@ mod tests {
     }
 
     #[test]
-    fn goal_replay_missing_from_the_history_lengthens_the_stoppage() {
+    fn goal_stoppage_follows_the_replay_ticks_that_were_queued() {
         let mut t = TestServer::new(EmptyGameMode);
         let player = t.join("player");
         let history = &mut t.server.state.replay;
@@ -1553,15 +1561,38 @@ mod tests {
 
         // Steps 2 to 4 are in the history, so 2 of the 5 replay ticks are missing.
         let mut game = goal_stoppage(100);
-        game.queue_goal_replay(&mut t.ctx(), 0, 4, None);
+        game.queue_goal_replay(&mut t.ctx(), &config, 0, 4, None);
         assert_eq!(timer(&game), 102);
         assert!(t.ctx().replay.is_in_replay());
         assert_eq!(t.take_chats(player), ["Goal replay"]);
 
         // None of these steps have been played, so there is no replay to announce.
         let mut game = goal_stoppage(100);
-        game.queue_goal_replay(&mut t.ctx(), 10, 12, None);
+        game.queue_goal_replay(&mut t.ctx(), &config, 10, 12, None);
         assert_eq!(timer(&game), 103);
         assert_eq!(t.take_chats(player), Vec::<String>::new());
+
+        // A full replay gets the minimum timer of 500 ticks instead of 1000 - 801. Without the
+        // replay, the pause is the plain 10 second break again, not 500 ticks plus the replay.
+        let longest_replay = REPLAY_BEFORE_GOAL + REPLAY_AFTER_GOAL + 1;
+        assert_eq!(goal_stoppage_time(10, Some(longest_replay)), 500);
+        let mut game = goal_stoppage(100);
+        game.queue_goal_replay(&mut t.ctx(), &config, 10, 10 + longest_replay - 1, None);
+        assert_eq!(timer(&game), 600);
+
+        // With a 2 second break, the break is already over when the missing replay would start.
+        let short_break = MatchConfiguration {
+            time_break: 2,
+            ..config
+        };
+        let mut game = goal_stoppage(500 - REPLAY_AFTER_GOAL);
+        game.queue_goal_replay(
+            &mut t.ctx(),
+            &short_break,
+            10,
+            10 + longest_replay - 1,
+            None,
+        );
+        assert_eq!(timer(&game), 0);
     }
 }

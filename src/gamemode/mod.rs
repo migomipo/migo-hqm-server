@@ -77,11 +77,11 @@ pub trait GameMode {
     /// Called when the last player has left the server during a game, right before the game is
     /// reset.
     ///
-    /// Bots do not count as players here, and are not removed when the game is reset, so this is
-    /// the place to remove bots that belong to the game. The server state of the abandoned game
-    /// can still be read here. [GameMode::game_started] is called once a player joins again.
-    /// Games that end through [GameContext::new_game] do not call this, as the game mode already
-    /// knows about them.
+    /// Bots do not count as players here. Bots added with [BotLifetime::Game] are removed when
+    /// the game is reset, right after this. The server state of the abandoned game can still be
+    /// read here. [GameMode::game_started] is called once a player joins again. Games that end
+    /// through [GameContext::new_game] do not call this, as the game mode already knows about
+    /// them.
     fn game_abandoned(&mut self, _ctx: &mut GameContext) {}
 
     /// Called right before a player is removed from the server.
@@ -165,9 +165,10 @@ impl GameContext<'_> {
 
     /// Ends the current game and resets the server state.
     ///
-    /// Pucks, skaters and replay history are cleared immediately, and the recording of the game is
-    /// saved if recording is enabled. [GameMode::game_started] is called on the next tick with a
-    /// player on the server, so game mode state should be reset there.
+    /// Pucks, skaters, bots added with [BotLifetime::Game] and replay history are cleared
+    /// immediately, and the recording of the game is saved if recording is enabled.
+    /// [GameMode::game_started] is called on the next tick with a player on the server, so game
+    /// mode state should be reset there.
     pub fn new_game(&mut self) {
         crate::server::new_game(
             &mut self.internals,
@@ -207,15 +208,19 @@ impl GameContext<'_> {
     /// input with [ServerPlayerMut::input_mut] before the physics simulation.
     ///
     /// Bots use the same player slots as network players, but do not count towards
-    /// [ServerConfiguration::player_max] or keep a game going on their own. They stay on the
-    /// server across games until they are removed with [GameContext::remove_player].
-    pub fn add_bot(&mut self, name: &str) -> Option<PlayerId> {
-        self.messages.messages.add_bot(self.players.players, name)
+    /// [ServerConfiguration::player_max] or keep a game going on their own. `lifetime` decides
+    /// whether the bot leaves with the current game or stays until it is removed with
+    /// [GameContext::remove_player].
+    pub fn add_bot(&mut self, name: &str, lifetime: BotLifetime) -> Option<PlayerId> {
+        self.messages
+            .messages
+            .add_bot(self.players.players, name, lifetime)
     }
 
     /// Removes a player or bot from the server. Returns false if the player does not exist.
     ///
-    /// [GameMode::before_player_exit] is not called for players removed this way.
+    /// [GameMode::before_player_exit] is not called for players removed this way, so the caller
+    /// should forget its own state about the player.
     pub fn remove_player(&mut self, player_id: PlayerId) -> bool {
         self.skater_links().remove_player(player_id, true)
     }
@@ -580,6 +585,18 @@ impl<'a> ServerPlayer<'a> {
     }
 }
 
+/// How long a bot added with [GameContext::add_bot] stays on the server.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum BotLifetime {
+    /// The bot leaves when the current game ends, whether the game mode starts a new game with
+    /// [GameContext::new_game] or the game is abandoned. [GameMode::before_player_exit] is not
+    /// called for it.
+    Game,
+    /// The bot stays on the server across games until it is removed with
+    /// [GameContext::remove_player].
+    Server,
+}
+
 /// Whether a game mode knows a chat command, returned from [GameMode::handle_command].
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CommandResult {
@@ -602,6 +619,7 @@ pub enum ExitReason {
 mod tests {
     use super::*;
     use crate::server::HQMServerState;
+    use crate::server::test_server::{chats, received};
 
     #[test]
     fn pucks_are_found_by_id_and_old_ids_do_not_match_new_pucks() {
@@ -699,17 +717,7 @@ mod tests {
         }
 
         state.player_message_state.flush_messages();
-        let player = state
-            .player_message_state
-            .players
-            .get_player(player_id)
-            .unwrap();
-        let ServerPlayerData::NetworkPlayer { data } = &player.data else {
-            panic!("expected a network player");
-        };
-        assert!(data.messages.iter().any(|message| matches!(
-            message.as_ref(),
-            crate::players::HQMMessage::Chat { message, .. } if message == "Hello test"
-        )));
+        let received = received(&state.player_message_state.players, player_id);
+        assert!(chats(received).contains(&"Hello test".to_owned()));
     }
 }

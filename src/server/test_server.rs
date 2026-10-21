@@ -2,11 +2,12 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::rc::Rc;
 
 use super::{HQMServer, test_server};
 use crate::game::{PhysicsEvent, PlayerId, PlayerIndex, PlayerInput, ScoreboardValues, Team};
 use crate::gamemode::{GameContext, GameMode};
-use crate::players::{HQMMessage, PlayerListExt, ServerPlayerData};
+use crate::players::{HQMMessage, PlayerListExt, PlayerSlots, ServerPlayerData};
 
 /// The only client version the server accepts.
 const CLIENT_VERSION: u32 = 55;
@@ -94,6 +95,36 @@ impl From<&HQMMessage> for Received {
             },
         }
     }
+}
+
+/// The message queue of a network player, or `None` for bots and players not on the server.
+fn message_queue(players: &PlayerSlots, player_id: PlayerId) -> Option<&[Rc<HQMMessage>]> {
+    match &players.get_player(player_id)?.data {
+        ServerPlayerData::NetworkPlayer { data } => Some(&data.messages),
+        ServerPlayerData::Bot { .. } => None,
+    }
+}
+
+/// All messages in a player's message queue, for tests that do not run a [TestServer].
+///
+/// Panics if the player is not a network player on the server.
+pub(crate) fn received(players: &PlayerSlots, player_id: PlayerId) -> Vec<Received> {
+    message_queue(players, player_id)
+        .expect("expected a network player on the server")
+        .iter()
+        .map(|message| Received::from(&**message))
+        .collect()
+}
+
+/// The text of the chat messages among `messages`.
+pub(crate) fn chats(messages: impl IntoIterator<Item = Received>) -> Vec<String> {
+    messages
+        .into_iter()
+        .filter_map(|message| match message {
+            Received::Chat { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect()
 }
 
 impl<M: GameMode> TestServer<M> {
@@ -244,36 +275,26 @@ impl<M: GameMode> TestServer<M> {
     /// Takes the text of the chat messages a player has received since the last call to this or
     /// [TestServer::take_messages].
     pub(crate) fn take_chats(&mut self, player_id: PlayerId) -> Vec<String> {
-        self.take_messages(player_id)
-            .into_iter()
-            .filter_map(|message| match message {
-                Received::Chat { text, .. } => Some(text),
-                _ => None,
-            })
-            .collect()
+        chats(self.take_messages(player_id))
     }
 
     fn collect_messages(&mut self) {
         let state = &mut self.server.state.player_message_state;
         state.flush_messages();
         for (player_id, test_player) in &mut self.players {
-            let Some(player) = state.players.get_player(*player_id) else {
-                continue;
-            };
-            let ServerPlayerData::NetworkPlayer { data } = &player.data else {
+            let Some(queue) = message_queue(&state.players, *player_id) else {
                 continue;
             };
             if test_player.game_id != self.server.game_id {
                 test_player.game_id = self.server.game_id;
                 test_player.read = 0;
             }
-            let new_messages = &data.messages[test_player.read..];
             test_player.unread.extend(
-                new_messages
+                queue[test_player.read..]
                     .iter()
                     .map(|message| Received::from(&**message)),
             );
-            test_player.read = data.messages.len();
+            test_player.read = queue.len();
         }
     }
 }

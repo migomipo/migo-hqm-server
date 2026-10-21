@@ -1485,9 +1485,9 @@ mod tests {
     use tokio_util::codec::Encoder;
 
     use crate::game::PhysicsEvent;
-    use crate::gamemode::ServerPlayerType;
+    use crate::gamemode::{BotLifetime, ServerPlayerType};
     use crate::players::{MAX_PLAYERS, ServerPlayer};
-    use crate::server::test_server::{EmptyGameMode, Received, TestServer};
+    use crate::server::test_server::{EmptyGameMode, Received, TestServer, chats, received};
 
     fn network_player() -> ServerPlayer {
         ServerPlayer::new_network_player(
@@ -1725,47 +1725,8 @@ mod tests {
             .get_player(player_id)
             .unwrap();
         assert!(!player.has_skater());
-        let ServerPlayerData::NetworkPlayer { data } = &player.data else {
-            panic!("expected a network player");
-        };
-        let chats: Vec<_> = data
-            .messages
-            .iter()
-            .filter_map(|message| match message.as_ref() {
-                HQMMessage::Chat { message, .. } => Some(message.as_ref()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(chats, ["after"]);
-    }
-
-    fn describe_message(message: &HQMMessage) -> String {
-        match message {
-            HQMMessage::PlayerUpdate {
-                player_index,
-                data: Some(data),
-            } => {
-                let team = data.object.map(|(_, team)| team.to_string());
-                format!(
-                    "update {player_index} {} {}",
-                    data.player_name,
-                    team.as_deref().unwrap_or("-")
-                )
-            }
-            HQMMessage::PlayerUpdate {
-                player_index,
-                data: None,
-            } => format!("update {player_index} removed"),
-            HQMMessage::Goal {
-                team,
-                goal_player_index,
-                ..
-            } => format!(
-                "goal {team} {}",
-                goal_player_index.map_or("-".to_owned(), |index| index.to_string())
-            ),
-            HQMMessage::Chat { message, .. } => format!("chat {message}"),
-        }
+        let players = &server.state.player_message_state.players;
+        assert_eq!(chats(received(players, player_id)), ["after"]);
     }
 
     #[test]
@@ -1784,18 +1745,7 @@ mod tests {
             .add_player("spectator", "127.0.0.1:3".parse().unwrap())
             .unwrap();
         state.player_message_state.flush_messages();
-        let queue_length = |state: &HQMServerState, player_id| {
-            let player = state
-                .player_message_state
-                .players
-                .get_player(player_id)
-                .unwrap();
-            let ServerPlayerData::NetworkPlayer { data } = &player.data else {
-                panic!("expected a network player");
-            };
-            data.messages.len()
-        };
-        let start = [red, blue].map(|id| queue_length(&state, id));
+        let start = [red, blue].map(|id| received(&state.player_message_state.players, id).len());
 
         let links = &mut state.skater_links();
         assert!(links.spawn_skater(red, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false));
@@ -1809,42 +1759,48 @@ mod tests {
         assert!(state.skater_links().remove_player(spectator, true));
         state.player_message_state.flush_messages();
 
-        let messages_since = |state: &HQMServerState, player_id, start: usize| -> Vec<String> {
-            let player = state
-                .player_message_state
-                .players
-                .get_player(player_id)
-                .unwrap();
-            let ServerPlayerData::NetworkPlayer { data } = &player.data else {
-                panic!("expected a network player");
-            };
-            data.messages[start..]
-                .iter()
-                .map(|message| describe_message(message))
-                .collect()
+        let messages_since = |player_id, start: usize| {
+            received(&state.player_message_state.players, player_id).split_off(start)
+        };
+        let red_update = |name: &str| Received::PlayerUpdate {
+            index: red.index,
+            name: name.to_owned(),
+            team: Some(Team::Red),
+        };
+        let goal = Received::Goal {
+            team: Team::Red,
+            scorer: Some(red.index),
+            assist: None,
+        };
+        let chat = |from: Option<PlayerId>, text: &str| Received::Chat {
+            from: from.map(|player_id| player_id.index),
+            text: text.to_owned(),
+        };
+        let removed = Received::PlayerRemoved {
+            index: spectator.index,
         };
         assert_eq!(
-            messages_since(&state, red, start[0]),
+            messages_since(red, start[0]),
             [
-                "update 0 red Red",
-                "goal Red 0",
-                "chat a",
-                "chat b",
-                "update 0 [Red] red Red",
-                "chat c",
-                "update 0 red Red",
-                "chat d",
-                "update 2 removed",
+                red_update("red"),
+                goal.clone(),
+                chat(None, "a"),
+                chat(None, "b"),
+                red_update("[Red] red"),
+                chat(Some(red), "c"),
+                red_update("red"),
+                chat(None, "d"),
+                removed.clone(),
             ]
         );
         assert_eq!(
-            messages_since(&state, blue, start[1]),
+            messages_since(blue, start[1]),
             [
-                "update 0 red Red",
-                "goal Red 0",
-                "chat a",
-                "chat d",
-                "update 2 removed",
+                red_update("red"),
+                goal,
+                chat(None, "a"),
+                chat(None, "d"),
+                removed,
             ]
         );
     }
@@ -1930,8 +1886,8 @@ mod tests {
             }
 
             fn game_started(&mut self, ctx: &mut GameContext) {
-                let skating = ctx.add_bot("skating").unwrap();
-                let standing = ctx.add_bot("standing").unwrap();
+                let skating = ctx.add_bot("skating", BotLifetime::Game).unwrap();
+                let standing = ctx.add_bot("standing", BotLifetime::Game).unwrap();
                 let rot = Rot3::IDENTITY;
                 assert!(ctx.spawn_skater(
                     skating,
@@ -1953,8 +1909,9 @@ mod tests {
 
             fn game_abandoned(&mut self, ctx: &mut GameContext) {
                 self.abandoned += 1;
-                assert!(ctx.remove_player(self.skating.take().unwrap()));
-                assert!(ctx.remove_player(self.standing.take().unwrap()));
+                // The bots are still here, and leave when the game is reset.
+                assert!(ctx.players.get(self.skating.take().unwrap()).is_some());
+                assert!(ctx.players.get(self.standing.take().unwrap()).is_some());
             }
         }
 
@@ -1999,14 +1956,41 @@ mod tests {
         let mut t = TestServer::new(EmptyGameMode);
         let mut ctx = t.ctx();
         let bots: Vec<_> = (0..MAX_PLAYERS)
-            .map(|i| ctx.add_bot(&format!("bot {i}")).unwrap())
+            .map(|i| {
+                ctx.add_bot(&format!("bot {i}"), BotLifetime::Server)
+                    .unwrap()
+            })
             .collect();
-        assert!(ctx.add_bot("one too many").is_none());
+        assert!(ctx.add_bot("one too many", BotLifetime::Server).is_none());
 
         assert!(ctx.remove_player(bots[3]));
-        let replacement = ctx.add_bot("replacement").unwrap();
+        let replacement = ctx.add_bot("replacement", BotLifetime::Server).unwrap();
         assert_eq!(replacement.index, bots[3].index);
         assert!(ctx.players.get(bots[3]).is_none());
+    }
+
+    #[test]
+    fn new_game_removes_game_bots_and_keeps_server_bots() {
+        let mut t = TestServer::new(EmptyGameMode);
+        let player = t.join("player");
+        t.tick();
+        let mut ctx = t.ctx();
+        let game_bot = ctx.add_bot("game bot", BotLifetime::Game).unwrap();
+        let server_bot = ctx.add_bot("server bot", BotLifetime::Server).unwrap();
+
+        ctx.new_game();
+
+        assert!(ctx.players.get(game_bot).is_none());
+        assert!(ctx.players.get(server_bot).is_some());
+        let messages = t.take_messages(player);
+        assert!(messages.contains(&Received::PlayerRemoved {
+            index: game_bot.index
+        }));
+        assert!(messages.contains(&Received::PlayerUpdate {
+            index: server_bot.index,
+            name: "server bot".to_owned(),
+            team: None,
+        }));
     }
 
     #[test]
@@ -2015,8 +1999,8 @@ mod tests {
         let red = t.join("red");
         let blue = t.join("blue");
         let mut ctx = t.ctx();
-        let bot = ctx.add_bot("bot").unwrap();
-        let benched_bot = ctx.add_bot("benched").unwrap();
+        let bot = ctx.add_bot("bot", BotLifetime::Server).unwrap();
+        let benched_bot = ctx.add_bot("benched", BotLifetime::Server).unwrap();
         for (player, team) in [(red, Team::Red), (blue, Team::Blue), (bot, Team::Red)] {
             assert!(ctx.spawn_skater(player, team, Vec3::ZERO, Rot3::IDENTITY, false));
         }

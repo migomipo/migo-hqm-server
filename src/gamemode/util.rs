@@ -1,9 +1,9 @@
 use crate::game::{PlayerId, Rink, Team};
-use crate::gamemode::{GameContext, Messages};
+use crate::gamemode::GameContext;
 use glam::Vec3;
 use glamx::Rot3;
 use smallvec::SmallVec;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_2, PI};
 use std::rc::Rc;
 use tracing::info;
@@ -19,8 +19,6 @@ pub struct TeamSelection {
     ///
     /// Set to 0 to let players rejoin immediately.
     pub team_switch_cooldown: u32,
-    /// Players who get a chat message whenever someone joins a team or starts spectating.
-    pub show_extra_messages: HashSet<PlayerId>,
     team_switch_timer: HashMap<PlayerId, u32>,
 }
 
@@ -31,7 +29,6 @@ impl TeamSelection {
         Self {
             team_max,
             team_switch_cooldown: Self::DEFAULT_TEAM_SWITCH_COOLDOWN,
-            show_extra_messages: HashSet::new(),
             team_switch_timer: HashMap::new(),
         }
     }
@@ -81,7 +78,6 @@ impl TeamSelection {
         for (player_id, player_name) in spectating_players {
             info!("{} ({}) is spectating", player_name, player_id);
             self.force_spectate(ctx, player_id);
-            self.send_extra_message(&mut ctx.messages, format!("{player_name} is spectating"));
         }
 
         let mut add_players =
@@ -98,10 +94,6 @@ impl TeamSelection {
                     }
                     info!("{} ({}) has joined team {:?}", player_name, player_id, team);
                     *player_count += 1;
-                    self.send_extra_message(
-                        &mut ctx.messages,
-                        format!("{player_name} is playing for {team}"),
-                    );
                 }
             };
 
@@ -126,15 +118,11 @@ impl TeamSelection {
     }
 
     /// Forgets everything about a player. Call this when a player leaves the server.
+    ///
+    /// A player who left without this being called is forgotten anyway once their team switch
+    /// cooldown runs out.
     pub fn remove_player(&mut self, player_id: PlayerId) {
         self.team_switch_timer.remove(&player_id);
-        self.show_extra_messages.remove(&player_id);
-    }
-
-    fn send_extra_message(&self, messages: &mut Messages, message: String) {
-        for player_id in self.show_extra_messages.iter() {
-            messages.add_directed_server_chat_message(message.clone(), *player_id);
-        }
     }
 }
 
