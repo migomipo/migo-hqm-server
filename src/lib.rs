@@ -3,6 +3,8 @@ pub mod gamemode;
 pub mod game;
 pub mod physics;
 mod protocol;
+#[cfg(test)]
+mod readme_tests;
 mod server;
 
 pub(crate) use server::players;

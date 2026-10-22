@@ -143,6 +143,13 @@ impl<M: GameMode> TestServer<M> {
 
     /// Connects a player, as if a client had joined. Panics if the player could not join.
     pub(crate) fn join(&mut self, name: &str) -> PlayerId {
+        self.try_join(name)
+            .unwrap_or_else(|| panic!("{name} could not join"))
+    }
+
+    /// Connects a player, as if a client had joined, and returns `None` if the server did not
+    /// let the player in.
+    pub(crate) fn try_join(&mut self, name: &str) -> Option<PlayerId> {
         let addr = SocketAddr::from(([127, 0, 0, 1], self.next_port));
         self.next_port += 1;
         self.server
@@ -152,8 +159,7 @@ impl<M: GameMode> TestServer<M> {
             .state
             .player_message_state
             .players
-            .find_player_by_addr(addr)
-            .unwrap_or_else(|| panic!("{name} could not join"));
+            .find_player_by_addr(addr)?;
         self.players.insert(
             player_id,
             TestPlayer {
@@ -164,7 +170,7 @@ impl<M: GameMode> TestServer<M> {
             },
         );
         self.collect_messages();
-        player_id
+        Some(player_id)
     }
 
     /// Connects a player who is logged in as admin.

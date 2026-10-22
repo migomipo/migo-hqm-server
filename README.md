@@ -87,7 +87,6 @@ Run `migo-hqm-server` to start the server with `config.toml` in the current work
 | /righty                | Makes player right-handed. If done during play, it will only be applied after play has stopped.                                                                   |
 | /rules                 | Shows current offside/icing rule settings.                                                                                                                        |
 | /admin *PASSWORD*      | Logs in as administrator, if the password is correct.                                                                                                             |
-| /chatextend <on/off>   | Show some additional chat messages when players join or leave teams in matches                                                                                    |
 
 ### Administrators only
 
