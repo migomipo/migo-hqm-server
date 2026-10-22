@@ -1188,19 +1188,25 @@ fn set_clock_period_and_scores() {
 }
 
 #[test]
-#[ignore = "since 2ec56b3, /set period 0 only changes the period shown, and the rules still apply"]
 fn set_period_zero_returns_to_warmup() {
     let config = MatchConfiguration {
         icing: IcingConfiguration::NoTouch,
         ..MatchGame::quick_config()
     };
     let mut game = MatchGame::start(config, 1, 1);
+    game.chat(game.admin(), "/set redscore 2");
     game.chat(game.admin(), "/set period 0");
     game.tick();
     assert_eq!(game.scoreboard.period, 0);
+    assert_eq!(game.scoreboard.red_score, 2);
     // Warmup has no rules, so icing the puck is not called.
     ice_the_puck(&mut game);
     assert!(!game.heard("Icing"), "{:?}", game.heard);
+
+    // The game starts again after warmup, with the score kept.
+    game.play_until_faceoff();
+    assert_eq!(game.scoreboard.period, 1);
+    assert_eq!(game.scoreboard.red_score, 2);
 }
 
 #[test]
@@ -1259,7 +1265,6 @@ fn set_rule_settings_announce_the_new_rules() {
 }
 
 #[test]
-#[ignore = "since 2ec56b3, /set mercy off and /set first off are ignored; only 0 works"]
 fn set_mercy_and_first_off_disable_the_rules() {
     let mut game = MatchGame::join(MatchGame::quick_config(), 1, 0);
     let admin = game.admin();

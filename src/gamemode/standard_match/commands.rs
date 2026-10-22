@@ -5,7 +5,7 @@ use crate::gamemode::GameContext;
 
 use super::{
     IcingConfiguration, OffsideConfiguration, OffsideLineConfiguration, StandardMatchGameMode,
-    StandardMatchState, TwoLinePassConfiguration,
+    StandardMatchState, TwoLinePassConfiguration, WarmupState,
 };
 
 impl StandardMatchGameMode {
@@ -55,8 +55,18 @@ impl StandardMatchGameMode {
                 }
             }
             "period" => {
-                if let Ok(period) = value.parse() {
-                    if let StandardMatchState::Game(game) = &mut self.state {
+                if let Ok(period) = value.parse()
+                    && let StandardMatchState::Game(game) = &mut self.state
+                {
+                    if period == 0 {
+                        // Period 0 is warmup. The score is kept, and the game starts again when
+                        // warmup is over.
+                        let score = game.game_state.score;
+                        self.state = StandardMatchState::WaitingForGame(WarmupState {
+                            score,
+                            ..WarmupState::new()
+                        });
+                    } else {
                         game.game_state.period = period;
                     }
                 }
@@ -107,12 +117,12 @@ impl StandardMatchGameMode {
                 _ => {}
             },
             "mercy" => {
-                if let Ok(goals) = value.parse() {
+                if let Some(goals) = parse_goal_rule(value) {
                     self.settings.config.mercy = goals;
                 }
             }
             "first" => {
-                if let Ok(goals) = value.parse() {
+                if let Some(goals) = parse_goal_rule(value) {
                     self.settings.config.first_to = goals;
                 }
             }
@@ -197,6 +207,15 @@ impl StandardMatchGameMode {
             ctx.messages
                 .add_server_chat_message(format!("{message} by {admin_name}"));
         }
+    }
+}
+
+/// Parses the goal count of the mercy and first-to rules, where "off" is the same as 0.
+fn parse_goal_rule(value: &str) -> Option<u32> {
+    if value == "off" {
+        Some(0)
+    } else {
+        value.parse().ok()
     }
 }
 
