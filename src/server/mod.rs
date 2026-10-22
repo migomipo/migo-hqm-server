@@ -773,7 +773,7 @@ impl HQMServer {
             self.state
                 .player_message_state
                 .add_directed_server_chat_message(
-                    "Stick hand will change at the next intermission",
+                    "Stick hand will change when play has stopped",
                     player_id,
                 );
         }

@@ -1257,18 +1257,11 @@ impl GameMode for StandardMatchGameMode {
     fn include_tick_in_recording(&self) -> bool {
         matches!(self.state, StandardMatchState::Game(_))
     }
-    /// Players can change hands in warmup and intermissions, but not during periods, not even
-    /// when play has stopped.
+    /// Players can change hands in warmup and whenever play has stopped, but not during play.
     fn hand_change_allowed(&self) -> bool {
         match &self.state {
             StandardMatchState::WaitingForGame(_) => true,
-            StandardMatchState::Game(game) => matches!(
-                &game.state,
-                MatchState::Break(BreakState {
-                    kind: BreakKind::Intermission { .. } | BreakKind::GameOver { .. },
-                    ..
-                })
-            ),
+            StandardMatchState::Game(game) => matches!(game.state, MatchState::Break(_)),
         }
     }
 }

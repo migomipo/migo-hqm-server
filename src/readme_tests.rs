@@ -969,10 +969,9 @@ fn hand(game: &MatchGame, player: PlayerId) -> SkaterHand {
 }
 
 #[test]
-fn lefty_during_a_period_applies_at_the_next_intermission() {
+fn lefty_during_play_applies_after_play_has_stopped() {
     let config = MatchConfiguration {
         icing: IcingConfiguration::NoTouch,
-        time_period: 20,
         ..MatchGame::quick_config()
     };
     let mut game = MatchGame::start(config, 1, 1);
@@ -980,24 +979,23 @@ fn lefty_during_a_period_applies_at_the_next_intermission() {
     assert_eq!(hand(&game, player), SkaterHand::Right);
     game.chat(player, "/lefty");
     assert!(
-        game.heard("Stick hand will change at the next intermission"),
+        game.heard("Stick hand will change when play has stopped"),
         "{:?}",
         game.heard
     );
     game.tick();
     assert_eq!(hand(&game, player), SkaterHand::Right);
 
-    // A stoppage and the faceoff after it do not change the hand.
+    // Play stops for icing, and the hand changes during the stoppage.
     ice_the_puck(&mut game);
+    game.tick_until(100, |game| game.scoreboard.rules_state == RulesState::Icing);
+    assert_eq!(hand(&game, player), SkaterHand::Left);
     game.wait_for_play();
-    assert_eq!(hand(&game, player), SkaterHand::Right);
-
-    game.tick_until(3000, |game| game.scoreboard.period == 2);
     assert_eq!(hand(&game, player), SkaterHand::Left);
 }
 
 #[test]
-fn players_who_have_not_been_on_the_ice_can_change_hands_during_a_period() {
+fn players_who_have_not_been_on_the_ice_can_change_hands_during_play() {
     let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
     let late = game.t.join("late");
     game.t.take_chats(late);
@@ -1009,7 +1007,7 @@ fn players_who_have_not_been_on_the_ice_can_change_hands_during_a_period() {
 }
 
 #[test]
-fn leaving_the_ice_during_a_period_does_not_allow_changing_hands() {
+fn leaving_the_ice_during_play_does_not_allow_changing_hands() {
     let config = MatchConfiguration {
         time_period: 5,
         ..MatchGame::quick_config()
@@ -1021,7 +1019,7 @@ fn leaving_the_ice_during_a_period_does_not_allow_changing_hands() {
     game.heard.clear();
     game.chat(player, "/lefty");
     assert!(
-        game.heard("Stick hand will change at the next intermission"),
+        game.heard("Stick hand will change when play has stopped"),
         "{:?}",
         game.heard
     );
