@@ -679,7 +679,13 @@ pub struct ServerPlayer {
     pub data: ServerPlayerData,
     pub is_admin: bool,
     pub is_muted: MuteStatus,
+    /// The stick hand the player has asked for with /lefty or /righty.
     pub preferred_hand: SkaterHand,
+    /// The stick hand of the player's skater, which new skaters are also spawned with.
+    pub(crate) hand: SkaterHand,
+    /// Whether the player has been on the ice since hand changes were last allowed, so that
+    /// [Self::preferred_hand] is not applied until they are allowed again.
+    pub(crate) hand_locked: bool,
     pub input: PlayerInput,
 }
 
@@ -715,6 +721,8 @@ impl ServerPlayer {
             input: Default::default(),
             is_muted: MuteStatus::NotMuted,
             preferred_hand: SkaterHand::Right,
+            hand: SkaterHand::Right,
+            hand_locked: false,
         }
     }
 
@@ -729,6 +737,8 @@ impl ServerPlayer {
             input: Default::default(),
             is_muted: MuteStatus::NotMuted,
             preferred_hand: SkaterHand::Right,
+            hand: SkaterHand::Right,
+            hand_locked: false,
         }
     }
 

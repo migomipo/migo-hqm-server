@@ -179,8 +179,14 @@ impl HQMServerState {
         }
     }
 
-    pub fn set_hand(&mut self, hand: SkaterHand, player_id: PlayerId) {
-        self.skater_links().set_hand(hand, player_id);
+    pub fn set_hand(
+        &mut self,
+        hand: SkaterHand,
+        player_id: PlayerId,
+        change_allowed: bool,
+    ) -> bool {
+        self.skater_links()
+            .set_hand(hand, player_id, change_allowed)
     }
 
     pub fn remove_player(&mut self, player_id: PlayerId, on_recording: bool) -> bool {
@@ -255,13 +261,52 @@ impl SkaterLinks<'_> {
         }
     }
 
-    pub(crate) fn set_hand(&mut self, hand: SkaterHand, player_id: PlayerId) {
+    /// Sets the player's preferred hand, and applies it if the player may change hands now.
+    ///
+    /// Returns whether the player now plays with the preferred hand.
+    pub(crate) fn set_hand(
+        &mut self,
+        hand: SkaterHand,
+        player_id: PlayerId,
+        change_allowed: bool,
+    ) -> bool {
         if let Some(player) = self.players.get_player_mut(player_id) {
             player.preferred_hand = hand;
         }
-        if let Some(skater) = self.skater_for_player_mut(player_id) {
-            skater.hand = hand;
+        self.update_hand(player_id, change_allowed)
+    }
+
+    /// Applies the preferred hand of every player who may change hands now.
+    pub(crate) fn update_hands(&mut self, change_allowed: bool) {
+        let player_ids: smallvec::SmallVec<[_; 32]> =
+            self.players.iter_players().map(|(id, _)| id).collect();
+        for player_id in player_ids {
+            self.update_hand(player_id, change_allowed);
         }
+    }
+
+    /// Applies the player's preferred hand unless the player has been on the ice since hand
+    /// changes were last allowed, and returns whether the player now plays with it.
+    fn update_hand(&mut self, player_id: PlayerId, change_allowed: bool) -> bool {
+        let on_ice = self.skater_for_player_mut(player_id).is_some();
+        let Some(player) = self.players.get_player_mut(player_id) else {
+            return false;
+        };
+        if change_allowed {
+            player.hand_locked = false;
+        } else if on_ice {
+            player.hand_locked = true;
+        }
+        let hand = player.preferred_hand;
+        if player.hand != hand && !player.hand_locked {
+            player.hand = hand;
+            if let Some(skater) = self.skater_for_player_mut(player_id) {
+                skater.hand = hand;
+            }
+        }
+        self.players
+            .get_player(player_id)
+            .is_some_and(|player| player.hand == player.preferred_hand)
     }
 
     pub(crate) fn move_to_spectator(&mut self, player_id: PlayerId) -> bool {
@@ -284,7 +329,7 @@ impl SkaterLinks<'_> {
         let Some(player) = self.players.get_player(player_id) else {
             return false;
         };
-        let hand = player.preferred_hand;
+        let hand = player.hand;
         let has_assignment = player.skater_assignment().is_some();
 
         if has_assignment {
@@ -634,10 +679,10 @@ impl HQMServer {
                 self.set_recording(player_id, rule);
             }
             ChatCommand::Builtin(BuiltinCommand::Lefty) => {
-                self.state.set_hand(SkaterHand::Left, player_id);
+                self.set_hand(SkaterHand::Left, player_id, behaviour);
             }
             ChatCommand::Builtin(BuiltinCommand::Righty) => {
-                self.state.set_hand(SkaterHand::Right, player_id);
+                self.set_hand(SkaterHand::Right, player_id, behaviour);
             }
             ChatCommand::Builtin(BuiltinCommand::Admin(password)) => {
                 self.admin_login(player_id, password);
@@ -717,6 +762,20 @@ impl HQMServer {
                         );
                 }
             }
+        }
+    }
+
+    fn set_hand<B: GameMode>(&mut self, hand: SkaterHand, player_id: PlayerId, behaviour: &B) {
+        if !self
+            .state
+            .set_hand(hand, player_id, behaviour.hand_change_allowed())
+        {
+            self.state
+                .player_message_state
+                .add_directed_server_chat_message(
+                    "Stick hand will change at the next intermission",
+                    player_id,
+                );
         }
     }
 
@@ -1089,6 +1148,9 @@ impl HQMServer {
         self.start_requested_game(behaviour);
         behaviour.before_tick(&mut self.context());
         self.start_requested_game(behaviour);
+        self.state
+            .skater_links()
+            .update_hands(behaviour.hand_change_allowed());
 
         let (game_step, forced_view, scoreboard) =
             if let Some((forced_view, tick)) = self.state.replay.pop_replay_tick() {

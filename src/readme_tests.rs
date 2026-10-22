@@ -71,6 +71,9 @@ impl<M: GameMode> GameMode for Recorder<M> {
     fn include_tick_in_recording(&self) -> bool {
         self.mode.include_tick_in_recording()
     }
+    fn hand_change_allowed(&self) -> bool {
+        self.mode.hand_change_allowed()
+    }
 }
 
 /// Places on the ice, as z coordinates, for a team attacking towards low z like Red.
@@ -966,22 +969,67 @@ fn hand(game: &MatchGame, player: PlayerId) -> SkaterHand {
 }
 
 #[test]
-#[ignore = "since 2ec56b3, /lefty and /righty change the hand at once during play"]
-fn lefty_and_righty_during_play_apply_after_play_has_stopped() {
+fn lefty_during_a_period_applies_at_the_next_intermission() {
     let config = MatchConfiguration {
         icing: IcingConfiguration::NoTouch,
+        time_period: 20,
         ..MatchGame::quick_config()
     };
     let mut game = MatchGame::start(config, 1, 1);
     let player = game.red[0];
     assert_eq!(hand(&game, player), SkaterHand::Right);
     game.chat(player, "/lefty");
+    assert!(
+        game.heard("Stick hand will change at the next intermission"),
+        "{:?}",
+        game.heard
+    );
     game.tick();
     assert_eq!(hand(&game, player), SkaterHand::Right);
 
-    // Play stops for icing, and the hand changes at the next faceoff at the latest.
+    // A stoppage and the faceoff after it do not change the hand.
     ice_the_puck(&mut game);
     game.wait_for_play();
+    assert_eq!(hand(&game, player), SkaterHand::Right);
+
+    game.tick_until(3000, |game| game.scoreboard.period == 2);
+    assert_eq!(hand(&game, player), SkaterHand::Left);
+}
+
+#[test]
+fn players_who_have_not_been_on_the_ice_can_change_hands_during_a_period() {
+    let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+    let late = game.t.join("late");
+    game.t.take_chats(late);
+    game.chat(late, "/lefty");
+    assert_eq!(game.t.take_chats(late), Vec::<String>::new());
+    game.t.press_join(late, Team::Red);
+    game.ticks(2);
+    assert_eq!(hand(&game, late), SkaterHand::Left);
+}
+
+#[test]
+fn leaving_the_ice_during_a_period_does_not_allow_changing_hands() {
+    let config = MatchConfiguration {
+        time_period: 5,
+        ..MatchGame::quick_config()
+    };
+    let mut game = MatchGame::start(config, 1, 1);
+    let player = game.red[0];
+    game.chat(player, "/view 1");
+    assert!(game.t.ctx().objects.skater(player).is_none());
+    game.heard.clear();
+    game.chat(player, "/lefty");
+    assert!(
+        game.heard("Stick hand will change at the next intermission"),
+        "{:?}",
+        game.heard
+    );
+    game.t.press_join(player, Team::Red);
+    game.ticks(2);
+    assert_eq!(hand(&game, player), SkaterHand::Right);
+
+    game.tick_until(1000, |game| game.scoreboard.period == 2);
     assert_eq!(hand(&game, player), SkaterHand::Left);
 }
 

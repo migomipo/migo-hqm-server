@@ -83,8 +83,8 @@ Run `migo-hqm-server` to start the server with `config.toml` in the current work
 | /restoreview           | Restores first person view.                                                                                                                                       |
 | /ping *ID*             | Get server-side ping of player with ID *ID*                                                                                                                       |
 | /pings *S*             | Searches for player with name *S* and gets server-side ping for that player if a unique match is found. If multiple matches are found, they are listed instead.   |
-| /lefty                 | Makes player left-handed. If done during play, it will only be applied after play has stopped.                                                                    |
-| /righty                | Makes player right-handed. If done during play, it will only be applied after play has stopped.                                                                   |
+| /lefty                 | Makes player left-handed. If done during a period after having been on the ice, it will only be applied at the next intermission.                                 |
+| /righty                | Makes player right-handed. If done during a period after having been on the ice, it will only be applied at the next intermission.                                |
 | /rules                 | Shows current offside/icing rule settings.                                                                                                                        |
 | /admin *PASSWORD*      | Logs in as administrator, if the password is correct.                                                                                                             |
 

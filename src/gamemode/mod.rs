@@ -106,6 +106,16 @@ pub trait GameMode {
     fn include_tick_in_recording(&self) -> bool {
         false
     }
+
+    /// Whether players may change their stick hand with /lefty and /righty right now.
+    ///
+    /// This is checked after [GameMode::before_tick] on every tick, and when a player asks to
+    /// change hands. While it returns false, a player who has been on the ice since it last
+    /// returned true keeps their hand, and the change is applied once it returns true again.
+    /// Players who have not been on the ice since then can still change hands at once.
+    fn hand_change_allowed(&self) -> bool {
+        true
+    }
 }
 
 /// Access to the server state, split into fields that can be borrowed independently.

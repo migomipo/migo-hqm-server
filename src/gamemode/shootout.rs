@@ -578,6 +578,17 @@ impl GameMode for ShootoutGameMode {
     fn include_tick_in_recording(&self) -> bool {
         !matches!(self.status, ServerStatus::WaitingForGame { .. })
     }
+
+    /// Players can change hands between attempts, but not during one.
+    fn hand_change_allowed(&self) -> bool {
+        !matches!(
+            self.status,
+            ServerStatus::Game(ShootoutGame {
+                state: ShootoutAttemptState::Attack(_),
+                ..
+            })
+        )
+    }
 }
 
 #[cfg(test)]
