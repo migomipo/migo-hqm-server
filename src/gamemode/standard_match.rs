@@ -483,8 +483,15 @@ impl PlayingState {
             .map(|(id, _)| id)
             .collect()
     }
-    fn team_in_zone(ctx: &GameContext, team: Team, ignore: Option<PlayerId>) -> bool {
-        !Self::players_past(ctx, team, ignore, false).is_empty()
+    /// Whether a player of `team` is past the offside line.
+    fn team_in_zone(
+        config: &MatchConfiguration,
+        ctx: &GameContext,
+        team: Team,
+        ignore: Option<PlayerId>,
+    ) -> bool {
+        let center = config.offside_line == OffsideLineConfiguration::Center;
+        !Self::players_past(ctx, team, ignore, center).is_empty()
     }
     fn side(ctx: &GameContext, puck: PuckId) -> RinkSide {
         ctx.objects.get_puck(puck).map_or(RinkSide::Lower, |p| {
@@ -761,7 +768,7 @@ impl PlayingState {
             || (!blue_line && config.offside_line == OffsideLineConfiguration::Center);
         if enabled && !matches!(playing.offside, Offside::InZone(t) if t == team) {
             if let Some(pass) = playing.pass {
-                if pass.team == team && Self::team_in_zone(ctx, team, Some(pass.player)) {
+                if pass.team == team && Self::team_in_zone(config, ctx, team, Some(pass.player)) {
                     match config.offside {
                         OffsideConfiguration::Delayed => {
                             playing.offside = Offside::Warning(OffsideWarning {
@@ -917,7 +924,7 @@ impl PlayingState {
             }
         }
         if let Offside::Warning(warning) = playing.offside {
-            if !Self::team_in_zone(ctx, warning.offending_team, None) {
+            if !Self::team_in_zone(config, ctx, warning.offending_team, None) {
                 playing.offside = Offside::InZone(warning.offending_team);
                 ctx.messages.add_server_chat_message("Offside waved off");
             }
@@ -1586,12 +1593,12 @@ mod tests {
 
             let past = offset > half_width;
             assert_eq!(
-                PlayingState::team_in_zone(&ctx, Team::Red, None),
+                PlayingState::team_in_zone(&MatchConfiguration::default(), &ctx, Team::Red, None),
                 past,
                 "{offset}"
             );
             assert_eq!(
-                PlayingState::team_in_zone(&ctx, Team::Blue, None),
+                PlayingState::team_in_zone(&MatchConfiguration::default(), &ctx, Team::Blue, None),
                 past,
                 "{offset}"
             );

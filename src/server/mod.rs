@@ -762,37 +762,29 @@ impl HQMServer {
         {
             let view_player_name = view_player.player_name.clone();
 
+            // A player on the ice becomes a spectator to view someone else.
+            if player_id != view_player_id {
+                self.state.skater_links().move_to_spectator(player_id);
+            }
+
             if let Some(player) = self
                 .state
                 .player_message_state
                 .players
                 .get_player_mut(player_id)
+                && let ServerPlayerData::NetworkPlayer { data } = &mut player.data
+                && view_player_index != data.view_player_index
             {
-                let has_skater = player.has_skater();
-                if let ServerPlayerData::NetworkPlayer { data } = &mut player.data {
-                    if has_skater {
-                        self.state
-                            .player_message_state
-                            .add_directed_server_chat_message(
-                                "You must be a spectator to change view",
-                                player_id,
-                            );
-                    } else if view_player_index != data.view_player_index {
-                        data.view_player_index = view_player_id.index;
-                        if player_id != view_player_id {
-                            let msg = format!("You are now viewing {view_player_name}");
-                            self.state
-                                .player_message_state
-                                .add_directed_server_chat_message(msg, player_id);
-                        } else {
-                            self.state
-                                .player_message_state
-                                .add_directed_server_chat_message(
-                                    "View has been restored",
-                                    player_id,
-                                );
-                        }
-                    }
+                data.view_player_index = view_player_id.index;
+                if player_id != view_player_id {
+                    let msg = format!("You are now viewing {view_player_name}");
+                    self.state
+                        .player_message_state
+                        .add_directed_server_chat_message(msg, player_id);
+                } else {
+                    self.state
+                        .player_message_state
+                        .add_directed_server_chat_message("View has been restored", player_id);
                 }
             }
         } else {

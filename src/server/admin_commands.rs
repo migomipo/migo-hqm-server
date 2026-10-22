@@ -223,6 +223,7 @@ impl HQMServer {
 
             impl<'a> Matching<'a> {
                 fn is_matching(&self, player_name: &str) -> bool {
+                    let player_name = player_name.to_lowercase();
                     match self {
                         Matching::StartsWith(s) => player_name.starts_with(s),
                         Matching::EndsWith(s) => player_name.ends_with(s),
@@ -232,17 +233,21 @@ impl HQMServer {
                 }
             }
 
-            // 0 full string | 1 begins with | 2 ends with | 3 contains
-            let matching = if kick_player_name.starts_with("%") {
-                if kick_player_name.ends_with("%") {
-                    Matching::Contains(&kick_player_name[1..kick_player_name.len() - 1])
-                } else {
-                    Matching::StartsWith(&kick_player_name[1..kick_player_name.len()])
-                }
-            } else if kick_player_name.ends_with("%") {
-                Matching::EndsWith(&kick_player_name[0..kick_player_name.len() - 1])
-            } else {
-                Matching::Equals(kick_player_name)
+            // Names match case-insensitively, and % is a wildcard at the start or end.
+            let pattern = kick_player_name.to_lowercase();
+            let (pattern, any_start) = match pattern.strip_prefix('%') {
+                Some(rest) => (rest, true),
+                None => (pattern.as_str(), false),
+            };
+            let (pattern, any_end) = match pattern.strip_suffix('%') {
+                Some(rest) => (rest, true),
+                None => (pattern, false),
+            };
+            let matching = match (any_start, any_end) {
+                (true, true) => Matching::Contains(pattern),
+                (true, false) => Matching::EndsWith(pattern),
+                (false, true) => Matching::StartsWith(pattern),
+                (false, false) => Matching::Equals(pattern),
             };
 
             let kick_player_list: Vec<_> = self

@@ -597,7 +597,6 @@ fn immediate_offside_is_called_when_the_puck_enters_the_zone() {
 }
 
 #[test]
-#[ignore = "with the center line as offside line, offside still checks for teammates past the blue line, in the code before 2ec56b3 too"]
 fn offside_line_center_checks_offside_at_the_center_line() {
     let config = MatchConfiguration {
         offside: OffsideConfiguration::Delayed,
@@ -901,7 +900,6 @@ fn view_enters_first_person_view_of_a_player() {
 }
 
 #[test]
-#[ignore = "/view from the ice is refused with \"You must be a spectator to change view\", in the code before 2ec56b3 too"]
 fn view_from_the_ice_makes_the_player_a_spectator() {
     let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
     let viewer = game.red[0];
@@ -1339,7 +1337,6 @@ fn kickall_kicks_players_with_the_exact_name() {
 }
 
 #[test]
-#[ignore = "kickall matches case-sensitively and its wildcards are reversed (migo% matches names             ending in migo), in the code before 2ec56b3 too"]
 fn kickall_ignores_case_and_supports_wildcards() {
     let patterns = ["migomipo", "Migo%", "migo%", "%Mipo", "%mipo", "%gomi%"];
     let failures = kickall_failures(&patterns);
