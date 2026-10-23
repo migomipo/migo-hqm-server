@@ -425,6 +425,21 @@ impl HQMServer {
         }
     }
 
+    /// Ends the current game. The new game starts once the command has been handled.
+    pub(crate) fn reset_game(&mut self, admin_player_id: PlayerId) {
+        if let Some(player) = self
+            .state
+            .player_message_state
+            .check_admin_or_deny(admin_player_id)
+        {
+            let name = player.player_name.clone();
+            info!("{} ({}) reset game", name, admin_player_id);
+            self.context().new_game();
+            let msg = format!("Game reset by {name}");
+            self.state.player_message_state.add_server_chat_message(msg);
+        }
+    }
+
     pub fn set_recording(&mut self, admin_player_id: PlayerId, rule: &str) {
         if let Some(player) = self
             .state

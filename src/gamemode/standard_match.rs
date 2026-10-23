@@ -182,6 +182,8 @@ enum MatchState {
 struct BreakState {
     timer: u32,
     kind: BreakKind,
+    /// Whether an admin has paused the game. The timer stands still while paused.
+    paused: bool,
 }
 #[derive(Debug, Clone)]
 enum BreakKind {
@@ -205,6 +207,8 @@ enum StoppageCause {
     Goal,
     Offside,
     Icing,
+    /// An admin stopped play with /faceoff or /pause.
+    Admin,
 }
 /// A change to the state of a running match.
 ///
@@ -234,16 +238,26 @@ struct PlayingState {
     faceoff_step: u32,
 }
 impl BreakState {
+    fn new(timer: u32, kind: BreakKind) -> Self {
+        Self {
+            timer,
+            kind,
+            paused: false,
+        }
+    }
     fn before_tick(&mut self, config: &MatchConfiguration, game_over: bool) -> MatchTransition {
+        if self.paused {
+            return MatchTransition::Continue;
+        }
         self.timer = self.timer.saturating_sub(1);
         if self.timer != 0 {
             return MatchTransition::Continue;
         }
         match &self.kind {
-            BreakKind::Stoppage(_) if game_over => MatchTransition::Break(BreakState {
-                timer: config.time_intermission * 100,
-                kind: BreakKind::GameOver { after_goal: false },
-            }),
+            BreakKind::Stoppage(_) if game_over => MatchTransition::Break(BreakState::new(
+                config.time_intermission * 100,
+                BreakKind::GameOver { after_goal: false },
+            )),
             BreakKind::Stoppage(stoppage) => MatchTransition::StartPlaying {
                 faceoff: stoppage.next_faceoff,
                 reset_clock: false,
@@ -269,6 +283,10 @@ impl BreakState {
                 cause: StoppageCause::Icing,
                 ..
             }) => (RulesState::Icing, 0, false),
+            BreakKind::Stoppage(Stoppage {
+                cause: StoppageCause::Admin,
+                ..
+            }) => (RulesState::default(), 0, false),
             BreakKind::Intermission { .. } => (RulesState::default(), 0, false),
             BreakKind::GameOver { after_goal } => (
                 RulesState::default(),
@@ -343,13 +361,13 @@ impl MatchSettings {
 impl Match {
     fn start(config: &MatchConfiguration, score: (u32, u32)) -> Self {
         Self {
-            state: MatchState::Break(BreakState {
-                timer: config.time_intermission * 100,
-                kind: BreakKind::Intermission {
+            state: MatchState::Break(BreakState::new(
+                config.time_intermission * 100,
+                BreakKind::Intermission {
                     period_end_step: None,
                     too_late_printed: false,
                 },
-            }),
+            )),
             game_state: MatchGameState {
                 time: 0,
                 score,
@@ -503,13 +521,13 @@ impl PlayingState {
         })
     }
     fn stoppage(timer: u32, cause: StoppageCause, next_faceoff: Faceoff) -> BreakState {
-        BreakState {
+        BreakState::new(
             timer,
-            kind: BreakKind::Stoppage(Stoppage {
+            BreakKind::Stoppage(Stoppage {
                 cause,
                 next_faceoff,
             }),
-        }
+        )
     }
     fn call_offside(
         config: &MatchConfiguration,
@@ -655,10 +673,7 @@ impl PlayingState {
         let timer = goal_stoppage_time(goal_pause(config, game_over), replay_length);
         if game_over {
             // The game over shows right away, along with the goal message.
-            BreakState {
-                timer,
-                kind: BreakKind::GameOver { after_goal: true },
-            }
+            BreakState::new(timer, BreakKind::GameOver { after_goal: true })
         } else {
             Self::stoppage(timer, StoppageCause::Goal, Faceoff::Center)
         }
@@ -968,9 +983,9 @@ impl Match {
             MatchTransition::Break(state) => self.state = MatchState::Break(state),
             MatchTransition::EndPeriod => {
                 self.game_state.period += 1;
-                self.state = MatchState::Break(BreakState {
-                    timer: settings.config.time_intermission * 100,
-                    kind: if self.game_state.game_over(&settings.config) {
+                self.state = MatchState::Break(BreakState::new(
+                    settings.config.time_intermission * 100,
+                    if self.game_state.game_over(&settings.config) {
                         BreakKind::GameOver { after_goal: false }
                     } else {
                         BreakKind::Intermission {
@@ -978,7 +993,7 @@ impl Match {
                             too_late_printed: false,
                         }
                     },
-                });
+                ));
             }
             MatchTransition::StartPlaying {
                 faceoff,
@@ -1135,6 +1150,16 @@ impl StandardMatchGameMode {
         self.teams
             .update(ctx, |rink, team, _| get_spawnpoint(rink, team, point))
     }
+    /// Whether a game is on and play has not been stopped.
+    pub(crate) fn is_playing(&self) -> bool {
+        matches!(
+            self.state,
+            StandardMatchState::Game(Match {
+                state: MatchState::Playing(_),
+                ..
+            })
+        )
+    }
     fn start_game(&mut self, preliminary_score: (u32, u32)) {
         self.state =
             StandardMatchState::Game(Match::start(&self.settings.config, preliminary_score));
@@ -1191,6 +1216,14 @@ impl GameMode for StandardMatchGameMode {
     ) -> CommandResult {
         match command {
             "set" => self.handle_set(ctx, arg, player),
+            "start" => self.handle_start(ctx, player),
+            "faceoff" => {
+                self.handle_game_command(ctx, player, "Faceoff initiated", Match::call_faceoff)
+            }
+            "pause" => self.handle_game_command(ctx, player, "Game paused", Match::pause),
+            "unpause" | "resume" => {
+                self.handle_game_command(ctx, player, "Game resumed", Match::unpause)
+            }
             "sp" | "setposition" => {
                 let requested = arg.to_ascii_uppercase();
                 if let Some(position) = ALLOWED_POSITIONS
@@ -1259,10 +1292,7 @@ impl GameMode for StandardMatchGameMode {
     }
     /// Players can change hands in warmup and whenever play has stopped, but not during play.
     fn hand_change_allowed(&self) -> bool {
-        match &self.state {
-            StandardMatchState::WaitingForGame(_) => true,
-            StandardMatchState::Game(game) => matches!(game.state, MatchState::Break(_)),
-        }
+        !self.is_playing()
     }
 }
 
@@ -1316,13 +1346,13 @@ mod tests {
 
     #[test]
     fn center_stoppage_does_not_reset_the_clock() {
-        let mut state = BreakState {
-            timer: 0,
-            kind: BreakKind::Stoppage(Stoppage {
+        let mut state = BreakState::new(
+            0,
+            BreakKind::Stoppage(Stoppage {
                 cause: StoppageCause::Goal,
                 next_faceoff: Faceoff::Center,
             }),
-        };
+        );
 
         assert!(matches!(
             state.before_tick(&MatchConfiguration::default(), false),
@@ -1335,13 +1365,13 @@ mod tests {
 
     #[test]
     fn intermission_resets_the_clock() {
-        let mut state = BreakState {
-            timer: 0,
-            kind: BreakKind::Intermission {
+        let mut state = BreakState::new(
+            0,
+            BreakKind::Intermission {
                 period_end_step: Some(0),
                 too_late_printed: false,
             },
-        };
+        );
 
         assert!(matches!(
             state.before_tick(&MatchConfiguration::default(), false),
@@ -1357,13 +1387,13 @@ mod tests {
         // Deciding goals go to game over right away, but an admin can set a deciding score
         // during any stoppage.
         let config = MatchConfiguration::default();
-        let mut state = BreakState {
-            timer: 1,
-            kind: BreakKind::Stoppage(Stoppage {
+        let mut state = BreakState::new(
+            1,
+            BreakKind::Stoppage(Stoppage {
                 cause: StoppageCause::Offside,
                 next_faceoff: Faceoff::Center,
             }),
-        };
+        );
 
         let transition = state.before_tick(&config, true);
 
@@ -1372,8 +1402,27 @@ mod tests {
             MatchTransition::Break(BreakState {
                 kind: BreakKind::GameOver { after_goal: false },
                 timer,
+                ..
             }) if timer == config.time_intermission * 100
         ));
+    }
+
+    #[test]
+    fn paused_break_holds_its_timer_even_when_the_game_is_decided() {
+        let mut state = BreakState::new(
+            1,
+            BreakKind::Stoppage(Stoppage {
+                cause: StoppageCause::Admin,
+                next_faceoff: Faceoff::Center,
+            }),
+        );
+        state.paused = true;
+
+        assert!(matches!(
+            state.before_tick(&MatchConfiguration::default(), true),
+            MatchTransition::Continue
+        ));
+        assert_eq!(state.timer, 1);
     }
 
     #[test]
@@ -1467,13 +1516,13 @@ mod tests {
         game.before_tick(&mut ctx, &settings);
         assert_eq!(game.game_state.time, period_time - 1);
 
-        game.state = MatchState::Break(BreakState {
-            timer: 5,
-            kind: BreakKind::Stoppage(Stoppage {
+        game.state = MatchState::Break(BreakState::new(
+            5,
+            BreakKind::Stoppage(Stoppage {
                 cause: StoppageCause::Goal,
                 next_faceoff: Faceoff::Center,
             }),
-        });
+        ));
         game.before_tick(&mut ctx, &settings);
         assert!(matches!(
             game.state,
@@ -1537,10 +1586,10 @@ mod tests {
         t.join("player");
         t.tick();
         let mut game = Match::start(&config, (2, 1));
-        game.state = MatchState::Break(BreakState {
-            timer: 1,
-            kind: BreakKind::GameOver { after_goal: false },
-        });
+        game.state = MatchState::Break(BreakState::new(
+            1,
+            BreakKind::GameOver { after_goal: false },
+        ));
         t.mode.state = StandardMatchState::Game(game);
         let mut ctx = t.ctx();
         ctx.objects.remove_all_pucks();
@@ -1862,14 +1911,14 @@ mod tests {
 
         t.chat(player, "/sp lw");
         t.chat(player, "/sp nowhere");
-        t.chat(player, "/reset");
+        t.chat(player, "/rules");
 
         assert_eq!(
             t.take_chats(player),
             [
                 "Preferred faceoff position set to LW",
                 "Invalid faceoff position",
-                "Unknown command /reset"
+                "Unknown command /rules"
             ]
         );
     }
@@ -1888,13 +1937,13 @@ mod tests {
         let config = MatchConfiguration::default();
         let goal_stoppage = |timer| {
             let mut game = Match::start(&config, (0, 0));
-            game.state = MatchState::Break(BreakState {
+            game.state = MatchState::Break(BreakState::new(
                 timer,
-                kind: BreakKind::Stoppage(Stoppage {
+                BreakKind::Stoppage(Stoppage {
                     cause: StoppageCause::Goal,
                     next_faceoff: Faceoff::Center,
                 }),
-            });
+            ));
             game
         };
         let timer = |game: &Match| match &game.state {

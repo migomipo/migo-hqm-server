@@ -448,15 +448,6 @@ impl ShootoutGameMode {
         })
     }
 
-    fn reset_game(&mut self, ctx: &mut GameContext, player_id: PlayerId) {
-        if let Some(name) = ctx.require_admin(player_id) {
-            info!("{} ({}) reset game", name, player_id);
-            ctx.new_game();
-            ctx.messages
-                .add_server_chat_message(format!("Game reset by {name}"));
-        }
-    }
-
     fn force_player_off_ice(
         &mut self,
         ctx: &mut GameContext,
@@ -538,9 +529,6 @@ impl GameMode for ShootoutGameMode {
         player_id: PlayerId,
     ) -> CommandResult {
         match cmd {
-            "reset" | "resetgame" => {
-                self.reset_game(ctx, player_id);
-            }
             "fs" => {
                 if let Ok(force_player_index) = arg.parse::<PlayerIndex>() {
                     self.force_player_off_ice(ctx, player_id, force_player_index);

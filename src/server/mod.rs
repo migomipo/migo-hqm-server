@@ -675,6 +675,7 @@ impl HQMServer {
                 self.kick_all_matching(player_id, name, true, behaviour);
             }
             ChatCommand::Builtin(BuiltinCommand::ClearBans) => self.clear_bans(player_id),
+            ChatCommand::Builtin(BuiltinCommand::Reset) => self.reset_game(player_id),
             ChatCommand::Builtin(BuiltinCommand::SetRecording(rule)) => {
                 self.set_recording(player_id, rule);
             }
@@ -1342,6 +1343,7 @@ enum BuiltinCommand<'a> {
     Ban(Option<PlayerIndex>),
     BanAll(&'a str),
     ClearBans,
+    Reset,
     SetRecording(&'a str),
     Lefty,
     Righty,
@@ -1376,6 +1378,7 @@ fn parse_chat_command<'a>(command: &'a str, arg: &'a str) -> ChatCommand<'a> {
         "ban" => BuiltinCommand::Ban(arg.parse().ok()),
         "banall" => BuiltinCommand::BanAll(arg),
         "clearbans" => BuiltinCommand::ClearBans,
+        "reset" | "resetgame" => BuiltinCommand::Reset,
         "replay" | "record" => BuiltinCommand::SetRecording(arg),
         "lefty" => BuiltinCommand::Lefty,
         "righty" => BuiltinCommand::Righty,
@@ -1573,6 +1576,10 @@ mod tests {
         assert_eq!(
             parse_chat_command("view", "not-a-player"),
             ChatCommand::Builtin(BuiltinCommand::View(None))
+        );
+        assert_eq!(
+            parse_chat_command("resetgame", ""),
+            ChatCommand::Builtin(BuiltinCommand::Reset)
         );
     }
 

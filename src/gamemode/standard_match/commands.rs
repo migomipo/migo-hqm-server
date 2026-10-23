@@ -1,14 +1,138 @@
 //! Runtime administration commands for the standard-match game mode.
 
+use tracing::info;
+
 use crate::game::PlayerId;
 use crate::gamemode::GameContext;
 
 use super::{
-    IcingConfiguration, OffsideConfiguration, OffsideLineConfiguration, StandardMatchGameMode,
-    StandardMatchState, TwoLinePassConfiguration, WarmupState,
+    BreakKind, BreakState, Faceoff, IcingConfiguration, Match, MatchSettings, MatchState,
+    MatchTransition, OffsideConfiguration, OffsideLineConfiguration, StandardMatchGameMode,
+    StandardMatchState, Stoppage, StoppageCause, TwoLinePassConfiguration, WarmupState,
 };
 
+/// Ticks from /faceoff until the faceoff.
+const FACEOFF_COMMAND_DELAY: u32 = 500;
+
+impl Match {
+    /// Calls a center-ice faceoff in [FACEOFF_COMMAND_DELAY] ticks, and unpauses the game.
+    pub(super) fn call_faceoff(
+        &mut self,
+        ctx: &mut GameContext,
+        settings: &MatchSettings,
+    ) -> Result<(), &'static str> {
+        match &mut self.state {
+            MatchState::Break(BreakState {
+                kind: BreakKind::GameOver { .. },
+                ..
+            }) => return Err("The game is over"),
+            // The intermission is shortened rather than replaced, as the clock is reset when it
+            // ends.
+            MatchState::Break(
+                state @ BreakState {
+                    kind: BreakKind::Intermission { .. },
+                    ..
+                },
+            ) => {
+                state.timer = FACEOFF_COMMAND_DELAY;
+                state.paused = false;
+            }
+            _ => {
+                // A goal replay that has not been queued yet would hold up the faceoff.
+                self.game_state.replay = None;
+                let stoppage = Self::admin_stoppage(FACEOFF_COMMAND_DELAY);
+                self.apply(ctx, settings, MatchTransition::Break(stoppage));
+            }
+        }
+        Ok(())
+    }
+    /// Holds the break timer, or stops play if it is on. Play resumes with a center-ice faceoff.
+    pub(super) fn pause(
+        &mut self,
+        ctx: &mut GameContext,
+        settings: &MatchSettings,
+    ) -> Result<(), &'static str> {
+        match &mut self.state {
+            MatchState::Break(state) if state.paused => return Err("The game is already paused"),
+            MatchState::Break(state) => state.paused = true,
+            MatchState::Playing(_) => {
+                let mut stoppage = Self::admin_stoppage(settings.config.time_break * 100);
+                stoppage.paused = true;
+                self.apply(ctx, settings, MatchTransition::Break(stoppage));
+            }
+        }
+        Ok(())
+    }
+    /// Lets the break timer run again, with at least a full break left so that players are not
+    /// caught by the faceoff.
+    pub(super) fn unpause(
+        &mut self,
+        _ctx: &mut GameContext,
+        settings: &MatchSettings,
+    ) -> Result<(), &'static str> {
+        match &mut self.state {
+            MatchState::Break(state) if state.paused => {
+                state.paused = false;
+                state.timer = state.timer.max(settings.config.time_break * 100);
+                Ok(())
+            }
+            _ => Err("The game is not paused"),
+        }
+    }
+    fn admin_stoppage(timer: u32) -> BreakState {
+        BreakState::new(
+            timer,
+            BreakKind::Stoppage(Stoppage {
+                cause: StoppageCause::Admin,
+                next_faceoff: Faceoff::Center,
+            }),
+        )
+    }
+}
+
 impl StandardMatchGameMode {
+    /// Ends warmup and starts the game, whether or not both teams have players.
+    pub(super) fn handle_start(&mut self, ctx: &mut GameContext, player: PlayerId) {
+        let Some(admin_name) = ctx.require_admin(player) else {
+            return;
+        };
+        let StandardMatchState::WaitingForGame(warmup) = &self.state else {
+            ctx.messages
+                .add_directed_server_chat_message("The game has already started", player);
+            return;
+        };
+        self.start_game(warmup.score);
+        info!("{} ({}) started game", admin_name, player);
+        ctx.messages
+            .add_server_chat_message(format!("Game started by {admin_name}"));
+    }
+    /// Runs an admin command that needs a game to be on, and announces it with `done`.
+    pub(super) fn handle_game_command(
+        &mut self,
+        ctx: &mut GameContext,
+        player: PlayerId,
+        done: &str,
+        command: fn(&mut Match, &mut GameContext, &MatchSettings) -> Result<(), &'static str>,
+    ) {
+        let Some(admin_name) = ctx.require_admin(player) else {
+            return;
+        };
+        let StandardMatchState::Game(game) = &mut self.state else {
+            ctx.messages
+                .add_directed_server_chat_message("No game is currently ongoing", player);
+            return;
+        };
+        match command(game, ctx, &self.settings) {
+            Ok(()) => {
+                info!("{} by {} ({})", done, admin_name, player);
+                ctx.messages
+                    .add_server_chat_message(format!("{done} by {admin_name}"));
+            }
+            Err(message) => ctx
+                .messages
+                .add_directed_server_chat_message(message, player),
+        }
+    }
     pub(super) fn handle_set(&mut self, ctx: &mut GameContext, arg: &str, player: PlayerId) {
         let Some(admin_name) = ctx.require_admin(player) else {
             return;
