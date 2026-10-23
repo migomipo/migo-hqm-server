@@ -1089,17 +1089,6 @@ fn admin_logs_in_with_the_right_password() {
 // ----- Commands for administrators -----
 
 #[test]
-#[ignore = "/disablejoin and /enablejoin were removed in 2ec56b3"]
-fn disablejoin_and_enablejoin_control_whether_new_players_can_join() {
-    let mut t = match_server();
-    let admin = t.join_admin("admin");
-    t.chat(admin, "/disablejoin");
-    assert!(t.try_join("blocked").is_none());
-    t.chat(admin, "/enablejoin");
-    assert!(t.try_join("welcome").is_some());
-}
-
-#[test]
 fn kick_removes_a_player() {
     let mut t = match_server();
     let admin = t.join_admin("admin");
