@@ -1043,16 +1043,29 @@ fn lefty_outside_of_play_applies_at_once() {
 }
 
 #[test]
-#[ignore = "/rules was removed in 2ec56b3"]
 fn rules_shows_the_offside_and_icing_settings() {
     let mut t = match_server();
     let player = t.join("player");
     t.take_messages(player);
     t.chat(player, "/rules");
-    let chats = t.take_chats(player);
-    assert!(
-        !chats.is_empty() && !chats.iter().any(|chat| chat.starts_with("Unknown command")),
-        "{chats:?}"
+    assert_eq!(t.take_chats(player), ["Offside disabled, Icing disabled"]);
+
+    let config = &mut t.mode.settings.config;
+    config.offside = OffsideConfiguration::Immediate;
+    config.offside_line = OffsideLineConfiguration::Center;
+    config.icing = IcingConfiguration::NoTouch;
+    config.twoline_pass = TwoLinePassConfiguration::ThreeLine;
+    config.mercy = 5;
+    config.first_to = 7;
+    t.chat(player, "/rules");
+    assert_eq!(
+        t.take_chats(player),
+        [
+            "Immediate offside enabled (center line), No-touch icing enabled",
+            "Three-line pass rule enabled",
+            "Game ends when a team leads by 5 goals",
+            "Game ends when a team reaches 7 goals",
+        ]
     );
 }
 

@@ -85,7 +85,7 @@ Run `migo-hqm-server` to start the server with `config.toml` in the current work
 | /pings *S*             | Searches for player with name *S* and gets server-side ping for that player if a unique match is found. If multiple matches are found, they are listed instead.   |
 | /lefty                 | Makes player left-handed. If done during play after having been on the ice, it will only be applied after play has stopped.                                       |
 | /righty                | Makes player right-handed. If done during play after having been on the ice, it will only be applied after play has stopped.                                      |
-| /rules                 | Shows current offside/icing rule settings.                                                                                                                        |
+| /rules                 | Shows the current offside, icing, two-line pass, mercy and first-to-goals rules. Match mode only.                                                                 |
 | /admin *PASSWORD*      | Logs in as administrator, if the password is correct.                                                                                                             |
 
 ### Administrators only

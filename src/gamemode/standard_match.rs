@@ -58,6 +58,39 @@ pub enum OffsideLineConfiguration {
     Center,
 }
 
+impl IcingConfiguration {
+    /// Describes the rule to players, as in /rules and the /set announcement.
+    fn description(self) -> &'static str {
+        match self {
+            Self::Off => "Icing disabled",
+            Self::Touch => "Touch icing enabled",
+            Self::NoTouch => "No-touch icing enabled",
+        }
+    }
+}
+impl OffsideConfiguration {
+    /// Describes the rule to players, as in /rules and the /set announcement.
+    fn description(self) -> &'static str {
+        match self {
+            Self::Off => "Offside disabled",
+            Self::Delayed => "Offside enabled",
+            Self::Immediate => "Immediate offside enabled",
+        }
+    }
+}
+impl TwoLinePassConfiguration {
+    /// Describes the rule to players, as in /rules and the /set announcement.
+    fn description(self) -> &'static str {
+        match self {
+            Self::Off => "Two-line pass rule disabled",
+            Self::On => "Regular two-line pass rule enabled",
+            Self::Forward => "Forward two-line pass rule enabled",
+            Self::Double => "Regular and forward two-line pass rules enabled",
+            Self::ThreeLine => "Three-line pass rule enabled",
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub struct MatchConfiguration {
     pub time_period: u32,
@@ -1222,6 +1255,7 @@ impl GameMode for StandardMatchGameMode {
     ) -> CommandResult {
         match command {
             "set" => self.handle_set(ctx, arg, player),
+            "rules" => self.handle_rules(ctx, player),
             "start" => self.handle_admin_command(ctx, player, "Game started", Self::start),
             "faceoff" => {
                 self.handle_admin_command(ctx, player, "Faceoff initiated", Self::call_faceoff)
@@ -1918,14 +1952,14 @@ mod tests {
 
         t.chat(player, "/sp lw");
         t.chat(player, "/sp nowhere");
-        t.chat(player, "/rules");
+        t.chat(player, "/nosuchcommand");
 
         assert_eq!(
             t.take_chats(player),
             [
                 "Preferred faceoff position set to LW",
                 "Invalid faceoff position",
-                "Unknown command /rules"
+                "Unknown command /nosuchcommand"
             ]
         );
     }

@@ -151,6 +151,41 @@ impl StandardMatchGameMode {
                 .add_directed_server_chat_message(message, player),
         }
     }
+    /// Tells a player which rules are in use.
+    pub(super) fn handle_rules(&self, ctx: &mut GameContext, player: PlayerId) {
+        let config = &self.settings.config;
+        let offside_line = if config.offside != OffsideConfiguration::Off
+            && config.offside_line == OffsideLineConfiguration::Center
+        {
+            " (center line)"
+        } else {
+            ""
+        };
+        let mut messages = vec![format!(
+            "{}{offside_line}, {}",
+            config.offside.description(),
+            config.icing.description(),
+        )];
+        if config.twoline_pass != TwoLinePassConfiguration::Off {
+            messages.push(config.twoline_pass.description().to_owned());
+        }
+        if config.mercy > 0 {
+            messages.push(format!(
+                "Game ends when a team leads by {} goals",
+                config.mercy
+            ));
+        }
+        if config.first_to > 0 {
+            messages.push(format!(
+                "Game ends when a team reaches {} goals",
+                config.first_to
+            ));
+        }
+        for message in messages {
+            ctx.messages
+                .add_directed_server_chat_message(message, player);
+        }
+    }
     pub(super) fn handle_set(&mut self, ctx: &mut GameContext, arg: &str, player: PlayerId) {
         let Some(admin_name) = ctx.require_admin(player) else {
             return;
@@ -320,21 +355,9 @@ impl StandardMatchGameMode {
                 ("period", _) => format!("Period set to {value}"),
                 ("periodnum", _) => format!("Number of periods set to {value}"),
                 ("clock", _) => format!("Clock set to {value}"),
-                ("icing", "on" | "touch") => "Touch icing enabled".to_owned(),
-                ("icing", "notouch") => "No-touch icing enabled".to_owned(),
-                ("icing", "off") => "Icing disabled".to_owned(),
-                ("offside", "on" | "delayed") => "Offside enabled".to_owned(),
-                ("offside", "imm" | "immediate") => "Immediate offside enabled".to_owned(),
-                ("offside", "off") => "Offside disabled".to_owned(),
-                ("twolinepass", "off") => "Two-line pass rule disabled".to_owned(),
-                ("twolinepass", "on") => "Regular two-line pass rule enabled".to_owned(),
-                ("twolinepass", "forward") => "Forward two-line pass rule enabled".to_owned(),
-                ("twolinepass", "double" | "both") => {
-                    "Regular and forward two-line pass rules enabled".to_owned()
-                }
-                ("twolinepass", "blue" | "three" | "threeline") => {
-                    "Three-line pass rule enabled".to_owned()
-                }
+                ("icing", _) => self.settings.config.icing.description().to_owned(),
+                ("offside", _) => self.settings.config.offside.description().to_owned(),
+                ("twolinepass", _) => self.settings.config.twoline_pass.description().to_owned(),
                 ("offsideline", "blue") => "Blue line set as offside line".to_owned(),
                 ("offsideline", "center") => "Center line set as offside line".to_owned(),
                 ("mercy", "0" | "off") => "Mercy rule disabled".to_owned(),
