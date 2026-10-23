@@ -1261,15 +1261,43 @@ fn pause_and_unpause_tell_the_admin_when_they_do_nothing() {
             .contains(&"Please log in before using that command".to_owned())
     );
     let mut warmup = MatchGame::join(MatchGame::quick_config(), 1, 0);
+    warmup.tick();
+    warmup.chat(warmup.admin(), "/unpause");
+    warmup.chat(warmup.admin(), "/pause");
     warmup.chat(warmup.admin(), "/pause");
     warmup.chat(warmup.admin(), "/faceoff");
     assert_eq!(
         warmup.heard,
         [
+            "The game is not paused",
+            "Game paused by red0",
+            "The game is already paused",
             "No game is currently ongoing",
-            "No game is currently ongoing"
         ]
     );
+}
+
+#[test]
+fn pause_in_warmup_holds_back_the_game_until_unpause() {
+    let mut game = MatchGame::join(MatchGame::quick_config(), 1, 1);
+    game.tick();
+    game.chat(game.admin(), "/pause");
+    // Much longer than warmup, which would start the game with players on both teams.
+    game.ticks(3000);
+    assert_eq!(game.scoreboard.period, 0);
+    game.chat(game.admin(), "/unpause");
+    game.play_until_faceoff();
+    assert_eq!(game.scoreboard.period, 1);
+}
+
+#[test]
+fn start_starts_the_game_from_a_paused_warmup() {
+    let mut game = MatchGame::join(MatchGame::quick_config(), 1, 1);
+    game.tick();
+    game.chat(game.admin(), "/pause");
+    game.chat(game.admin(), "/start");
+    game.play_until_faceoff();
+    assert_eq!(game.scoreboard.period, 1);
 }
 
 /// Whether the puck is at the center faceoff spot.

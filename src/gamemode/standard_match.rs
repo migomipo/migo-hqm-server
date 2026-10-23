@@ -1099,6 +1099,8 @@ pub enum StandardMatchState {
 pub struct WarmupState {
     pub(crate) time: u32,
     pub(crate) score: (u32, u32),
+    /// Whether an admin has paused the game. The game does not start while paused.
+    paused: bool,
 }
 impl WarmupState {
     /// Ticks of warmup once both teams have players, before the game starts.
@@ -1108,11 +1110,15 @@ impl WarmupState {
         Self {
             time: Self::TIME,
             score: (0, 0),
+            paused: false,
         }
     }
     fn before_tick(&mut self, red_players: usize, blue_players: usize) -> Option<(u32, u32)> {
         if red_players == 0 || blue_players == 0 {
             self.time = Self::TIME;
+            return None;
+        }
+        if self.paused {
             return None;
         }
         self.time = self.time.saturating_sub(1);
@@ -1216,13 +1222,13 @@ impl GameMode for StandardMatchGameMode {
     ) -> CommandResult {
         match command {
             "set" => self.handle_set(ctx, arg, player),
-            "start" => self.handle_start(ctx, player),
+            "start" => self.handle_admin_command(ctx, player, "Game started", Self::start),
             "faceoff" => {
-                self.handle_game_command(ctx, player, "Faceoff initiated", Match::call_faceoff)
+                self.handle_admin_command(ctx, player, "Faceoff initiated", Self::call_faceoff)
             }
-            "pause" => self.handle_game_command(ctx, player, "Game paused", Match::pause),
+            "pause" => self.handle_admin_command(ctx, player, "Game paused", Self::pause),
             "unpause" | "resume" => {
-                self.handle_game_command(ctx, player, "Game resumed", Match::unpause)
+                self.handle_admin_command(ctx, player, "Game resumed", Self::unpause)
             }
             "sp" | "setposition" => {
                 let requested = arg.to_ascii_uppercase();
@@ -1606,6 +1612,7 @@ mod tests {
             StandardMatchState::WaitingForGame(WarmupState {
                 time: WarmupState::TIME,
                 score: (0, 0),
+                paused: false,
             })
         ));
     }

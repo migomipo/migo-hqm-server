@@ -91,38 +91,56 @@ impl Match {
 }
 
 impl StandardMatchGameMode {
-    /// Ends warmup and starts the game, whether or not both teams have players.
-    pub(super) fn handle_start(&mut self, ctx: &mut GameContext, player: PlayerId) {
-        let Some(admin_name) = ctx.require_admin(player) else {
-            return;
-        };
+    /// Ends warmup and starts the game, whether or not both teams have players or the warmup
+    /// is paused.
+    pub(super) fn start(&mut self, _ctx: &mut GameContext) -> Result<(), &'static str> {
         let StandardMatchState::WaitingForGame(warmup) = &self.state else {
-            ctx.messages
-                .add_directed_server_chat_message("The game has already started", player);
-            return;
+            return Err("The game has already started");
         };
         self.start_game(warmup.score);
-        info!("{} ({}) started game", admin_name, player);
-        ctx.messages
-            .add_server_chat_message(format!("Game started by {admin_name}"));
+        Ok(())
     }
-    /// Runs an admin command that needs a game to be on, and announces it with `done`.
-    pub(super) fn handle_game_command(
+    pub(super) fn call_faceoff(&mut self, ctx: &mut GameContext) -> Result<(), &'static str> {
+        let StandardMatchState::Game(game) = &mut self.state else {
+            return Err("No game is currently ongoing");
+        };
+        game.call_faceoff(ctx, &self.settings)
+    }
+    pub(super) fn pause(&mut self, ctx: &mut GameContext) -> Result<(), &'static str> {
+        match &mut self.state {
+            StandardMatchState::WaitingForGame(warmup) if warmup.paused => {
+                Err("The game is already paused")
+            }
+            StandardMatchState::WaitingForGame(warmup) => {
+                warmup.paused = true;
+                Ok(())
+            }
+            StandardMatchState::Game(game) => game.pause(ctx, &self.settings),
+        }
+    }
+    pub(super) fn unpause(&mut self, ctx: &mut GameContext) -> Result<(), &'static str> {
+        match &mut self.state {
+            // The game opens with an intermission, so there is no need to hold back the start.
+            StandardMatchState::WaitingForGame(warmup) if warmup.paused => {
+                warmup.paused = false;
+                Ok(())
+            }
+            StandardMatchState::WaitingForGame(_) => Err("The game is not paused"),
+            StandardMatchState::Game(game) => game.unpause(ctx, &self.settings),
+        }
+    }
+    /// Runs an admin command, and announces it with `done` if it succeeded.
+    pub(super) fn handle_admin_command(
         &mut self,
         ctx: &mut GameContext,
         player: PlayerId,
         done: &str,
-        command: fn(&mut Match, &mut GameContext, &MatchSettings) -> Result<(), &'static str>,
+        command: fn(&mut Self, &mut GameContext) -> Result<(), &'static str>,
     ) {
         let Some(admin_name) = ctx.require_admin(player) else {
             return;
         };
-        let StandardMatchState::Game(game) = &mut self.state else {
-            ctx.messages
-                .add_directed_server_chat_message("No game is currently ongoing", player);
-            return;
-        };
-        match command(game, ctx, &self.settings) {
+        match command(self, ctx) {
             Ok(()) => {
                 info!("{} by {} ({})", done, admin_name, player);
                 ctx.messages
