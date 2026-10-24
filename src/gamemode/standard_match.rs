@@ -247,7 +247,9 @@ enum StoppageCause {
 }
 /// A change to the state of a running match.
 ///
-/// The current state decides which transition to make, and [Match::apply] carries it out.
+/// The current state decides which transition to make, and [Match::apply] carries it out. A match
+/// only ends once its game-over break has run out, which [BreakState::before_tick] reports with
+/// [BreakOutcome::GameFinished] instead of a transition.
 #[derive(Debug, Clone)]
 enum MatchTransition {
     Continue,
@@ -259,8 +261,13 @@ enum MatchTransition {
         faceoff: Faceoff,
         reset_clock: bool,
     },
-    /// The game is over and a new one should start.
-    Finish,
+}
+/// What happens when a break's timer is counted down.
+#[derive(Debug)]
+enum BreakOutcome {
+    Transition(MatchTransition),
+    /// The game-over break has run out and the game is over.
+    GameFinished,
 }
 #[derive(Debug)]
 struct PlayingState {
@@ -280,15 +287,15 @@ impl BreakState {
             paused: false,
         }
     }
-    fn before_tick(&mut self, config: &MatchConfiguration, game_over: bool) -> MatchTransition {
+    fn before_tick(&mut self, config: &MatchConfiguration, game_over: bool) -> BreakOutcome {
         if self.paused {
-            return MatchTransition::Continue;
+            return BreakOutcome::Transition(MatchTransition::Continue);
         }
         self.timer = self.timer.saturating_sub(1);
         if self.timer != 0 {
-            return MatchTransition::Continue;
+            return BreakOutcome::Transition(MatchTransition::Continue);
         }
-        match &self.kind {
+        let transition = match &self.kind {
             BreakKind::Stoppage(_) if game_over => MatchTransition::Break(BreakState::new(
                 config.time_intermission * 100,
                 BreakKind::GameOver { after_goal: false },
@@ -301,8 +308,9 @@ impl BreakState {
                 faceoff: Faceoff::Center,
                 reset_clock: true,
             },
-            BreakKind::GameOver { .. } => MatchTransition::Finish,
-        }
+            BreakKind::GameOver { .. } => return BreakOutcome::GameFinished,
+        };
+        BreakOutcome::Transition(transition)
     }
     fn scoreboard(&self) -> (RulesState, u32, bool) {
         match self.kind {
@@ -999,12 +1007,16 @@ impl Match {
                     MatchTransition::Continue
                 }
             }
-            MatchState::Break(state) => state.before_tick(
+            MatchState::Break(state) => match state.before_tick(
                 &settings.config,
                 self.game_state.game_over(&settings.config),
-            ),
+            ) {
+                BreakOutcome::Transition(transition) => transition,
+                BreakOutcome::GameFinished => return GameProgress::Finished,
+            },
         };
-        self.apply(ctx, settings, transition)
+        self.apply(ctx, settings, transition);
+        GameProgress::Continue
     }
     /// Carries out a transition. This is the only place where a running match changes state.
     fn apply(
@@ -1012,7 +1024,7 @@ impl Match {
         ctx: &mut GameContext,
         settings: &MatchSettings,
         transition: MatchTransition,
-    ) -> GameProgress {
+    ) {
         match transition {
             MatchTransition::Continue => {}
             MatchTransition::Break(state) => self.state = MatchState::Break(state),
@@ -1044,9 +1056,7 @@ impl Match {
                     faceoff,
                 ));
             }
-            MatchTransition::Finish => return GameProgress::Finished,
         }
-        GameProgress::Continue
     }
     fn scoreboard(&self) -> ScoreboardValues {
         let (rules_state, goal_message_timer, game_over) = match &self.state {
@@ -1076,7 +1086,7 @@ impl Match {
         ctx: &mut GameContext,
         settings: &MatchSettings,
         events: &[PhysicsEvent],
-    ) -> GameProgress {
+    ) {
         let transition = match &mut self.state {
             MatchState::Playing(playing) => {
                 PlayingState::events(&mut self.game_state, &settings.config, ctx, events, playing)
@@ -1086,14 +1096,13 @@ impl Match {
                 MatchTransition::Continue
             }
         };
-        let progress = self.apply(ctx, settings, transition);
+        self.apply(ctx, settings, transition);
         if let Some((start_step, end_step, force_view)) = self.game_state.replay
             && end_step <= ctx.replay.game_step()
         {
             self.game_state.replay = None;
             self.queue_goal_replay(ctx, &settings.config, start_step, end_step, force_view);
         }
-        progress
     }
     /// Queues the goal replay once all of its ticks have been played.
     ///
@@ -1238,10 +1247,8 @@ impl GameMode for StandardMatchGameMode {
         }
     }
     fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues {
-        if let StandardMatchState::Game(game) = &mut self.state
-            && game.after_tick(ctx, &self.settings, events) == GameProgress::Finished
-        {
-            ctx.new_game();
+        if let StandardMatchState::Game(game) = &mut self.state {
+            game.after_tick(ctx, &self.settings, events);
         }
         match &self.state {
             StandardMatchState::WaitingForGame(warmup) => warmup.scoreboard(),
@@ -1399,10 +1406,10 @@ mod tests {
 
         assert!(matches!(
             state.before_tick(&MatchConfiguration::default(), false),
-            MatchTransition::StartPlaying {
+            BreakOutcome::Transition(MatchTransition::StartPlaying {
                 faceoff: Faceoff::Center,
                 reset_clock: false,
-            }
+            })
         ));
     }
 
@@ -1418,10 +1425,10 @@ mod tests {
 
         assert!(matches!(
             state.before_tick(&MatchConfiguration::default(), false),
-            MatchTransition::StartPlaying {
+            BreakOutcome::Transition(MatchTransition::StartPlaying {
                 faceoff: Faceoff::Center,
                 reset_clock: true,
-            }
+            })
         ));
     }
 
@@ -1438,15 +1445,15 @@ mod tests {
             }),
         );
 
-        let transition = state.before_tick(&config, true);
+        let outcome = state.before_tick(&config, true);
 
         assert!(matches!(
-            transition,
-            MatchTransition::Break(BreakState {
+            outcome,
+            BreakOutcome::Transition(MatchTransition::Break(BreakState {
                 kind: BreakKind::GameOver { after_goal: false },
                 timer,
                 ..
-            }) if timer == config.time_intermission * 100
+            })) if timer == config.time_intermission * 100
         ));
     }
 
@@ -1463,7 +1470,7 @@ mod tests {
 
         assert!(matches!(
             state.before_tick(&MatchConfiguration::default(), true),
-            MatchTransition::Continue
+            BreakOutcome::Transition(MatchTransition::Continue)
         ));
         assert_eq!(state.timer, 1);
     }
@@ -1476,10 +1483,7 @@ mod tests {
         let settings = MatchSettings::new(config);
 
         let mut tied = Match::start(&config, (1, 1));
-        assert_eq!(
-            tied.apply(&mut ctx, &settings, MatchTransition::EndPeriod),
-            GameProgress::Continue
-        );
+        tied.apply(&mut ctx, &settings, MatchTransition::EndPeriod);
         assert_eq!(tied.game_state.period, 2);
         assert!(matches!(
             tied.state,
@@ -1923,7 +1927,7 @@ mod tests {
         };
         assert!(matches!(
             last_tick.before_tick(&config, true),
-            MatchTransition::Finish
+            BreakOutcome::GameFinished
         ));
     }
 

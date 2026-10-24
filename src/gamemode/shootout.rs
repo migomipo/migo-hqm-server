@@ -142,7 +142,9 @@ impl ShootoutAttemptState {
 /// A change to the state of a running shootout.
 ///
 /// The current attempt state decides which transition to make, and [ShootoutGame::apply]
-/// carries it out.
+/// carries it out. A shootout only ends once the pause after its last attempt has run out, which
+/// [OverState::before_tick] reports with [AttemptOverOutcome::ShootoutFinished] instead of a
+/// transition.
 #[derive(Debug, Clone, Copy)]
 enum ShootoutTransition {
     Continue,
@@ -152,8 +154,14 @@ enum ShootoutTransition {
         goal_scored: bool,
     },
     StartNextAttempt,
-    /// The shootout is over and a new game should start.
-    Finish,
+}
+
+/// What happens when the pause after an attempt is counted down.
+#[derive(Debug, Clone, Copy)]
+enum AttemptOverOutcome {
+    Transition(ShootoutTransition),
+    /// The pause after the last attempt has run out and the shootout is over.
+    ShootoutFinished,
 }
 
 impl AttackState {
@@ -321,14 +329,14 @@ impl AttackState {
 }
 
 impl OverState {
-    fn before_tick(&mut self) -> ShootoutTransition {
+    fn before_tick(&mut self) -> AttemptOverOutcome {
         self.timer_until_next_round = self.timer_until_next_round.saturating_sub(1);
         if self.timer_until_next_round != 0 {
-            ShootoutTransition::Continue
+            AttemptOverOutcome::Transition(ShootoutTransition::Continue)
         } else if self.game_over {
-            ShootoutTransition::Finish
+            AttemptOverOutcome::ShootoutFinished
         } else {
-            ShootoutTransition::StartNextAttempt
+            AttemptOverOutcome::Transition(ShootoutTransition::StartNextAttempt)
         }
     }
 }
@@ -373,9 +381,13 @@ impl ShootoutGame {
     ) -> GameProgress {
         let transition = match &mut self.state {
             ShootoutAttemptState::Attack(state) => state.before_tick(),
-            ShootoutAttemptState::Over(state) => state.before_tick(),
+            ShootoutAttemptState::Over(state) => match state.before_tick() {
+                AttemptOverOutcome::Transition(transition) => transition,
+                AttemptOverOutcome::ShootoutFinished => return GameProgress::Finished,
+            },
         };
-        self.apply(ctx, config, transition)
+        self.apply(ctx, config, transition);
+        GameProgress::Continue
     }
 
     fn tick(
@@ -383,12 +395,12 @@ impl ShootoutGame {
         ctx: &mut GameContext,
         config: &ShootoutGameConfiguration,
         events: &[PhysicsEvent],
-    ) -> GameProgress {
+    ) {
         let transition = match &mut self.state {
             ShootoutAttemptState::Attack(state) => state.tick(ctx, self.game_state.team, events),
             ShootoutAttemptState::Over(_) => ShootoutTransition::Continue,
         };
-        self.apply(ctx, config, transition)
+        self.apply(ctx, config, transition);
     }
 
     /// Carries out a transition. This is the only place where a running shootout changes state.
@@ -397,7 +409,7 @@ impl ShootoutGame {
         ctx: &mut GameContext,
         config: &ShootoutGameConfiguration,
         transition: ShootoutTransition,
-    ) -> GameProgress {
+    ) {
         match transition {
             ShootoutTransition::Continue => {}
             ShootoutTransition::EndAttempt { time, goal_scored } => {
@@ -422,9 +434,7 @@ impl ShootoutGame {
                     &self.game_state,
                 ));
             }
-            ShootoutTransition::Finish => return GameProgress::Finished,
         }
-        GameProgress::Continue
     }
 }
 
@@ -502,10 +512,8 @@ impl GameMode for ShootoutGameMode {
     }
 
     fn after_tick(&mut self, ctx: &mut GameContext, events: &[PhysicsEvent]) -> ScoreboardValues {
-        if let ServerStatus::Game(game) = &mut self.status
-            && game.tick(ctx, &self.config, events) == GameProgress::Finished
-        {
-            ctx.new_game();
+        if let ServerStatus::Game(game) = &mut self.status {
+            game.tick(ctx, &self.config, events);
         }
         match &self.status {
             &ServerStatus::WaitingForGame { time, .. } => ScoreboardValues {
