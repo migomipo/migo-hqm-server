@@ -88,13 +88,20 @@ impl PacketHistory {
             .objects
     }
 
-    pub(crate) fn objects_for(&self, sequence: PacketNumber) -> Option<&[ObjectPacket; 32]> {
+    fn frame(&self, sequence: PacketNumber) -> Option<&ReplicationFrame> {
         let latest = self.latest?;
-        let age = latest.0.wrapping_sub(sequence.0) as usize;
+        let mut age = latest.0.wrapping_sub(sequence.0);
+        // Numbering skips NO_PACKET_SEQUENCE, so frames from before a wraparound are one step newer
+        if sequence.0 > latest.0 {
+            age = age.wrapping_sub(1);
+        }
         self.frames
-            .get(age)
+            .get(age as usize)
             .filter(|frame| frame.sequence == sequence)
-            .map(|frame| &frame.objects)
+    }
+
+    pub(crate) fn objects_for(&self, sequence: PacketNumber) -> Option<&[ObjectPacket; 32]> {
+        self.frame(sequence).map(|frame| &frame.objects)
     }
 
     pub(crate) fn baseline_objects_for(
@@ -109,12 +116,7 @@ impl PacketHistory {
     }
 
     pub(crate) fn sent_at(&self, sequence: PacketNumber) -> Option<Instant> {
-        let latest = self.latest?;
-        let age = latest.0.wrapping_sub(sequence.0) as usize;
-        self.frames
-            .get(age)
-            .filter(|frame| frame.sequence == sequence)
-            .map(|frame| frame.created_at)
+        self.frame(sequence).map(|frame| frame.created_at)
     }
 }
 
