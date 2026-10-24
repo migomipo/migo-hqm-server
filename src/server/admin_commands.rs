@@ -485,3 +485,171 @@ impl HQMServer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gamemode::standard_match::test_game::{MatchGame, match_server};
+    use crate::gamemode::util::SpawnPoint;
+    use crate::gamemode::warmup::PermanentWarmup;
+    use crate::server::test_server::TestServer;
+    use glam::Vec3;
+
+    #[test]
+    fn admin_logs_in_with_the_right_password() {
+        let mut t = match_server();
+        t.server.config.password = Some("secret".to_owned());
+        let player = t.join("player");
+        t.take_messages(player);
+        t.chat(player, "/admin wrong");
+        assert_eq!(t.take_chats(player), ["Wrong administrator password"]);
+        t.chat(player, "/admin secret");
+        assert_eq!(
+            t.take_chats(player),
+            ["Successfully logged in as administrator"]
+        );
+        t.chat(player, "/mutechat");
+        assert_eq!(t.take_chats(player), ["Chat muted by player"]);
+    }
+
+    #[test]
+    fn kick_removes_a_player() {
+        let mut t = match_server();
+        let admin = t.join_admin("admin");
+        let kicked = t.join("kicked");
+        t.take_messages(admin);
+        t.chat(admin, "/kick 1");
+        assert!(t.ctx().players.get(kicked).is_none());
+        assert!(
+            t.take_chats(admin)
+                .contains(&"kicked kicked by admin".to_owned())
+        );
+    }
+
+    #[test]
+    fn ban_kicks_and_bans_until_clearbans() {
+        let mut t = match_server();
+        let admin = t.join_admin("admin");
+        let banned = t.join("banned");
+        t.chat(admin, "/ban 1");
+        assert!(t.ctx().players.get(banned).is_none());
+        // Test players all connect from 127.0.0.1, so nobody else can join while it is banned.
+        assert!(t.try_join("again").is_none());
+        t.chat(admin, "/clearbans");
+        assert!(t.try_join("again").is_some());
+    }
+
+    #[test]
+    fn mute_and_unmute_a_player() {
+        let mut t = match_server();
+        let admin = t.join_admin("admin");
+        let player = t.join("player");
+        t.chat(admin, "/mute 1");
+        t.take_messages(admin);
+        t.chat(player, "hello");
+        assert!(!t.take_chats(admin).contains(&"hello".to_owned()));
+        t.chat(admin, "/unmute 1");
+        t.chat(player, "hello again");
+        assert!(t.take_chats(admin).contains(&"hello again".to_owned()));
+    }
+
+    #[test]
+    fn mutechat_and_unmutechat_mute_all_chat() {
+        let mut t = match_server();
+        let admin = t.join_admin("admin");
+        let player = t.join("player");
+        t.chat(admin, "/mutechat");
+        t.take_messages(admin);
+        t.chat(player, "hello");
+        assert!(!t.take_chats(admin).contains(&"hello".to_owned()));
+        t.chat(admin, "/unmutechat");
+        t.chat(player, "hello again");
+        assert!(t.take_chats(admin).contains(&"hello again".to_owned()));
+    }
+
+    #[test]
+    fn reset_resets_the_game() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        game.score(game.red[0]);
+        game.chat(game.admin(), "/reset");
+        game.ticks(2);
+        assert_eq!(game.scoreboard.period, 0);
+        assert_eq!(game.scoreboard.red_score, 0);
+        assert!(game.heard("Game reset by red0"), "{:?}", game.heard);
+    }
+
+    #[test]
+    fn reset_works_in_every_game_mode() {
+        let mut t = TestServer::new(PermanentWarmup::new(1, SpawnPoint::Center));
+        let admin = t.join_admin("admin");
+        t.take_messages(admin);
+        t.tick();
+        let start = |t: &mut TestServer<PermanentWarmup>| {
+            t.ctx().objects.pucks().next().unwrap().1.body.pos
+        };
+        let puck_start = start(&mut t);
+        t.ctx().objects.pucks_mut().next().unwrap().1.body.pos = Vec3::new(5.0, 1.0, 5.0);
+        t.chat(admin, "/reset");
+        // The new game puts the warmup puck back where it starts.
+        let puck = start(&mut t);
+        assert_eq!((puck.x, puck.z), (puck_start.x, puck_start.z));
+        assert_eq!(t.take_chats(admin), ["Game reset by admin"]);
+    }
+
+    #[test]
+    fn replay_turns_server_side_replays_on_and_off() {
+        let mut t = match_server();
+        let admin = t.join_admin("admin");
+        t.take_messages(admin);
+        t.chat(admin, "/replay on");
+        assert_eq!(t.server.config.recording_enabled, ReplayRecording::On);
+        t.chat(admin, "/replay off");
+        assert_eq!(t.server.config.recording_enabled, ReplayRecording::Off);
+        assert_eq!(
+            t.take_chats(admin),
+            ["Replays enabled by admin", "Replays disabled by admin"]
+        );
+    }
+
+    /// Kicks with `/kickall pattern` from a server with MigoMipo and Other, and returns the patterns
+    /// that did not kick exactly MigoMipo.
+    fn kickall_failures(patterns: &[&'static str]) -> Vec<&'static str> {
+        let mut failures = vec![];
+        for &pattern in patterns {
+            let mut t = match_server();
+            let admin = t.join_admin("admin");
+            let target = t.join("MigoMipo");
+            let other = t.join("Other");
+            t.chat(admin, &format!("/kickall {pattern}"));
+            if t.ctx().players.get(target).is_some() || t.ctx().players.get(other).is_none() {
+                failures.push(pattern);
+            }
+        }
+        failures
+    }
+
+    #[test]
+    fn kickall_kicks_players_with_the_exact_name() {
+        assert_eq!(kickall_failures(&["MigoMipo"]), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn kickall_ignores_case_and_supports_wildcards() {
+        let patterns = ["migomipo", "Migo%", "migo%", "%Mipo", "%mipo", "%gomi%"];
+        let failures = kickall_failures(&patterns);
+        assert!(
+            failures.is_empty(),
+            "patterns that did not kick only MigoMipo: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn banall_kicks_and_bans_players_by_name() {
+        let mut t = match_server();
+        let admin = t.join_admin("admin");
+        let target = t.join("MigoMipo");
+        t.chat(admin, "/banall MigoMipo");
+        assert!(t.ctx().players.get(target).is_none());
+        assert!(t.try_join("again").is_none());
+    }
+}

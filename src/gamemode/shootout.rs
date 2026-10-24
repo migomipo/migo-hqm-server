@@ -766,4 +766,23 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn shootout_attempts_sets_the_attempts_per_team() {
+        let mut t = TestServer::new(ShootoutGameMode::new(ShootoutGameConfiguration {
+            attempts: 3,
+        }));
+        let red = t.join("red");
+        let blue = t.join("blue");
+        t.press_join(red, Team::Red);
+        t.press_join(blue, Team::Blue);
+        t.take_messages(red);
+        for _ in 0..2000 {
+            t.tick();
+        }
+        assert!(
+            t.take_chats(red)
+                .contains(&"3 attempts left for Red".to_owned())
+        );
+    }
 }

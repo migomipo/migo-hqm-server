@@ -1538,6 +1538,14 @@ pub(crate) fn test_server() -> HQMServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::{RulesState, SkaterHand};
+    use crate::gamemode::standard_match::test_game::{MatchGame, ice_the_puck, match_server};
+    use crate::gamemode::standard_match::{
+        IcingConfiguration, MatchConfiguration, StandardMatchGameMode,
+    };
+    use crate::gamemode::util::SpawnPoint;
+    use crate::gamemode::warmup::PermanentWarmup;
+    use crate::players::ServerPlayerData;
     use tokio_util::codec::Encoder;
 
     use crate::game::PhysicsEvent;
@@ -2228,5 +2236,222 @@ mod tests {
         assert!(chats[0].starts_with("Migo HQM Server, version"));
         assert_eq!(chats[1], "Unknown command /typo");
         assert_eq!(t.take_chats(other), Vec::<String>::new());
+    }
+
+    #[test]
+    fn welcome_messages_are_sent_to_joining_players() {
+        let mut t = TestServer::new(StandardMatchGameMode::new(
+            MatchConfiguration::default(),
+            5,
+            SpawnPoint::Center,
+        ));
+        t.server.config.welcome = vec!["Welcome!".to_owned(), "Have fun".to_owned()];
+        let player = t.join("player");
+        let chats = t.take_chats(player);
+        assert_eq!(chats[..2], ["Welcome!", "Have fun"]);
+    }
+
+    #[test]
+    fn player_max_limits_the_players_on_the_server() {
+        let mut t = TestServer::new(PermanentWarmup::new(1, SpawnPoint::Center));
+        t.server.config.player_max = 2;
+        t.join("first");
+        t.join("second");
+        assert!(t.try_join("third").is_none());
+    }
+
+    #[test]
+    fn team_chat_reaches_only_team_mates() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 2, 1);
+        let (red0, red1, blue) = (game.red[0], game.red[1], game.blue[0]);
+        game.t.take_messages(red1);
+        game.t.take_messages(blue);
+        game.chat(red0, "/t go left");
+        assert!(game.t.take_chats(red1).contains(&"go left".to_owned()));
+        assert!(!game.t.take_chats(blue).contains(&"go left".to_owned()));
+    }
+
+    #[test]
+    fn list_shows_up_to_five_player_ids_from_an_optional_start() {
+        let mut t = match_server();
+        let players: Vec<_> = (0..7).map(|i| t.join(&format!("player{i}"))).collect();
+        let asker = players[0];
+        t.take_messages(asker);
+        t.chat(asker, "/list");
+        assert_eq!(
+            t.take_chats(asker),
+            [
+                "0: player0",
+                "1: player1",
+                "2: player2",
+                "3: player3",
+                "4: player4"
+            ]
+        );
+        t.chat(asker, "/list 5");
+        assert_eq!(t.take_chats(asker), ["5: player5", "6: player6"]);
+    }
+
+    #[test]
+    fn search_lists_players_whose_name_contains_the_text() {
+        let mut t = match_server();
+        let asker = t.join("asker");
+        t.join("MigoMipo");
+        t.join("Other");
+        t.take_messages(asker);
+        t.chat(asker, "/search Mipo");
+        assert_eq!(t.take_chats(asker), ["1: MigoMipo"]);
+    }
+
+    #[test]
+    fn view_enters_first_person_view_of_a_player() {
+        let mut t = match_server();
+        let viewer = t.join("viewer");
+        t.join("target");
+        t.take_messages(viewer);
+        t.chat(viewer, "/view 1");
+        assert_eq!(t.take_chats(viewer), ["You are now viewing target"]);
+        t.chat(viewer, "/restoreview");
+        assert_eq!(t.take_chats(viewer), ["View has been restored"]);
+    }
+
+    #[test]
+    fn view_from_the_ice_makes_the_player_a_spectator() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        let viewer = game.red[0];
+        game.chat(viewer, "/view 1");
+        assert!(game.heard("You are now viewing blue0"), "{:?}", game.heard);
+        assert!(game.t.ctx().objects.skater(viewer).is_none());
+    }
+
+    #[test]
+    fn views_finds_a_player_by_name_or_lists_the_matches() {
+        let mut t = match_server();
+        let viewer = t.join("viewer");
+        t.join("target one");
+        t.join("target two");
+        t.take_messages(viewer);
+        t.chat(viewer, "/views one");
+        assert_eq!(t.take_chats(viewer), ["You are now viewing target one"]);
+        t.chat(viewer, "/views target");
+        assert_eq!(
+            t.take_chats(viewer),
+            [
+                "Multiple matches found, use /view X",
+                "1: target one",
+                "2: target two"
+            ]
+        );
+    }
+
+    fn add_ping(t: &mut TestServer<impl GameMode>, player: PlayerId, seconds: f32) {
+        let player = t
+            .server
+            .state
+            .player_message_state
+            .players
+            .get_player_mut(player)
+            .unwrap();
+        let ServerPlayerData::NetworkPlayer { data } = &mut player.data else {
+            panic!("expected a network player");
+        };
+        data.last_ping.push_front(seconds);
+    }
+
+    #[test]
+    fn ping_and_pings_show_a_players_server_side_ping() {
+        let mut t = match_server();
+        let asker = t.join("asker");
+        let target = t.join("target");
+        add_ping(&mut t, target, 0.05);
+        t.take_messages(asker);
+        t.chat(asker, "/ping 1");
+        let chats = t.take_chats(asker);
+        assert_eq!(chats[0], "target ping: avg 50 ms");
+        t.chat(asker, "/pings targ");
+        assert_eq!(t.take_chats(asker), chats);
+    }
+
+    fn hand(game: &MatchGame, player: PlayerId) -> SkaterHand {
+        game.server_objects()
+            .find_map(|object| match object {
+                crate::server::GameObject::Skater(id, skater) if *id == player => Some(skater.hand),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn lefty_during_play_applies_after_play_has_stopped() {
+        let config = MatchConfiguration {
+            icing: IcingConfiguration::NoTouch,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        let player = game.red[0];
+        assert_eq!(hand(&game, player), SkaterHand::Right);
+        game.chat(player, "/lefty");
+        assert!(
+            game.heard("Stick hand will change when play has stopped"),
+            "{:?}",
+            game.heard
+        );
+        game.tick();
+        assert_eq!(hand(&game, player), SkaterHand::Right);
+
+        // Play stops for icing, and the hand changes during the stoppage.
+        ice_the_puck(&mut game);
+        game.tick_until(100, |game| game.scoreboard.rules_state == RulesState::Icing);
+        assert_eq!(hand(&game, player), SkaterHand::Left);
+        game.wait_for_play();
+        assert_eq!(hand(&game, player), SkaterHand::Left);
+    }
+
+    #[test]
+    fn players_who_have_not_been_on_the_ice_can_change_hands_during_play() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        let late = game.t.join("late");
+        game.t.take_chats(late);
+        game.chat(late, "/lefty");
+        assert_eq!(game.t.take_chats(late), Vec::<String>::new());
+        game.t.press_join(late, Team::Red);
+        game.ticks(2);
+        assert_eq!(hand(&game, late), SkaterHand::Left);
+    }
+
+    #[test]
+    fn leaving_the_ice_during_play_does_not_allow_changing_hands() {
+        let config = MatchConfiguration {
+            time_period: 5,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        let player = game.red[0];
+        game.chat(player, "/view 1");
+        assert!(game.t.ctx().objects.skater(player).is_none());
+        game.heard.clear();
+        game.chat(player, "/lefty");
+        assert!(
+            game.heard("Stick hand will change when play has stopped"),
+            "{:?}",
+            game.heard
+        );
+        game.t.press_join(player, Team::Red);
+        game.ticks(2);
+        assert_eq!(hand(&game, player), SkaterHand::Right);
+
+        game.tick_until(1000, |game| game.scoreboard.period == 2);
+        assert_eq!(hand(&game, player), SkaterHand::Left);
+    }
+
+    #[test]
+    fn lefty_outside_of_play_applies_at_once() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 0);
+        game.ticks(2);
+        let player = game.red[0];
+        game.chat(player, "/lefty");
+        assert_eq!(hand(&game, player), SkaterHand::Left);
+        game.chat(player, "/righty");
+        assert_eq!(hand(&game, player), SkaterHand::Right);
     }
 }

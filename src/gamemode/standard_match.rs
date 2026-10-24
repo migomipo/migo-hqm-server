@@ -12,6 +12,8 @@ use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 
 mod commands;
 mod faceoff;
+#[cfg(test)]
+pub(crate) mod test_game;
 
 use faceoff::{assign_team_positions, faceoff_spot};
 
@@ -1340,6 +1342,7 @@ impl GameMode for StandardMatchGameMode {
 mod tests {
     use super::*;
     use crate::server::test_server::{EmptyGameMode, TestServer};
+    use test_game::{MatchGame, PUCK_LANE, RECEIVER_LANE, ice_the_puck, red_attack};
 
     fn player(index: usize) -> PlayerId {
         PlayerId {
@@ -2027,5 +2030,418 @@ mod tests {
             None,
         );
         assert_eq!(timer(&game), 0);
+    }
+
+    #[test]
+    fn team_max_limits_the_players_on_each_team() {
+        let mode = StandardMatchGameMode::new(MatchGame::quick_config(), 1, SpawnPoint::Center);
+        let mut game = MatchGame::join_with(mode, 2, 0);
+        game.ticks(5);
+        assert_eq!(game.t.ctx().players.count_team_members(), (1, 0));
+    }
+
+    #[test]
+    fn spawn_center_puts_joining_players_at_the_center_circle() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 0);
+        game.ticks(2);
+        let pos = game.skater_pos(game.red[0]);
+        let center = Vec3::new(15.0, pos.y, 30.5);
+        assert!(pos.distance(center) < 4.5, "{pos}");
+    }
+
+    #[test]
+    fn spawn_bench_puts_joining_players_next_to_the_bench() {
+        let mode = StandardMatchGameMode::new(MatchGame::quick_config(), 5, SpawnPoint::Bench);
+        let mut game = MatchGame::join_with(mode, 1, 0);
+        game.ticks(2);
+        let pos = game.skater_pos(game.red[0]);
+        assert!(pos.x < 2.0, "{pos}");
+    }
+
+    #[test]
+    fn spawn_offset_sets_the_centers_distance_from_the_faceoff_spot() {
+        for offset in [1.0, 4.0] {
+            let config = MatchConfiguration {
+                spawn_point_offset: offset,
+                ..MatchGame::quick_config()
+            };
+            let game = MatchGame::start(config, 1, 1);
+            let center_z = game.t.server.rink.center_line.z;
+            let red = game.skater_pos(game.red[0]);
+            let blue = game.skater_pos(game.blue[0]);
+            assert!(((red.z - center_z) - offset).abs() < 0.1, "{red}");
+            assert!(((center_z - blue.z) - offset).abs() < 0.1, "{blue}");
+        }
+    }
+
+    #[test]
+    fn spawn_altitudes_set_where_players_and_the_puck_appear_at_faceoffs() {
+        let config = MatchConfiguration {
+            spawn_player_altitude: 4.0,
+            spawn_puck_altitude: 3.0,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::join(config, 1, 1);
+        game.play_until_faceoff();
+        // One tick of physics has passed since the faceoff, so allow for a little falling.
+        let skater = game.skater_pos(game.red[0]);
+        assert!((skater.y - 4.0).abs() < 0.1, "{skater}");
+        let puck = game.pucks()[0];
+        assert!((puck.y - 3.0).abs() < 0.1, "{puck}");
+    }
+
+    #[test]
+    fn icing_off_does_not_call_icing() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        game.clear_ice();
+        game.pass_from(game.red[0], PUCK_LANE, red_attack::OWN_ZONE, 0.4);
+        game.wait_for_puck_past(3.0);
+        game.ticks(20);
+        assert!(
+            !game.heard.iter().any(|chat| chat.contains("Icing")),
+            "{:?}",
+            game.heard
+        );
+    }
+
+    #[test]
+    fn touch_icing_warns_and_is_called_when_a_defender_touches_the_puck() {
+        let config = MatchConfiguration {
+            icing: IcingConfiguration::Touch,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        ice_the_puck(&mut game);
+        assert!(game.heard("Icing warning"), "{:?}", game.heard);
+        assert!(matches!(
+            game.scoreboard.rules_state,
+            RulesState::Regular {
+                icing_warning: true,
+                ..
+            }
+        ));
+
+        game.place(game.blue[0], RECEIVER_LANE, 10.0);
+        game.touch(game.blue[0]);
+        assert!(game.heard("Icing"), "{:?}", game.heard);
+        assert_eq!(game.scoreboard.rules_state, RulesState::Icing);
+    }
+
+    #[test]
+    fn touch_icing_is_waved_off_when_the_icing_team_touches_the_puck_first() {
+        let config = MatchConfiguration {
+            icing: IcingConfiguration::Touch,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        ice_the_puck(&mut game);
+        game.place(game.red[0], RECEIVER_LANE, 10.0);
+        game.touch(game.red[0]);
+        assert!(game.heard("Icing waved off"), "{:?}", game.heard);
+        assert!(!game.heard("Icing"));
+    }
+
+    #[test]
+    fn no_touch_icing_is_called_when_the_puck_crosses_the_goal_line() {
+        let config = MatchConfiguration {
+            icing: IcingConfiguration::NoTouch,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        ice_the_puck(&mut game);
+        assert!(game.heard("Icing"), "{:?}", game.heard);
+        assert!(!game.heard("Icing warning"));
+        assert_eq!(game.scoreboard.rules_state, RulesState::Icing);
+    }
+
+    /// Red passes from the neutral zone into Blue's zone, where a red teammate already is.
+    fn offside_pass(config: MatchConfiguration) -> MatchGame {
+        let mut game = MatchGame::start(config, 2, 1);
+        game.clear_ice();
+        game.place(game.red[1], RECEIVER_LANE, red_attack::IN_ZONE);
+        game.pass_from(game.red[0], PUCK_LANE, red_attack::PAST_CENTER, 0.3);
+        game.wait_for_puck_past(red_attack::IN_ZONE + 3.0);
+        game
+    }
+
+    #[test]
+    fn offside_off_does_not_call_offside() {
+        let mut game = offside_pass(MatchGame::quick_config());
+        game.touch(game.red[1]);
+        assert!(
+            !game.heard.iter().any(|chat| chat.contains("Offside")),
+            "{:?}",
+            game.heard
+        );
+    }
+
+    #[test]
+    fn offside_on_warns_and_is_called_when_the_offside_player_touches_the_puck() {
+        let config = MatchConfiguration {
+            offside: OffsideConfiguration::Delayed,
+            ..MatchGame::quick_config()
+        };
+        let mut game = offside_pass(config);
+        assert!(game.heard("Offside warning"), "{:?}", game.heard);
+        assert!(matches!(
+            game.scoreboard.rules_state,
+            RulesState::Regular {
+                offside_warning: true,
+                ..
+            }
+        ));
+
+        game.touch(game.red[1]);
+        assert!(game.heard("Offside"), "{:?}", game.heard);
+        assert_eq!(game.scoreboard.rules_state, RulesState::Offside);
+    }
+
+    #[test]
+    fn immediate_offside_is_called_when_the_puck_enters_the_zone() {
+        let config = MatchConfiguration {
+            offside: OffsideConfiguration::Immediate,
+            ..MatchGame::quick_config()
+        };
+        let game = offside_pass(config);
+        assert!(game.heard("Offside"), "{:?}", game.heard);
+        assert!(!game.heard("Offside warning"));
+        assert_eq!(game.scoreboard.rules_state, RulesState::Offside);
+    }
+
+    #[test]
+    fn offside_line_center_checks_offside_at_the_center_line() {
+        let config = MatchConfiguration {
+            offside: OffsideConfiguration::Delayed,
+            offside_line: OffsideLineConfiguration::Center,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 2, 1);
+        game.clear_ice();
+        // The teammate is past the center line, but not in the offensive zone.
+        game.place(game.red[1], RECEIVER_LANE, red_attack::PAST_CENTER);
+        game.pass_from(game.red[0], PUCK_LANE, red_attack::OWN_HALF, 0.3);
+        game.wait_for_puck_past(red_attack::PAST_CENTER);
+        assert!(game.heard("Offside warning"), "{:?}", game.heard);
+    }
+
+    /// Red passes from `from_z` to a teammate waiting at `receiver_z`, and the teammate touches the
+    /// puck once it has passed them.
+    fn two_line_pass(
+        twoline_pass: TwoLinePassConfiguration,
+        from_z: f32,
+        receiver_z: f32,
+    ) -> MatchGame {
+        let config = MatchConfiguration {
+            twoline_pass,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 2, 1);
+        game.clear_ice();
+        game.place(game.red[1], RECEIVER_LANE, receiver_z);
+        game.pass_from(game.red[0], PUCK_LANE, from_z, 0.3);
+        game.wait_for_puck_past(receiver_z);
+        game.touch(game.red[1]);
+        game
+    }
+
+    fn two_line_pass_called(game: &MatchGame) -> bool {
+        game.heard("Two-line pass")
+    }
+
+    #[test]
+    fn two_line_pass_off_allows_every_pass() {
+        use red_attack::*;
+        for (from, receiver) in [
+            (OWN_ZONE, PAST_CENTER),
+            (OWN_HALF, IN_ZONE),
+            (OWN_ZONE, IN_ZONE),
+        ] {
+            let game = two_line_pass(TwoLinePassConfiguration::Off, from, receiver);
+            assert!(
+                !two_line_pass_called(&game),
+                "{from} to {receiver}: {:?}",
+                game.heard
+            );
+        }
+    }
+
+    #[test]
+    fn two_line_pass_on_disallows_passes_through_own_blue_and_center_lines() {
+        use red_attack::*;
+        let game = two_line_pass(TwoLinePassConfiguration::On, OWN_ZONE, PAST_CENTER);
+        assert!(game.heard("Two-line pass warning"), "{:?}", game.heard);
+        assert!(two_line_pass_called(&game), "{:?}", game.heard);
+
+        // A pass through the center line and the offensive blue line is allowed.
+        let game = two_line_pass(TwoLinePassConfiguration::On, OWN_HALF, IN_ZONE);
+        assert!(!two_line_pass_called(&game), "{:?}", game.heard);
+    }
+
+    #[test]
+    fn two_line_pass_forward_disallows_passes_through_center_and_offensive_blue_lines() {
+        use red_attack::*;
+        let game = two_line_pass(TwoLinePassConfiguration::Forward, OWN_HALF, IN_ZONE);
+        assert!(game.heard("Two-line pass warning"), "{:?}", game.heard);
+        assert!(two_line_pass_called(&game), "{:?}", game.heard);
+
+        // A pass through the own blue line and the center line is allowed.
+        let game = two_line_pass(TwoLinePassConfiguration::Forward, OWN_ZONE, PAST_CENTER);
+        assert!(!two_line_pass_called(&game), "{:?}", game.heard);
+    }
+
+    #[test]
+    fn two_line_pass_both_disallows_both_kinds_of_passes() {
+        use red_attack::*;
+        for (from, receiver) in [(OWN_ZONE, PAST_CENTER), (OWN_HALF, IN_ZONE)] {
+            let game = two_line_pass(TwoLinePassConfiguration::Double, from, receiver);
+            assert!(
+                two_line_pass_called(&game),
+                "{from} to {receiver}: {:?}",
+                game.heard
+            );
+        }
+    }
+
+    #[test]
+    fn two_line_pass_three_disallows_passes_through_all_three_lines() {
+        use red_attack::*;
+        let game = two_line_pass(TwoLinePassConfiguration::ThreeLine, OWN_ZONE, IN_ZONE);
+        assert!(two_line_pass_called(&game), "{:?}", game.heard);
+
+        // Passes through two lines are allowed.
+        for (from, receiver) in [(OWN_ZONE, PAST_CENTER), (OWN_HALF, IN_ZONE)] {
+            let game = two_line_pass(TwoLinePassConfiguration::ThreeLine, from, receiver);
+            assert!(
+                !two_line_pass_called(&game),
+                "{from} to {receiver}: {:?}",
+                game.heard
+            );
+        }
+    }
+
+    #[test]
+    fn time_period_sets_the_period_length() {
+        let config = MatchConfiguration {
+            time_period: 3,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::join(config, 1, 1);
+        game.play_until_faceoff();
+        assert_eq!(game.scoreboard.time, 300);
+        let ticks = game.tick_until(1000, |game| game.scoreboard.period == 2);
+        assert_eq!(ticks, 300);
+    }
+
+    #[test]
+    fn time_intermission_sets_the_intermission_length() {
+        let config = MatchConfiguration {
+            time_period: 1,
+            time_intermission: 3,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        game.tick_until(1000, |game| game.scoreboard.period == 2);
+        let ticks = game.tick_until(1000, |game| game.scoreboard.time > 0);
+        assert_eq!(ticks, 300);
+    }
+
+    #[test]
+    fn warmup_pucks_sets_the_number_of_pucks_in_warmup() {
+        let config = MatchConfiguration {
+            warmup_pucks: 4,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::join(config, 1, 0);
+        game.ticks(2);
+        assert_eq!(game.scoreboard.period, 0);
+        assert_eq!(game.pucks().len(), 4);
+    }
+
+    #[test]
+    fn periods_sets_how_many_periods_a_game_has() {
+        let config = MatchConfiguration {
+            periods: 1,
+            time_period: 5,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        game.score(game.red[0]);
+        game.tick_until(1000, |game| game.scoreboard.period == 2);
+        assert!(game.scoreboard.game_over);
+    }
+
+    #[test]
+    fn a_tied_game_goes_to_overtime() {
+        let config = MatchConfiguration {
+            periods: 1,
+            time_period: 1,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        game.tick_until(1000, |game| game.scoreboard.period == 2);
+        assert!(!game.scoreboard.game_over);
+        game.tick_until(1000, |game| game.scoreboard.time > 0);
+        assert_eq!(game.scoreboard.period, 2);
+    }
+
+    #[test]
+    fn mercy_ends_the_game_when_a_team_leads_by_enough_goals() {
+        let config = MatchConfiguration {
+            mercy: 2,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        game.score(game.red[0]);
+        assert!(!game.scoreboard.game_over);
+        game.wait_for_play();
+        game.score(game.red[0]);
+        assert!(game.scoreboard.game_over);
+    }
+
+    #[test]
+    fn first_ends_the_game_when_a_team_reaches_enough_goals() {
+        let config = MatchConfiguration {
+            first_to: 2,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        game.score(game.blue[0]);
+        game.wait_for_play();
+        game.score(game.red[0]);
+        assert!(!game.scoreboard.game_over);
+        game.wait_for_play();
+        game.score(game.red[0]);
+        assert!(game.scoreboard.game_over);
+    }
+
+    #[test]
+    fn use_mph_prints_puck_speeds_in_miles_per_hour() {
+        for (use_mph, unit) in [(false, "km/h"), (true, "mph")] {
+            let config = MatchConfiguration {
+                use_mph,
+                ..MatchGame::quick_config()
+            };
+            let mut game = MatchGame::start(config, 1, 1);
+            game.score(game.red[0]);
+            let message = game
+                .heard
+                .iter()
+                .find(|chat| chat.starts_with("Goal scored"))
+                .expect("a goal message");
+            assert!(message.contains(unit), "{message}");
+        }
+    }
+
+    #[test]
+    fn goal_replay_shows_a_replay_after_goals() {
+        let config = MatchConfiguration {
+            goal_replay: true,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        game.score(game.red[0]);
+        game.wait_to_hear(500, "Goal replay");
+        game.tick();
+        assert!(game.t.ctx().replay.is_in_replay());
     }
 }

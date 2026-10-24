@@ -66,6 +66,7 @@ impl GameMode for PermanentWarmup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::Team;
     use crate::server::test_server::TestServer;
 
     #[test]
@@ -96,5 +97,19 @@ mod tests {
             assert_eq!(offsets.len(), pucks);
             assert!(offsets.iter().sum::<f32>().abs() < 1e-4, "{offsets:?}");
         }
+    }
+
+    #[test]
+    fn warmup_mode_stays_in_warmup() {
+        let mut t = TestServer::new(PermanentWarmup::new(3, SpawnPoint::Center));
+        let red = t.join("red");
+        let blue = t.join("blue");
+        t.press_join(red, Team::Red);
+        t.press_join(blue, Team::Blue);
+        for _ in 0..5000 {
+            let scoreboard = t.tick().unwrap();
+            assert_eq!(scoreboard.period, 0);
+        }
+        assert_eq!(t.ctx().objects.pucks().count(), 3);
     }
 }

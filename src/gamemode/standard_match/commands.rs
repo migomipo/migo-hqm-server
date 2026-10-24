@@ -398,3 +398,393 @@ fn parse_clock(value: &str) -> Option<u32> {
     };
     Some(minutes * 6000 + seconds * 100 + centiseconds)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::Team;
+    use crate::gamemode::standard_match::MatchConfiguration;
+    use crate::gamemode::standard_match::test_game::{
+        MatchGame, PUCK_LANE, ice_the_puck, match_server,
+    };
+    use glam::Vec3;
+
+    #[test]
+    fn rules_shows_the_offside_and_icing_settings() {
+        let mut t = match_server();
+        let player = t.join("player");
+        t.take_messages(player);
+        t.chat(player, "/rules");
+        assert_eq!(t.take_chats(player), ["Offside disabled, Icing disabled"]);
+
+        let config = &mut t.mode.settings.config;
+        config.offside = OffsideConfiguration::Immediate;
+        config.offside_line = OffsideLineConfiguration::Center;
+        config.icing = IcingConfiguration::NoTouch;
+        config.twoline_pass = TwoLinePassConfiguration::ThreeLine;
+        config.mercy = 5;
+        config.first_to = 7;
+        t.chat(player, "/rules");
+        assert_eq!(
+            t.take_chats(player),
+            [
+                "Immediate offside enabled (center line), No-touch icing enabled",
+                "Three-line pass rule enabled",
+                "Game ends when a team leads by 5 goals",
+                "Game ends when a team reaches 7 goals",
+            ]
+        );
+    }
+
+    #[test]
+    fn fs_forces_a_player_off_the_ice() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        let blue = game.blue[0];
+        game.chat(game.admin(), &format!("/fs {}", blue.index));
+        assert!(game.t.ctx().objects.skater(blue).is_none());
+    }
+
+    #[test]
+    fn start_starts_the_game_during_warmup() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 1);
+        game.ticks(5);
+        assert_eq!(game.scoreboard.period, 0);
+        game.chat(game.admin(), "/start");
+        game.tick_until(500, |game| game.scoreboard.period >= 1);
+        game.chat(game.admin(), "/start");
+        assert_eq!(
+            game.heard,
+            ["Game started by red0", "The game has already started"]
+        );
+    }
+
+    #[test]
+    fn start_starts_the_game_without_players_on_both_teams() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 0);
+        game.ticks(5);
+        game.chat(game.admin(), "/start");
+        game.play_until_faceoff();
+        assert_eq!(game.scoreboard.period, 1);
+    }
+
+    #[test]
+    fn pause_stops_play_until_unpause_and_play_resumes_with_a_faceoff() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        game.set_puck(Vec3::new(PUCK_LANE, 0.5, 10.0), Vec3::ZERO);
+        game.chat(game.admin(), "/pause");
+        game.tick();
+        assert!(!game.is_playing());
+        let time = game.scoreboard.time;
+        // Much longer than the break, which stands still while paused.
+        game.ticks(500);
+        assert!(!game.is_playing());
+        assert_eq!(game.scoreboard.time, time);
+
+        // Play resumes after a full break, so that players are not caught by the faceoff.
+        game.chat(game.admin(), "/unpause");
+        let ticks = game.tick_until(1000, |game| game.is_playing());
+        assert!(ticks >= 99, "{ticks}");
+        assert!(is_center_faceoff(&game), "{:?}", game.pucks());
+        game.ticks(50);
+        assert!(game.scoreboard.time < time);
+        assert_eq!(game.heard, ["Game paused by red0", "Game resumed by red0"]);
+    }
+
+    #[test]
+    fn pause_holds_a_stoppage_until_unpause() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        game.score(game.red[0]);
+        game.chat(game.admin(), "/pause");
+        game.tick();
+        let goal_message_timer = game.scoreboard.goal_message_timer;
+        game.ticks(500);
+        assert!(!game.is_playing());
+        assert_eq!(game.scoreboard.goal_message_timer, goal_message_timer);
+        game.chat(game.admin(), "/unpause");
+        game.tick_until(1000, |game| game.is_playing());
+    }
+
+    #[test]
+    fn pause_and_unpause_tell_the_admin_when_they_do_nothing() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 1);
+        let blue = game.blue[0];
+        game.t.take_messages(blue);
+        game.play_until_faceoff();
+        game.chat(game.admin(), "/unpause");
+        game.chat(game.admin(), "/pause");
+        game.chat(game.admin(), "/pause");
+        game.chat(blue, "/unpause");
+        assert_eq!(
+            game.heard,
+            [
+                "The game is not paused",
+                "Game paused by red0",
+                "The game is already paused",
+            ]
+        );
+        assert!(
+            game.t
+                .take_chats(blue)
+                .contains(&"Please log in before using that command".to_owned())
+        );
+        let mut warmup = MatchGame::join(MatchGame::quick_config(), 1, 0);
+        warmup.tick();
+        warmup.chat(warmup.admin(), "/unpause");
+        warmup.chat(warmup.admin(), "/pause");
+        warmup.chat(warmup.admin(), "/pause");
+        warmup.chat(warmup.admin(), "/faceoff");
+        assert_eq!(
+            warmup.heard,
+            [
+                "The game is not paused",
+                "Game paused by red0",
+                "The game is already paused",
+                "No game is currently ongoing",
+            ]
+        );
+    }
+
+    #[test]
+    fn pause_in_warmup_holds_back_the_game_until_unpause() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 1);
+        game.tick();
+        game.chat(game.admin(), "/pause");
+        // Much longer than warmup, which would start the game with players on both teams.
+        game.ticks(3000);
+        assert_eq!(game.scoreboard.period, 0);
+        game.chat(game.admin(), "/unpause");
+        game.play_until_faceoff();
+        assert_eq!(game.scoreboard.period, 1);
+    }
+
+    #[test]
+    fn start_starts_the_game_from_a_paused_warmup() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 1);
+        game.tick();
+        game.chat(game.admin(), "/pause");
+        game.chat(game.admin(), "/start");
+        game.play_until_faceoff();
+        assert_eq!(game.scoreboard.period, 1);
+    }
+
+    /// Whether the puck is at the center faceoff spot.
+    fn is_center_faceoff(game: &MatchGame) -> bool {
+        let puck = game.pucks()[0];
+        (puck.x - 15.0).abs() < 0.5 && (puck.z - 30.5).abs() < 0.5
+    }
+
+    #[test]
+    fn faceoff_calls_a_center_ice_faceoff() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        game.set_puck(Vec3::new(PUCK_LANE, 0.5, 10.0), Vec3::ZERO);
+        game.chat(game.admin(), "/faceoff");
+        game.tick();
+        assert!(!game.is_playing());
+        let ticks = game.tick_until(1000, |game| game.is_playing());
+        assert!((495..=500).contains(&ticks), "{ticks}");
+        assert!(is_center_faceoff(&game), "{:?}", game.pucks());
+        assert!(game.heard("Faceoff initiated by red0"), "{:?}", game.heard);
+    }
+
+    #[test]
+    fn faceoff_unpauses_the_game() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        game.chat(game.admin(), "/pause");
+        game.chat(game.admin(), "/faceoff");
+        game.tick_until(1000, |game| game.is_playing());
+    }
+
+    #[test]
+    fn faceoff_during_an_intermission_shortens_it_and_resets_the_clock() {
+        let config = MatchConfiguration {
+            time_intermission: 60,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::join(config, 1, 1);
+        // The game opens with an intermission.
+        game.tick_until(10_000, |game| game.scoreboard.period == 1);
+        game.chat(game.admin(), "/faceoff");
+        game.tick_until(510, |game| game.is_playing());
+        assert!(
+            game.scoreboard.time > config.time_period * 100 - 5,
+            "{}",
+            game.scoreboard.time
+        );
+    }
+
+    #[test]
+    fn faceoff_after_a_goal_skips_the_goal_replay() {
+        let config = MatchConfiguration {
+            goal_replay: true,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        game.score(game.red[0]);
+        game.chat(game.admin(), "/faceoff");
+        let ticks = game.tick_until(1000, |game| game.is_playing());
+        assert!(ticks <= 500, "{ticks}");
+        assert!(!game.heard("Goal replay"), "{:?}", game.heard);
+    }
+
+    #[test]
+    fn faceoff_is_refused_after_the_game_is_over() {
+        let config = MatchConfiguration {
+            first_to: 1,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        game.score(game.red[0]);
+        assert!(game.scoreboard.game_over);
+        game.heard.clear();
+        game.chat(game.admin(), "/faceoff");
+        assert_eq!(game.heard, ["The game is over"]);
+    }
+
+    #[test]
+    fn set_clock_period_and_scores() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        let admin = game.admin();
+        game.chat(admin, "/set clock 1:30");
+        game.chat(admin, "/set period 2");
+        game.chat(admin, "/set redscore 3");
+        game.chat(admin, "/set bluescore 4");
+        game.tick();
+        let scoreboard = &game.scoreboard;
+        assert!(
+            (8990..=9000).contains(&scoreboard.time),
+            "{}",
+            scoreboard.time
+        );
+        assert_eq!(scoreboard.period, 2);
+        assert_eq!((scoreboard.red_score, scoreboard.blue_score), (3, 4));
+    }
+
+    #[test]
+    fn set_period_zero_returns_to_warmup() {
+        let config = MatchConfiguration {
+            icing: IcingConfiguration::NoTouch,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        game.chat(game.admin(), "/set redscore 2");
+        game.chat(game.admin(), "/set period 0");
+        game.tick();
+        assert_eq!(game.scoreboard.period, 0);
+        assert_eq!(game.scoreboard.red_score, 2);
+        // Warmup has no rules, so icing the puck is not called.
+        ice_the_puck(&mut game);
+        assert!(!game.heard("Icing"), "{:?}", game.heard);
+
+        // The game starts again after warmup, with the score kept.
+        game.play_until_faceoff();
+        assert_eq!(game.scoreboard.period, 1);
+        assert_eq!(game.scoreboard.red_score, 2);
+    }
+
+    #[test]
+    fn set_periodnum_sets_the_number_of_periods() {
+        let config = MatchConfiguration {
+            time_period: 5,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        game.chat(game.admin(), "/set periodnum 1");
+        game.score(game.red[0]);
+        game.tick_until(1000, |game| game.scoreboard.period == 2);
+        assert!(game.scoreboard.game_over);
+    }
+
+    #[test]
+    fn set_rule_settings_announce_the_new_rules() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 0);
+        let admin = game.admin();
+        let mut failures = vec![];
+        for (command, message) in [
+            ("icing on", "Touch icing enabled"),
+            ("icing notouch", "No-touch icing enabled"),
+            ("icing off", "Icing disabled"),
+            ("offside on", "Offside enabled"),
+            ("offside imm", "Immediate offside enabled"),
+            ("offside off", "Offside disabled"),
+            ("offside immediate", "Immediate offside enabled"),
+            ("offside off", "Offside disabled"),
+            ("offsideline center", "Center line set as offside line"),
+            ("offsideline blue", "Blue line set as offside line"),
+            ("twolinepass on", "Regular two-line pass rule enabled"),
+            ("twolinepass forward", "Forward two-line pass rule enabled"),
+            (
+                "twolinepass both",
+                "Regular and forward two-line pass rules enabled",
+            ),
+            ("twolinepass three", "Three-line pass rule enabled"),
+            ("twolinepass off", "Two-line pass rule disabled"),
+            ("mercy 3", "Mercy rule set to 3 goals"),
+            ("mercy 0", "Mercy rule disabled"),
+            ("first 5", "First-to-goals rule set to 5 goals"),
+            ("first 0", "First-to-goals rule disabled"),
+            ("goalreplay on", "Goal replays enabled"),
+            ("goalreplay off", "Goal replays disabled"),
+            ("teamsize 3", "Team size set to 3"),
+        ] {
+            game.heard.clear();
+            game.chat(admin, &format!("/set {command}"));
+            let expected = format!("{message} by red0");
+            if !game.heard(&expected) {
+                failures.push(format!("/set {command}: {:?}", game.heard));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn set_mercy_and_first_off_disable_the_rules() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 0);
+        let admin = game.admin();
+        for (enable, disable, message) in [
+            ("mercy 3", "mercy off", "Mercy rule disabled by red0"),
+            (
+                "first 5",
+                "first off",
+                "First-to-goals rule disabled by red0",
+            ),
+        ] {
+            game.chat(admin, &format!("/set {enable}"));
+            game.heard.clear();
+            game.chat(admin, &format!("/set {disable}"));
+            assert!(game.heard(message), "/set {disable}: {:?}", game.heard);
+        }
+    }
+
+    #[test]
+    fn set_icing_changes_the_icing_rule() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        game.chat(game.admin(), "/set icing notouch");
+        ice_the_puck(&mut game);
+        assert!(game.heard("Icing"), "{:?}", game.heard);
+    }
+
+    #[test]
+    fn set_teamsize_limits_the_players_on_each_team() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 0);
+        game.chat(game.admin(), "/set teamsize 1");
+        let second = game.t.join("second");
+        game.t.press_join(second, Team::Red);
+        game.ticks(5);
+        assert_eq!(game.t.ctx().players.count_team_members(), (1, 0));
+    }
+
+    #[test]
+    fn set_spawn_settings_apply_at_the_next_faceoff() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 1);
+        let admin = game.admin();
+        game.chat(admin, "/set spawnoffset 4");
+        game.chat(admin, "/set spawnplayeraltitude 4");
+        game.chat(admin, "/set spawnpuckaltitude 3");
+        game.play_until_faceoff();
+        let center_z = game.t.server.rink.center_line.z;
+        let red = game.skater_pos(game.red[0]);
+        assert!(((red.z - center_z) - 4.0).abs() < 0.1, "{red}");
+        assert!((red.y - 4.0).abs() < 0.1, "{red}");
+        assert!((game.pucks()[0].y - 3.0).abs() < 0.1);
+    }
+}
