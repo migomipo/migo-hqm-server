@@ -185,7 +185,6 @@ struct OffsideWarning {
     offending_team: Team,
     side: RinkSide,
     pass_origin: Option<PassLocation>,
-    passer: PlayerId,
 }
 #[derive(Debug, Clone)]
 enum TwoLine {
@@ -578,20 +577,20 @@ impl PlayingState {
         team: Team,
         side: RinkSide,
         from: Option<PassLocation>,
-        self_touch: bool,
     ) -> BreakState {
-        let next_faceoff = if self_touch {
-            if config.offside_line == OffsideLineConfiguration::Center {
-                Faceoff::Center
-            } else {
-                Faceoff::Offside(team.get_other_team(), side)
-            }
-        } else if from.is_some_and(|p| p <= PassLocation::ReachedOwnBlue) {
+        // IIHF rule 83.6: a pass is faced off in the zone it came from, at the spot with the least
+        // territorial advantage, and a puck carried in is faced off at the spot just outside the
+        // offside line. A carry's last touch is right before the line, so `from` tells the two
+        // apart, whoever touches the puck next. Outside the center line is the offending team's
+        // own half.
+        let next_faceoff = if from.is_some_and(|p| p <= PassLocation::ReachedOwnBlue) {
             Faceoff::Defensive(team, side)
-        } else if from.is_some_and(|p| p <= PassLocation::ReachedCenter) {
+        } else if from.is_some_and(|p| p <= PassLocation::ReachedCenter)
+            || config.offside_line == OffsideLineConfiguration::Center
+        {
             Faceoff::Offside(team, side)
         } else {
-            Faceoff::Center
+            Faceoff::Offside(team.get_other_team(), side)
         };
         ctx.messages.add_server_chat_message("Offside");
         Self::stoppage(
@@ -641,14 +640,7 @@ impl PlayingState {
     ) -> BreakState {
         if let Offside::Warning(warning) = playing.offside {
             if warning.offending_team == team {
-                return Self::call_offside(
-                    config,
-                    ctx,
-                    team,
-                    warning.side,
-                    warning.pass_origin,
-                    false,
-                );
+                return Self::call_offside(config, ctx, team, warning.side, warning.pass_origin);
             }
         }
         let puck_speed_across_line = ctx
@@ -766,7 +758,6 @@ impl PlayingState {
                     team,
                     warning.side,
                     warning.pass_origin,
-                    player == warning.passer,
                 ));
             }
         }
@@ -833,13 +824,12 @@ impl PlayingState {
                                 offending_team: team,
                                 side: pass.side,
                                 pass_origin: pass.from,
-                                passer: pass.player,
                             });
                             ctx.messages.add_server_chat_message("Offside warning");
                         }
                         OffsideConfiguration::Immediate => {
                             return Some(Self::call_offside(
-                                config, ctx, team, pass.side, pass.from, false,
+                                config, ctx, team, pass.side, pass.from,
                             ));
                         }
                         OffsideConfiguration::Off => playing.offside = Offside::InZone(team),
@@ -2141,12 +2131,97 @@ mod tests {
 
     /// Red passes from the neutral zone into Blue's zone, where a red teammate already is.
     fn offside_pass(config: MatchConfiguration) -> MatchGame {
+        offside_pass_from(config, red_attack::PAST_CENTER)
+    }
+
+    /// Red passes from `from_z` into Blue's zone, where a red teammate already is.
+    fn offside_pass_from(config: MatchConfiguration, from_z: f32) -> MatchGame {
         let mut game = MatchGame::start(config, 2, 1);
         game.clear_ice();
         game.place(game.red[1], RECEIVER_LANE, red_attack::IN_ZONE);
-        game.pass_from(game.red[0], PUCK_LANE, red_attack::PAST_CENTER, 0.3);
+        game.pass_from(game.red[0], PUCK_LANE, from_z, 0.3);
         game.wait_for_puck_past(red_attack::IN_ZONE + 3.0);
         game
+    }
+
+    /// Plays until the next faceoff, and checks that the puck is dropped at `faceoff`.
+    fn assert_next_faceoff(game: &mut MatchGame, faceoff: Faceoff) {
+        game.play_until_faceoff();
+        let spot = faceoff_spot(&game.t.server.rink, faceoff, 0.0, 0.0).center;
+        let puck = game.pucks()[0];
+        assert!(
+            Vec3::new(puck.x, 0.0, puck.z).distance(spot) < 0.1,
+            "puck at {puck}, {faceoff:?} at {spot}"
+        );
+    }
+
+    /// The passer goes to the puck and touches it again.
+    fn passer_touches_the_puck(game: &mut MatchGame) {
+        let puck = game.pucks()[0];
+        game.place(game.red[0], puck.x, puck.z);
+        game.touch(game.red[0]);
+    }
+
+    #[test]
+    fn offside_is_faced_off_in_the_zone_the_pass_came_from() {
+        // IIHF rule 83.6. Passes go along PUCK_LANE, on the higher side of the rink.
+        let config = MatchConfiguration {
+            offside: OffsideConfiguration::Immediate,
+            ..MatchGame::quick_config()
+        };
+        for (from_z, faceoff) in [
+            // As when carrying the puck in: the neutral zone spot nearest the attacking zone.
+            (
+                red_attack::PAST_CENTER,
+                Faceoff::Offside(Team::Blue, RinkSide::Higher),
+            ),
+            (
+                red_attack::OWN_HALF,
+                Faceoff::Offside(Team::Red, RinkSide::Higher),
+            ),
+            (
+                red_attack::OWN_ZONE,
+                Faceoff::Defensive(Team::Red, RinkSide::Higher),
+            ),
+        ] {
+            let mut game = offside_pass_from(config, from_z);
+            assert!(game.heard("Offside"), "{:?}", game.heard);
+            assert_next_faceoff(&mut game, faceoff);
+        }
+    }
+
+    #[test]
+    fn delayed_offside_on_a_dump_in_is_faced_off_where_it_came_from_when_the_passer_touches_it() {
+        let config = MatchConfiguration {
+            offside: OffsideConfiguration::Delayed,
+            ..MatchGame::quick_config()
+        };
+        let mut game = offside_pass_from(config, red_attack::OWN_ZONE);
+        assert!(game.heard("Offside warning"), "{:?}", game.heard);
+
+        passer_touches_the_puck(&mut game);
+        assert!(game.heard("Offside"), "{:?}", game.heard);
+        assert_next_faceoff(&mut game, Faceoff::Defensive(Team::Red, RinkSide::Higher));
+    }
+
+    #[test]
+    fn center_line_offside_is_faced_off_in_the_offending_teams_half() {
+        let config = MatchConfiguration {
+            offside: OffsideConfiguration::Delayed,
+            offside_line: OffsideLineConfiguration::Center,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 2, 1);
+        game.clear_ice();
+        game.place(game.red[1], RECEIVER_LANE, red_attack::PAST_CENTER);
+        game.pass_from(game.red[0], PUCK_LANE, red_attack::OWN_HALF, 0.3);
+        game.wait_for_puck_past(red_attack::PAST_CENTER);
+        assert!(game.heard("Offside warning"), "{:?}", game.heard);
+
+        // Not at center, even though this looks like the passer carrying the puck over the line.
+        passer_touches_the_puck(&mut game);
+        assert!(game.heard("Offside"), "{:?}", game.heard);
+        assert_next_faceoff(&mut game, Faceoff::Offside(Team::Red, RinkSide::Higher));
     }
 
     #[test]
