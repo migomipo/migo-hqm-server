@@ -14,7 +14,7 @@ use super::{MatchConfiguration, StandardMatchGameMode};
 
 /// Runs a game mode and keeps the physics events of the last simulated tick.
 pub(crate) struct Recorder<M> {
-    mode: M,
+    pub(crate) mode: M,
     events: Vec<PhysicsEvent>,
 }
 

@@ -1,7 +1,7 @@
 use crate::game::ScoreboardValues;
 use crate::game::{PhysicsEvent, PlayerId};
 use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint, spawn_warmup_pucks};
-use crate::gamemode::{ExitReason, GameContext, GameMode};
+use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 
 pub struct PermanentWarmup {
     pucks: usize,
@@ -31,6 +31,22 @@ impl GameMode for PermanentWarmup {
 
     fn after_tick(&mut self, _ctx: &mut GameContext, _events: &[PhysicsEvent]) -> ScoreboardValues {
         ScoreboardValues::default()
+    }
+
+    fn handle_command(
+        &mut self,
+        ctx: &mut GameContext,
+        cmd: &str,
+        arg: &str,
+        player_id: PlayerId,
+    ) -> CommandResult {
+        match cmd {
+            "fs" => self
+                .teams
+                .handle_force_spectate_command(ctx, player_id, arg),
+            _ => return CommandResult::Unknown,
+        }
+        CommandResult::Handled
     }
 
     fn game_started(&mut self, ctx: &mut GameContext) {
@@ -99,5 +115,21 @@ mod tests {
             assert_eq!(scoreboard.period, 0);
         }
         assert_eq!(t.ctx().objects.pucks().count(), 3);
+    }
+
+    #[test]
+    fn fs_forces_a_player_off_the_ice() {
+        let mut t = TestServer::new(PermanentWarmup::new(1, SpawnPoint::Center));
+        let admin = t.join_admin("admin");
+        let player = t.join("player");
+        t.press_join(player, Team::Red);
+        t.tick();
+        assert!(t.ctx().objects.skater(player).is_some());
+        t.take_messages(admin);
+
+        t.chat(admin, &format!("/fs {}", player.index));
+
+        assert!(t.ctx().objects.skater(player).is_none());
+        assert_eq!(t.take_chats(admin), ["player forced off ice by admin"]);
     }
 }

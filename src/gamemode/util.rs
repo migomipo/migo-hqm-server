@@ -1,4 +1,4 @@
-use crate::game::{PlayerId, Puck, Rink, Team};
+use crate::game::{PlayerId, PlayerIndex, Puck, Rink, Team};
 use crate::gamemode::GameContext;
 use glam::Vec3;
 use glamx::Rot3;
@@ -115,6 +115,42 @@ impl TeamSelection {
                 .insert(player_id, self.team_switch_cooldown);
         }
         true
+    }
+
+    /// Handles the admin command `/fs <player index>`, which moves a player to the spectators,
+    /// starts their team switch cooldown and announces it.
+    pub fn handle_force_spectate_command(
+        &mut self,
+        ctx: &mut GameContext,
+        admin_id: PlayerId,
+        arg: &str,
+    ) {
+        let Some(admin_name) = ctx.require_admin(admin_id) else {
+            return;
+        };
+        let Some(target) = arg
+            .parse::<PlayerIndex>()
+            .ok()
+            .and_then(|index| ctx.players.get_by_index(index))
+        else {
+            ctx.messages
+                .add_directed_server_chat_message("No player with this ID exists", admin_id);
+            return;
+        };
+        let (target_id, target_name) = (target.id, target.name());
+        if self.force_spectate(ctx, target_id) {
+            info!(
+                "{} ({}) forced {} ({}) off ice",
+                admin_name, admin_id, target_name, target_id
+            );
+            ctx.messages
+                .add_server_chat_message(format!("{target_name} forced off ice by {admin_name}"));
+        } else {
+            ctx.messages.add_directed_server_chat_message(
+                format!("{target_name} is not on the ice"),
+                admin_id,
+            );
+        }
     }
 
     /// Forgets everything about a player. Call this when a player leaves the server.

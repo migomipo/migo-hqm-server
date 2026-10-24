@@ -1,10 +1,9 @@
 use glam::Vec3;
 use glamx::Rot3;
 use std::f32::consts::PI;
-use tracing::info;
 
 use crate::game::{PhysicsEvent, PlayerId, RulesState};
-use crate::game::{PlayerIndex, Puck, PuckId, ScoreboardValues, Team};
+use crate::game::{Puck, PuckId, ScoreboardValues, Team};
 use crate::gamemode::util::{GameProgress, SpawnPoint, TeamSelection, get_spawnpoint};
 use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 
@@ -457,30 +456,6 @@ impl ShootoutGameMode {
             get_spawnpoint(rink, team, SpawnPoint::Bench)
         })
     }
-
-    fn force_player_off_ice(
-        &mut self,
-        ctx: &mut GameContext,
-        admin_player_id: PlayerId,
-        force_player_index: PlayerIndex,
-    ) {
-        let Some(admin_player_name) = ctx.require_admin(admin_player_id) else {
-            return;
-        };
-        let Some(force_player) = ctx.players.get_by_index(force_player_index) else {
-            return;
-        };
-        let (force_player_id, force_player_name) = (force_player.id, force_player.name());
-        if self.teams.force_spectate(ctx, force_player_id) {
-            info!(
-                "{} ({}) forced {} ({}) off ice",
-                admin_player_name, admin_player_id, force_player_name, force_player_index
-            );
-            ctx.messages.add_server_chat_message(format!(
-                "{force_player_name} forced off ice by {admin_player_name}"
-            ));
-        }
-    }
 }
 
 impl GameMode for ShootoutGameMode {
@@ -537,11 +512,9 @@ impl GameMode for ShootoutGameMode {
         player_id: PlayerId,
     ) -> CommandResult {
         match cmd {
-            "fs" => {
-                if let Ok(force_player_index) = arg.parse::<PlayerIndex>() {
-                    self.force_player_off_ice(ctx, player_id, force_player_index);
-                }
-            }
+            "fs" => self
+                .teams
+                .handle_force_spectate_command(ctx, player_id, arg),
             _ => return CommandResult::Unknown,
         }
         CommandResult::Handled

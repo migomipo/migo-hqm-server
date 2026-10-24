@@ -4,6 +4,7 @@ use tracing::info;
 
 use crate::game::PlayerId;
 use crate::gamemode::GameContext;
+use crate::gamemode::util::spawn_warmup_pucks;
 
 use super::{
     BreakKind, BreakState, Faceoff, IcingConfiguration, Match, MatchSettings, MatchState,
@@ -190,51 +191,71 @@ impl StandardMatchGameMode {
         let Some(admin_name) = ctx.require_admin(player) else {
             return;
         };
-        let old_config = self.settings.config;
-        let old_team_max = self.teams.team_max;
-        let old_state_values = match &self.state {
-            StandardMatchState::Game(game) => (
-                game.game_state.score,
-                game.game_state.period,
-                game.game_state.time,
-            ),
-            StandardMatchState::WaitingForGame(warmup) => (warmup.score, 0, warmup.time),
-        };
         let mut parts = arg.split_whitespace();
-        let Some(setting) = parts.next() else { return };
-        let Some(value) = parts.next() else { return };
-        if matches!(setting, "period" | "clock")
-            && matches!(self.state, StandardMatchState::WaitingForGame(_))
-        {
+        let (Some(setting), Some(value)) = (parts.next(), parts.next()) else {
             ctx.messages
-                .add_directed_server_chat_message("No game is currently ongoing", player);
+                .add_directed_server_chat_message("Usage: /set <setting> <value>", player);
+            return;
+        };
+        if let Err(message) = self.apply_setting(ctx, setting, value) {
+            ctx.messages
+                .add_directed_server_chat_message(message, player);
             return;
         }
+        let message = match (setting, value) {
+            ("redscore", _) => format!("Red score changed to {value}"),
+            ("bluescore", _) => format!("Blue score changed to {value}"),
+            ("period", _) => format!("Period set to {value}"),
+            ("periodnum", _) => format!("Number of periods set to {value}"),
+            ("clock", _) => format!("Clock set to {value}"),
+            ("icing", _) => self.settings.config.icing.description().to_owned(),
+            ("offside", _) => self.settings.config.offside.description().to_owned(),
+            ("twolinepass", _) => self.settings.config.twoline_pass.description().to_owned(),
+            ("offsideline", "blue") => "Blue line set as offside line".to_owned(),
+            ("offsideline", "center") => "Center line set as offside line".to_owned(),
+            ("mercy", "0" | "off") => "Mercy rule disabled".to_owned(),
+            ("mercy", _) => format!("Mercy rule set to {value} goals"),
+            ("first", "0" | "off") => "First-to-goals rule disabled".to_owned(),
+            ("first", _) => format!("First-to-goals rule set to {value} goals"),
+            ("goalreplay", "on") => "Goal replays enabled".to_owned(),
+            ("goalreplay", "off") => "Goal replays disabled".to_owned(),
+            ("teamsize", _) => format!("Team size set to {value}"),
+            _ => format!("{setting} changed to {value}"),
+        };
+        info!("{} by {} ({})", message, admin_name, player);
+        ctx.messages
+            .add_server_chat_message(format!("{message} by {admin_name}"));
+    }
+    /// Changes a setting for /set, or returns why it could not be changed.
+    fn apply_setting(
+        &mut self,
+        ctx: &mut GameContext,
+        setting: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        let invalid = || format!("Invalid value {value} for {setting}");
+        let config = &mut self.settings.config;
         match setting {
             "redscore" | "bluescore" => {
-                if let Ok(score) = value.parse() {
-                    match &mut self.state {
-                        StandardMatchState::WaitingForGame(warmup) => {
-                            if setting == "redscore" {
-                                warmup.score.0 = score
-                            } else {
-                                warmup.score.1 = score
-                            }
-                        }
-                        StandardMatchState::Game(game) => {
-                            if setting == "redscore" {
-                                game.game_state.score.0 = score
-                            } else {
-                                game.game_state.score.1 = score
-                            }
-                        }
-                    }
+                let score = value.parse().map_err(|_| invalid())?;
+                let scores = match &mut self.state {
+                    StandardMatchState::WaitingForGame(warmup) => &mut warmup.score,
+                    StandardMatchState::Game(game) => &mut game.game_state.score,
+                };
+                if setting == "redscore" {
+                    scores.0 = score;
+                } else {
+                    scores.1 = score;
                 }
             }
-            "period" => {
-                if let Ok(period) = value.parse()
-                    && let StandardMatchState::Game(game) = &mut self.state
-                {
+            "period" | "clock" => {
+                let StandardMatchState::Game(game) = &mut self.state else {
+                    return Err("No game is currently ongoing".to_owned());
+                };
+                if setting == "clock" {
+                    game.game_state.time = parse_clock(value).ok_or_else(invalid)?;
+                } else {
+                    let period = value.parse().map_err(|_| invalid())?;
                     if period == 0 {
                         // Period 0 is warmup. The score is kept, and the game starts again when
                         // warmup is over.
@@ -243,136 +264,91 @@ impl StandardMatchGameMode {
                             score,
                             ..WarmupState::new()
                         });
+                        ctx.objects.remove_all_pucks();
+                        spawn_warmup_pucks(ctx, config.warmup_pucks, config.spawn_puck_altitude);
                     } else {
                         game.game_state.period = period;
                     }
                 }
             }
-            "periodnum" => {
-                if let Ok(periods) = value.parse() {
-                    self.settings.config.periods = periods;
+            "periodnum" => config.periods = value.parse().map_err(|_| invalid())?,
+            "icing" => {
+                config.icing = match value {
+                    "on" | "touch" => IcingConfiguration::Touch,
+                    "notouch" => IcingConfiguration::NoTouch,
+                    "off" => IcingConfiguration::Off,
+                    _ => return Err(invalid()),
                 }
             }
-            "clock" => {
-                if let Some(time) = parse_clock(value) {
-                    if let StandardMatchState::Game(game) = &mut self.state {
-                        game.game_state.time = time;
-                    }
+            "offside" => {
+                config.offside = match value {
+                    "on" | "delayed" => OffsideConfiguration::Delayed,
+                    "imm" | "immediate" => OffsideConfiguration::Immediate,
+                    "off" => OffsideConfiguration::Off,
+                    _ => return Err(invalid()),
                 }
             }
-            "icing" => match value {
-                "on" | "touch" => self.settings.config.icing = IcingConfiguration::Touch,
-                "notouch" => self.settings.config.icing = IcingConfiguration::NoTouch,
-                "off" => self.settings.config.icing = IcingConfiguration::Off,
-                _ => {}
-            },
-            "offside" => match value {
-                "on" | "delayed" => self.settings.config.offside = OffsideConfiguration::Delayed,
-                "imm" | "immediate" => {
-                    self.settings.config.offside = OffsideConfiguration::Immediate
-                }
-                "off" => self.settings.config.offside = OffsideConfiguration::Off,
-                _ => {}
-            },
-            "twolinepass" => match value {
-                "off" => self.settings.config.twoline_pass = TwoLinePassConfiguration::Off,
-                "on" => self.settings.config.twoline_pass = TwoLinePassConfiguration::On,
-                "forward" => self.settings.config.twoline_pass = TwoLinePassConfiguration::Forward,
-                "double" | "both" => {
-                    self.settings.config.twoline_pass = TwoLinePassConfiguration::Double
-                }
-                "blue" | "three" | "threeline" => {
-                    self.settings.config.twoline_pass = TwoLinePassConfiguration::ThreeLine
-                }
-                _ => {}
-            },
-            "offsideline" => match value {
-                "blue" => {
-                    self.settings.config.offside_line = OffsideLineConfiguration::OffensiveBlue
-                }
-                "center" => self.settings.config.offside_line = OffsideLineConfiguration::Center,
-                _ => {}
-            },
-            "mercy" => {
-                if let Some(goals) = parse_goal_rule(value) {
-                    self.settings.config.mercy = goals;
+            "twolinepass" => {
+                config.twoline_pass = match value {
+                    "off" => TwoLinePassConfiguration::Off,
+                    "on" => TwoLinePassConfiguration::On,
+                    "forward" => TwoLinePassConfiguration::Forward,
+                    "double" | "both" => TwoLinePassConfiguration::Double,
+                    "blue" | "three" | "threeline" => TwoLinePassConfiguration::ThreeLine,
+                    _ => return Err(invalid()),
                 }
             }
-            "first" => {
-                if let Some(goals) = parse_goal_rule(value) {
-                    self.settings.config.first_to = goals;
+            "offsideline" => {
+                config.offside_line = match value {
+                    "blue" => OffsideLineConfiguration::OffensiveBlue,
+                    "center" => OffsideLineConfiguration::Center,
+                    _ => return Err(invalid()),
                 }
             }
-            "goalreplay" => match value {
-                "on" => self.settings.config.goal_replay = true,
-                "off" => self.settings.config.goal_replay = false,
-                _ => {}
-            },
+            "mercy" => config.mercy = parse_goal_rule(value).ok_or_else(invalid)?,
+            "first" => config.first_to = parse_goal_rule(value).ok_or_else(invalid)?,
+            "goalreplay" => {
+                config.goal_replay = match value {
+                    "on" => true,
+                    "off" => false,
+                    _ => return Err(invalid()),
+                }
+            }
             "spawnoffset" => {
-                if let Ok(offset) = value.parse() {
-                    self.settings.config.spawn_point_offset = offset;
-                }
+                config.spawn_point_offset = parse_distance(value).ok_or_else(invalid)?
             }
             "spawnplayeraltitude" => {
-                if let Ok(altitude) = value.parse() {
-                    self.settings.config.spawn_player_altitude = altitude;
-                }
+                config.spawn_player_altitude = parse_distance(value).ok_or_else(invalid)?
             }
             "spawnpuckaltitude" => {
-                if let Ok(altitude) = value.parse() {
-                    self.settings.config.spawn_puck_altitude = altitude;
+                config.spawn_puck_altitude = parse_distance(value).ok_or_else(invalid)?
+            }
+            "spawnplayerkeepstick" => {
+                config.spawn_keep_stick_position = match value {
+                    "on" | "true" => true,
+                    "off" | "false" => false,
+                    _ => return Err(invalid()),
                 }
             }
-            "spawnplayerkeepstick" => match value {
-                "on" | "true" => self.settings.config.spawn_keep_stick_position = true,
-                "off" | "false" => self.settings.config.spawn_keep_stick_position = false,
-                _ => {}
-            },
             "teamsize" => {
-                if let Ok(size) = value.parse() {
-                    if (1..=15).contains(&size) {
-                        self.teams.team_max = size;
-                    }
+                let size = value.parse().map_err(|_| invalid())?;
+                if !(1..=15).contains(&size) {
+                    return Err("Team size must be between 1 and 15".to_owned());
                 }
+                self.teams.team_max = size;
             }
-            _ => {}
+            _ => return Err(format!("Unknown setting {setting}")),
         }
-        let new_state_values = match &self.state {
-            StandardMatchState::Game(game) => (
-                game.game_state.score,
-                game.game_state.period,
-                game.game_state.time,
-            ),
-            StandardMatchState::WaitingForGame(warmup) => (warmup.score, 0, warmup.time),
-        };
-        if self.settings.config != old_config
-            || self.teams.team_max != old_team_max
-            || new_state_values != old_state_values
-        {
-            let message = match (setting, value) {
-                ("redscore", _) => format!("Red score changed to {value}"),
-                ("bluescore", _) => format!("Blue score changed to {value}"),
-                ("period", _) => format!("Period set to {value}"),
-                ("periodnum", _) => format!("Number of periods set to {value}"),
-                ("clock", _) => format!("Clock set to {value}"),
-                ("icing", _) => self.settings.config.icing.description().to_owned(),
-                ("offside", _) => self.settings.config.offside.description().to_owned(),
-                ("twolinepass", _) => self.settings.config.twoline_pass.description().to_owned(),
-                ("offsideline", "blue") => "Blue line set as offside line".to_owned(),
-                ("offsideline", "center") => "Center line set as offside line".to_owned(),
-                ("mercy", "0" | "off") => "Mercy rule disabled".to_owned(),
-                ("mercy", _) => format!("Mercy rule set to {value} goals"),
-                ("first", "0" | "off") => "First-to-goals rule disabled".to_owned(),
-                ("first", _) => format!("First-to-goals rule set to {value} goals"),
-                ("goalreplay", "on") => "Goal replays enabled".to_owned(),
-                ("goalreplay", "off") => "Goal replays disabled".to_owned(),
-                ("teamsize", _) => format!("Team size set to {value}"),
-                _ => format!("{setting} changed to {value}"),
-            };
-            ctx.messages
-                .add_server_chat_message(format!("{message} by {admin_name}"));
-        }
+        Ok(())
     }
+}
+
+/// Parses a distance in meters for the spawn settings, which must not be negative.
+fn parse_distance(value: &str) -> Option<f32> {
+    value
+        .parse::<f32>()
+        .ok()
+        .filter(|distance| distance.is_finite() && *distance >= 0.0)
 }
 
 /// Parses the goal count of the mercy and first-to rules, where "off" is the same as 0.
@@ -786,5 +762,78 @@ mod tests {
         assert!(((red.z - center_z) - 4.0).abs() < 0.1, "{red}");
         assert!((red.y - 4.0).abs() < 0.1, "{red}");
         assert!((game.pucks()[0].y - 3.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn fs_announces_and_tells_the_admin_why_it_failed() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        let admin = game.admin();
+        let blue = game.blue[0];
+        game.chat(admin, &format!("/fs {}", blue.index));
+        game.chat(admin, &format!("/fs {}", blue.index));
+        game.chat(admin, "/fs 99");
+        game.chat(admin, "/fs blue0");
+        assert_eq!(
+            game.heard,
+            [
+                "blue0 forced off ice by red0",
+                "blue0 is not on the ice",
+                "No player with this ID exists",
+                "No player with this ID exists",
+            ]
+        );
+    }
+
+    #[test]
+    fn set_tells_the_admin_why_a_setting_was_not_changed() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 0);
+        let admin = game.admin();
+        for command in [
+            "/set",
+            "/set icing",
+            "/set color red",
+            "/set icing sometimes",
+            "/set mercy many",
+            "/set teamsize 16",
+            "/set spawnoffset -1",
+            "/set clock 1:30",
+        ] {
+            game.chat(admin, command);
+        }
+        assert_eq!(
+            game.heard,
+            [
+                "Usage: /set <setting> <value>",
+                "Usage: /set <setting> <value>",
+                "Unknown setting color",
+                "Invalid value sometimes for icing",
+                "Invalid value many for mercy",
+                "Team size must be between 1 and 15",
+                "Invalid value -1 for spawnoffset",
+                "No game is currently ongoing",
+            ]
+        );
+        let mode = &game.t.mode.mode;
+        assert_eq!(mode.settings.config, MatchGame::quick_config());
+        assert_eq!(mode.teams.team_max, 5);
+    }
+
+    #[test]
+    fn set_announces_a_setting_that_already_had_the_value() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 0);
+        game.chat(game.admin(), "/set icing off");
+        assert_eq!(game.heard, ["Icing disabled by red0"]);
+    }
+
+    #[test]
+    fn set_period_zero_puts_the_warmup_pucks_back() {
+        let config = MatchConfiguration {
+            warmup_pucks: 3,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        assert_eq!(game.pucks().len(), 1);
+        game.chat(game.admin(), "/set period 0");
+        assert_eq!(game.pucks().len(), 3);
     }
 }

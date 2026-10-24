@@ -4,9 +4,7 @@ use glam::Vec3;
 use glamx::Rot3;
 
 use crate::game::RinkSideOfLine::{BlueSide, RedSide};
-use crate::game::{
-    PhysicsEvent, PlayerId, PlayerIndex, Puck, PuckId, RulesState, ScoreboardValues, Team,
-};
+use crate::game::{PhysicsEvent, PlayerId, Puck, PuckId, RulesState, ScoreboardValues, Team};
 use crate::gamemode::util::{
     GameProgress, SpawnPoint, TeamSelection, get_spawnpoint, spawn_warmup_pucks,
 };
@@ -1291,16 +1289,7 @@ impl GameMode for StandardMatchGameMode {
                         .add_directed_server_chat_message("Invalid faceoff position", player);
                 }
             }
-            "fs" => {
-                if let Ok(index) = arg.parse::<PlayerIndex>() {
-                    if ctx.require_admin(player).is_some() {
-                        let target = ctx.players.get_by_index(index).map(|p| p.id);
-                        if let Some(target) = target {
-                            self.teams.force_spectate(ctx, target);
-                        }
-                    }
-                }
-            }
+            "fs" => self.teams.handle_force_spectate_command(ctx, player, arg),
             _ => return CommandResult::Unknown,
         }
         CommandResult::Handled
@@ -1339,6 +1328,7 @@ impl GameMode for StandardMatchGameMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::PlayerIndex;
     use crate::server::test_server::{EmptyGameMode, TestServer};
     use test_game::{MatchGame, PUCK_LANE, RECEIVER_LANE, ice_the_puck, red_attack};
 
