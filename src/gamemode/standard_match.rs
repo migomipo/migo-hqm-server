@@ -616,12 +616,13 @@ impl PlayingState {
         side: RinkSide,
         from: PassLocation,
     ) -> BreakState {
+        // Two-line passes are only called on passes from the passer's own half, so like an
+        // offside pass, it is faced off in the zone the pass came from, at the spot with the
+        // least territorial advantage.
         let next_faceoff = if from <= PassLocation::ReachedOwnBlue {
             Faceoff::Defensive(team, side)
-        } else if from <= PassLocation::ReachedCenter {
-            Faceoff::Offside(team, side)
         } else {
-            Faceoff::Center
+            Faceoff::Offside(team, side)
         };
         ctx.messages.add_server_chat_message("Two-line pass");
         Self::stoppage(
