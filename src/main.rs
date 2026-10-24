@@ -15,6 +15,7 @@ use migo_hqm_server::record::{
 };
 use migo_hqm_server::{ReplayRecording, ServerConfiguration};
 use serde::Deserialize;
+use tracing::warn;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -65,7 +66,6 @@ struct ServerSection {
 struct GameSection {
     periods: Option<u32>,
     time_period: Option<u32>,
-    time_warmup: Option<u32>,
     time_break: Option<u32>,
     time_intermission: Option<u32>,
     warmup_pucks: Option<usize>,
@@ -97,6 +97,24 @@ struct PhysicsSection {
     player_turning: Option<f32>,
     player_shift_turning: Option<f32>,
     player_shift_acceleration: Option<f32>,
+}
+
+/// Warns that a [game] setting has a value the server does not recognize, and which value is used
+/// instead.
+fn warn_unknown_value(setting: &str, value: &str, used: &str) {
+    eprintln!("Unknown value \"{value}\" for {setting}, using \"{used}\"");
+    warn!("Unknown value \"{value}\" for {setting}, using \"{used}\"");
+}
+
+fn parse_spawn_point(game_section: &GameSection) -> SpawnPoint {
+    match game_section.spawn.as_deref().unwrap_or("center") {
+        "center" => SpawnPoint::Center,
+        "bench" => SpawnPoint::Bench,
+        other => {
+            warn_unknown_value("spawn", other, "center");
+            SpawnPoint::Center
+        }
+    }
 }
 
 #[tokio::main]
@@ -226,7 +244,6 @@ async fn main() -> anyhow::Result<()> {
                 let periods = game_section.periods.unwrap_or(3);
 
                 let rules_time_period = game_section.time_period.unwrap_or(300);
-                let rules_time_warmup = game_section.time_warmup.unwrap_or(300);
                 let rule_time_break = game_section.time_break.unwrap_or(10);
                 let rule_time_intermission = game_section.time_intermission.unwrap_or(20);
                 let warmup_pucks = game_section.warmup_pucks.unwrap_or(1);
@@ -235,35 +252,47 @@ async fn main() -> anyhow::Result<()> {
                 let first_to = game_section.first.unwrap_or(0);
 
                 let icing = match game_section.icing.as_deref().unwrap_or("off") {
+                    "off" => IcingConfiguration::Off,
                     "on" | "touch" => IcingConfiguration::Touch,
                     "notouch" => IcingConfiguration::NoTouch,
-                    _ => IcingConfiguration::Off,
+                    other => {
+                        warn_unknown_value("icing", other, "off");
+                        IcingConfiguration::Off
+                    }
                 };
 
                 let offside = match game_section.offside.as_deref().unwrap_or("off") {
+                    "off" => OffsideConfiguration::Off,
                     "on" | "delayed" => OffsideConfiguration::Delayed,
                     "immediate" | "imm" => OffsideConfiguration::Immediate,
-                    _ => OffsideConfiguration::Off,
+                    other => {
+                        warn_unknown_value("offside", other, "off");
+                        OffsideConfiguration::Off
+                    }
                 };
 
                 let offside_line = match game_section.offsideline.as_deref().unwrap_or("blue") {
                     "blue" => OffsideLineConfiguration::OffensiveBlue,
                     "center" => OffsideLineConfiguration::Center,
-                    _ => OffsideLineConfiguration::OffensiveBlue,
+                    other => {
+                        warn_unknown_value("offsideline", other, "blue");
+                        OffsideLineConfiguration::OffensiveBlue
+                    }
                 };
 
                 let twoline_pass = match game_section.twolinepass.as_deref().unwrap_or("off") {
+                    "off" => TwoLinePassConfiguration::Off,
                     "on" => TwoLinePassConfiguration::On,
                     "forward" => TwoLinePassConfiguration::Forward,
                     "double" | "both" => TwoLinePassConfiguration::Double,
                     "blue" | "three" | "threeline" => TwoLinePassConfiguration::ThreeLine,
-                    _ => TwoLinePassConfiguration::Off,
+                    other => {
+                        warn_unknown_value("twolinepass", other, "off");
+                        TwoLinePassConfiguration::Off
+                    }
                 };
 
-                let spawn_point = match game_section.spawn.as_deref().unwrap_or("center") {
-                    "bench" => SpawnPoint::Bench,
-                    _ => SpawnPoint::Center,
-                };
+                let spawn_point = parse_spawn_point(&game_section);
 
                 let spawn_point_offset = game_section.spawn_offset.unwrap_or(2.75);
 
@@ -280,7 +309,6 @@ async fn main() -> anyhow::Result<()> {
 
                 let match_config = MatchConfiguration {
                     time_period: rules_time_period,
-                    time_warmup: rules_time_warmup,
                     time_break: rule_time_break,
                     time_intermission: rule_time_intermission,
                     mercy,
@@ -313,10 +341,7 @@ async fn main() -> anyhow::Result<()> {
             HQMServerMode::PermanentWarmup => {
                 let warmup_pucks = game_section.warmup_pucks.unwrap_or(1);
 
-                let spawn_point = match game_section.spawn.as_deref().unwrap_or("center") {
-                    "bench" => SpawnPoint::Bench,
-                    _ => SpawnPoint::Center,
-                };
+                let spawn_point = parse_spawn_point(&game_section);
 
                 migo_hqm_server::run_server(
                     server_port,

@@ -85,11 +85,13 @@ pub struct RinkLine {
 }
 
 impl RinkLine {
+    /// Which side of the line a sphere with the given radius is on. It is on the line if any part
+    /// of it touches the line.
     pub fn side_of_line(&self, pos: Vec3, radius: f32) -> RinkSideOfLine {
         let dot = pos.z - self.z;
         if dot > (self.width / 2.0) + radius {
             RedSide
-        } else if dot < (-self.width) - radius {
+        } else if dot < -(self.width / 2.0) - radius {
             BlueSide
         } else {
             On
@@ -323,7 +325,8 @@ impl PhysicsBody {
 ///
 /// If you set the position, rotation, and/or linear velocity directly without adjusting the collision balls,
 /// some weird things will happen with the inertia of the player. To fix this, use the [SkaterObject::reset_collision_balls] method after
-/// changing the physics properties.
+/// changing the physics properties. To move a skater somewhere else, use [SkaterObject::teleport],
+/// which also takes care of the stick.
 #[derive(Debug, Clone)]
 pub struct SkaterObject {
     pub body: PhysicsBody,
@@ -369,6 +372,30 @@ impl SkaterObject {
             hand,
             collision_balls,
         }
+    }
+
+    /// Returns the position of the bottom of the skater.
+    pub fn feet_position(&self) -> Vec3 {
+        self.body.pos - self.body.rot * Vec3::Y * self.height
+    }
+
+    /// Moves the skater to a new position and rotation, and stops it.
+    ///
+    /// The stick moves along with the skater, so it stays in the same place relative to the
+    /// skater, and the collision balls are reset. Head, body and stick placement are kept.
+    ///
+    /// To have the skater keep moving from the new position, set the velocities afterwards and
+    /// call [SkaterObject::reset_collision_balls].
+    pub fn teleport(&mut self, pos: Vec3, rot: Rot3) {
+        let frame_change = rot * self.body.rot.inverse();
+        self.stick_pos = pos + frame_change * (self.stick_pos - self.body.pos);
+        self.stick_rot = frame_change * self.stick_rot;
+        self.stick_velocity = Vec3::ZERO;
+        self.body.pos = pos;
+        self.body.rot = rot;
+        self.body.linear_velocity = Vec3::ZERO;
+        self.body.angular_velocity = Vec3::ZERO;
+        self.reset_collision_balls();
     }
 
     pub fn reset_collision_balls(&mut self) {
@@ -687,6 +714,25 @@ impl std::fmt::Display for PlayerId {
     }
 }
 
+/**
+Unique puck ID.
+
+Each puck that is spawned gets an ID that no other puck has had since the server started. An ID
+of a puck that has been removed never refers to a puck that was spawned later in the same object
+slot.
+**/
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct PuckId {
+    pub(crate) index: usize,
+    pub(crate) counter: u32,
+}
+
+impl std::fmt::Display for PuckId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.index, self.counter)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Team {
     Red,
@@ -720,15 +766,81 @@ impl Display for Team {
 
 #[derive(Debug, Copy, Clone)]
 pub enum PhysicsEvent {
-    PuckTouch { player: PlayerId, puck: usize },
-    PuckReachedDefensiveLine { team: Team, puck: usize },
-    PuckPassedDefensiveLine { team: Team, puck: usize },
-    PuckReachedCenterLine { team: Team, puck: usize },
-    PuckPassedCenterLine { team: Team, puck: usize },
-    PuckReachedOffensiveZone { team: Team, puck: usize },
-    PuckEnteredOffensiveZone { team: Team, puck: usize },
+    PuckTouch { player: PlayerId, puck: PuckId },
+    PuckReachedDefensiveLine { team: Team, puck: PuckId },
+    PuckPassedDefensiveLine { team: Team, puck: PuckId },
+    PuckReachedCenterLine { team: Team, puck: PuckId },
+    PuckPassedCenterLine { team: Team, puck: PuckId },
+    PuckReachedOffensiveZone { team: Team, puck: PuckId },
+    PuckEnteredOffensiveZone { team: Team, puck: PuckId },
 
-    PuckEnteredNet { team: Team, puck: usize },
-    PuckPassedGoalLine { team: Team, puck: usize },
-    PuckTouchedNet { team: Team, puck: usize },
+    PuckEnteredNet { team: Team, puck: PuckId },
+    PuckPassedGoalLine { team: Team, puck: PuckId },
+    PuckTouchedNet { team: Team, puck: PuckId },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f32::consts::FRAC_PI_2;
+
+    #[test]
+    fn both_sides_of_a_line_start_at_its_edges() {
+        let line = RinkLine {
+            z: 10.0,
+            width: 0.3,
+        };
+        let at = |z: f32, radius| line.side_of_line(Vec3::new(5.0, 0.0, z), radius);
+
+        // The edges are half the line width from the middle on both sides.
+        for (offset, side) in [(0.16, RedSide), (0.14, On), (-0.14, On), (-0.16, BlueSide)] {
+            assert_eq!(at(10.0 + offset, 0.0), side, "offset {offset}");
+        }
+        // A sphere is on the line while any part of it touches it.
+        assert_eq!(at(10.3, 0.1), RedSide);
+        assert_eq!(at(10.2, 0.1), On);
+        assert_eq!(at(9.8, 0.1), On);
+        assert_eq!(at(9.7, 0.1), BlueSide);
+    }
+
+    #[test]
+    fn teleport_moves_the_stick_along_and_stops_the_skater() {
+        let mut skater =
+            SkaterObject::new(Vec3::new(5.0, 1.0, 10.0), Rot3::IDENTITY, SkaterHand::Right);
+        skater.stick_pos = Vec3::new(5.0, 0.2, 11.5);
+        skater.stick_rot = Rot3::from_rotation_x(0.3);
+        skater.stick_velocity = Vec3::X;
+        skater.stick_placement = Vec2::new(0.5, -0.2);
+        skater.head_rot = 0.4;
+        skater.body.linear_velocity = Vec3::new(0.1, 0.0, 0.2);
+        skater.body.angular_velocity = Vec3::Y;
+        skater.reset_collision_balls();
+
+        let pos = Vec3::new(20.0, 1.5, 40.0);
+        let rot = Rot3::from_rotation_y(FRAC_PI_2);
+        skater.teleport(pos, rot);
+
+        assert_eq!(skater.body.pos, pos);
+        assert!(skater.body.rot.abs_diff_eq(rot, 1e-6));
+        // A quarter turn around Y turns the stick's offset of 1.5 m along Z into 1.5 m along X.
+        let stick_offset = skater.stick_pos - pos;
+        assert!(stick_offset.abs_diff_eq(Vec3::new(1.5, -0.8, 0.0), 1e-5));
+        assert!(
+            skater
+                .stick_rot
+                .abs_diff_eq(rot * Rot3::from_rotation_x(0.3), 1e-6)
+        );
+        assert_eq!(skater.body.linear_velocity, Vec3::ZERO);
+        assert_eq!(skater.body.angular_velocity, Vec3::ZERO);
+        assert_eq!(skater.stick_velocity, Vec3::ZERO);
+        assert_eq!(skater.stick_placement, Vec2::new(0.5, -0.2));
+        assert_eq!(skater.head_rot, 0.4);
+
+        let fresh = SkaterObject::new(pos, rot, SkaterHand::Right);
+        assert_eq!(skater.collision_balls.len(), fresh.collision_balls.len());
+        for (ball, fresh_ball) in skater.collision_balls.iter().zip(&fresh.collision_balls) {
+            assert!(ball.pos.abs_diff_eq(fresh_ball.pos, 1e-5));
+            assert_eq!(ball.velocity, Vec3::ZERO);
+        }
+    }
 }

@@ -18,12 +18,12 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::udp::UdpFramed;
 use tracing::{info, warn};
 
-use crate::gamemode::{ExitReason, GameMode};
+use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 
 use self::ban::{BanCheck, BanCheckResponse};
 use self::recording::RecordingSaveMethod;
 use crate::game::{
-    PhysicsConfiguration, PlayerId, PlayerIndex, PlayerInput, Puck, Rink, ScoreboardValues,
+    PhysicsConfiguration, PlayerId, PlayerIndex, PlayerInput, Puck, PuckId, Rink, ScoreboardValues,
     SkaterHand, SkaterObject, Team,
 };
 use crate::protocol::{
@@ -33,7 +33,7 @@ use crate::protocol::{
 use crate::{ReplayRecording, ServerConfiguration};
 pub(crate) use players::{
     HQMMessage, MessageRecording, MessageRetention, MuteStatus, PlayerListExt, PlayerSlots,
-    ServerPlayerData, ServerPlayersAndMessages,
+    ServerMessages, ServerPlayerData, ServerPlayersAndMessages,
 };
 
 type HQMFramedSocket = UdpFramed<HQMMessageCodec, Arc<UdpSocket>>;
@@ -44,6 +44,8 @@ pub(crate) mod players;
 pub mod recording;
 mod replay;
 mod replication;
+#[cfg(test)]
+pub(crate) mod test_server;
 
 pub use replay::HQMTickHistory;
 use replication::ReplicationState;
@@ -89,22 +91,24 @@ impl HQMClientVersion {
 #[derive(Debug, Clone)]
 pub enum GameObject {
     Skater(PlayerId, SkaterObject),
-    Puck(Puck),
+    Puck(PuckId, Puck),
 }
 
 pub(crate) trait ObjectExt {
-    fn spawn_puck(&mut self, puck: Puck) -> Option<usize>;
+    fn spawn_puck(&mut self, puck: Puck, puck_counter: &mut u32) -> Option<PuckId>;
     fn spawn_skater(&mut self, player_id: PlayerId, skater: SkaterObject) -> Option<ObjectSlot>;
 }
 
 impl ObjectExt for [Option<GameObject>] {
-    fn spawn_puck(&mut self, puck: Puck) -> Option<usize> {
-        if let Some(object_index) = self.iter().position(|x| x.is_none()) {
-            self[object_index] = Some(GameObject::Puck(puck));
-            Some(object_index)
-        } else {
-            None
-        }
+    fn spawn_puck(&mut self, puck: Puck, puck_counter: &mut u32) -> Option<PuckId> {
+        let index = self.iter().position(|x| x.is_none())?;
+        let puck_id = PuckId {
+            index,
+            counter: *puck_counter,
+        };
+        *puck_counter = puck_counter.wrapping_add(1);
+        self[index] = Some(GameObject::Puck(puck_id, puck));
+        Some(puck_id)
     }
 
     fn spawn_skater(&mut self, player_id: PlayerId, skater: SkaterObject) -> Option<ObjectSlot> {
@@ -147,6 +151,8 @@ pub(crate) struct HQMServerState {
     pub(crate) player_message_state: ServerPlayersAndMessages,
 
     pub(crate) objects: Vec<Option<GameObject>>,
+    /// Counter for [PuckId], so that every spawned puck gets a new ID.
+    pub(crate) puck_counter: u32,
 
     pub(crate) replay: HQMTickHistory,
     replication: ReplicationState,
@@ -158,46 +164,52 @@ impl HQMServerState {
         Self {
             player_message_state: ServerPlayersAndMessages::new(),
             objects: vec![None; 32],
+            puck_counter: 0,
             replay: HQMTickHistory::new(),
             replication: ReplicationState::new(),
             recording: RecordingState::new(),
         }
     }
 
-    fn new_game(&mut self) {
-        self.player_message_state.new_game();
-
-        self.replay.clear();
-        self.replication.new_game();
-        self.recording.new_game();
-
-        self.objects = vec![None; 32];
-    }
-
-    pub(crate) fn skater_for_player(&self, player_id: PlayerId) -> Option<&SkaterObject> {
-        let object_slot = self
-            .player_message_state
-            .players
-            .get_player(player_id)?
-            .skater_assignment()?
-            .0;
-        match self.objects.get(object_slot.index())? {
-            Some(GameObject::Skater(object_player_id, skater))
-                if *object_player_id == player_id =>
-            {
-                Some(skater)
-            }
-            _ => None,
+    pub(crate) fn skater_links(&mut self) -> SkaterLinks<'_> {
+        SkaterLinks {
+            players: &mut self.player_message_state.players,
+            messages: &mut self.player_message_state.messages,
+            objects: &mut self.objects,
         }
     }
 
-    fn skater_for_player_mut(&mut self, player_id: PlayerId) -> Option<&mut SkaterObject> {
-        let object_slot = self
-            .player_message_state
-            .players
-            .get_player(player_id)?
-            .skater_assignment()?
-            .0;
+    pub fn set_hand(
+        &mut self,
+        hand: SkaterHand,
+        player_id: PlayerId,
+        change_allowed: bool,
+    ) -> bool {
+        self.skater_links()
+            .set_hand(hand, player_id, change_allowed)
+    }
+
+    pub fn remove_player(&mut self, player_id: PlayerId, on_recording: bool) -> bool {
+        self.skater_links().remove_player(player_id, on_recording)
+    }
+}
+
+/// The parts of the server state that link players to their skater objects.
+///
+/// Operations that create or remove skaters, or remove players, go through this, so the link
+/// stored on the player and the owner stored on the skater object always match.
+pub(crate) struct SkaterLinks<'a> {
+    pub(crate) players: &'a mut PlayerSlots,
+    pub(crate) messages: &'a mut ServerMessages,
+    pub(crate) objects: &'a mut [Option<GameObject>],
+}
+
+impl SkaterLinks<'_> {
+    pub(crate) fn skater_for_player_mut(
+        &mut self,
+        player_id: PlayerId,
+    ) -> Option<&mut SkaterObject> {
+        let object_slot = self.players.get_player(player_id)?.skater_assignment()?.0;
         match self.objects.get_mut(object_slot.index())? {
             Some(GameObject::Skater(object_player_id, skater))
                 if *object_player_id == player_id =>
@@ -210,7 +222,6 @@ impl HQMServerState {
 
     fn clear_skater_assignment(&mut self, player_id: PlayerId) -> bool {
         let object_slot = match self
-            .player_message_state
             .players
             .get_player(player_id)
             .and_then(|player| player.skater_assignment())
@@ -231,7 +242,7 @@ impl HQMServerState {
         }
 
         self.objects[object_slot.index()] = None;
-        if let Some(player) = self.player_message_state.players.get_player_mut(player_id) {
+        if let Some(player) = self.players.get_player_mut(player_id) {
             player.clear_skater_assignment();
             true
         } else {
@@ -240,9 +251,9 @@ impl HQMServerState {
     }
 
     fn broadcast_player_update(&mut self, player_id: PlayerId) {
-        if let Some(player) = self.player_message_state.players.get_player(player_id) {
+        if let Some(player) = self.players.get_player(player_id) {
             let update = player.get_update_message(player_id.index);
-            self.player_message_state.broadcast_message(
+            self.messages.broadcast_message(
                 update,
                 MessageRetention::ForLateJoiners,
                 MessageRecording::Include,
@@ -250,13 +261,52 @@ impl HQMServerState {
         }
     }
 
-    pub fn set_hand(&mut self, hand: SkaterHand, player_id: PlayerId) {
-        if let Some(player) = self.player_message_state.players.get_player_mut(player_id) {
+    /// Sets the player's preferred hand, and applies it if the player may change hands now.
+    ///
+    /// Returns whether the player now plays with the preferred hand.
+    pub(crate) fn set_hand(
+        &mut self,
+        hand: SkaterHand,
+        player_id: PlayerId,
+        change_allowed: bool,
+    ) -> bool {
+        if let Some(player) = self.players.get_player_mut(player_id) {
             player.preferred_hand = hand;
         }
-        if let Some(skater) = self.skater_for_player_mut(player_id) {
-            skater.hand = hand;
+        self.update_hand(player_id, change_allowed)
+    }
+
+    /// Applies the preferred hand of every player who may change hands now.
+    pub(crate) fn update_hands(&mut self, change_allowed: bool) {
+        let player_ids: smallvec::SmallVec<[_; 32]> =
+            self.players.iter_players().map(|(id, _)| id).collect();
+        for player_id in player_ids {
+            self.update_hand(player_id, change_allowed);
         }
+    }
+
+    /// Applies the player's preferred hand unless the player has been on the ice since hand
+    /// changes were last allowed, and returns whether the player now plays with it.
+    fn update_hand(&mut self, player_id: PlayerId, change_allowed: bool) -> bool {
+        let on_ice = self.skater_for_player_mut(player_id).is_some();
+        let Some(player) = self.players.get_player_mut(player_id) else {
+            return false;
+        };
+        if change_allowed {
+            player.hand_locked = false;
+        } else if on_ice {
+            player.hand_locked = true;
+        }
+        let hand = player.preferred_hand;
+        if player.hand != hand && !player.hand_locked {
+            player.hand = hand;
+            if let Some(skater) = self.skater_for_player_mut(player_id) {
+                skater.hand = hand;
+            }
+        }
+        self.players
+            .get_player(player_id)
+            .is_some_and(|player| player.hand == player.preferred_hand)
     }
 
     pub(crate) fn move_to_spectator(&mut self, player_id: PlayerId) -> bool {
@@ -276,10 +326,10 @@ impl HQMServerState {
         rot: Rot3,
         keep_stick_position: bool,
     ) -> bool {
-        let Some(player) = self.player_message_state.players.get_player(player_id) else {
+        let Some(player) = self.players.get_player(player_id) else {
             return false;
         };
-        let hand = player.preferred_hand;
+        let hand = player.hand;
         let has_assignment = player.skater_assignment().is_some();
 
         if has_assignment {
@@ -297,8 +347,7 @@ impl HQMServerState {
                 new_skater.stick_placement_delta = skater.stick_placement_delta;
             }
             *skater = new_skater;
-            self.player_message_state
-                .players
+            self.players
                 .get_player_mut(player_id)
                 .expect("player must exist while updating its skater")
                 .set_skater_team(team);
@@ -308,7 +357,6 @@ impl HQMServerState {
                 return false;
             };
             let player = self
-                .player_message_state
                 .players
                 .get_player_mut(player_id)
                 .expect("player must exist while spawning its skater");
@@ -322,8 +370,8 @@ impl HQMServerState {
         true
     }
 
-    pub fn remove_player(&mut self, player_id: PlayerId, on_recording: bool) -> bool {
-        if let Some(player) = self.player_message_state.players.get_player(player_id) {
+    pub(crate) fn remove_player(&mut self, player_id: PlayerId, on_recording: bool) -> bool {
+        if let Some(player) = self.players.get_player(player_id) {
             let update = HQMMessage::PlayerUpdate {
                 player_index: player_id.index,
                 data: None,
@@ -337,12 +385,11 @@ impl HQMServerState {
                 );
             }
 
-            self.player_message_state
-                .players
+            self.players
                 .remove(player_id)
                 .expect("player must exist while removing it");
 
-            self.player_message_state.broadcast_message(
+            self.messages.broadcast_message(
                 update,
                 MessageRetention::ForLateJoiners,
                 if on_recording {
@@ -359,6 +406,20 @@ impl HQMServerState {
     }
 }
 
+/// The server state that game modes can reach, split into parts that can be borrowed
+/// independently.
+pub(crate) struct ServerSplit<'a> {
+    pub(crate) players: &'a mut PlayerSlots,
+    pub(crate) messages: &'a mut ServerMessages,
+    pub(crate) objects: &'a mut [Option<GameObject>],
+    pub(crate) puck_counter: &'a mut u32,
+    pub(crate) replay: &'a mut HQMTickHistory,
+    pub(crate) rink: &'a mut Rink,
+    pub(crate) config: &'a mut ServerConfiguration,
+    pub(crate) physics_config: &'a mut PhysicsConfiguration,
+    pub(crate) new_game_requested: &'a mut bool,
+}
+
 pub(crate) struct HQMServer {
     pub(crate) state: HQMServerState,
 
@@ -372,6 +433,9 @@ pub(crate) struct HQMServer {
     pub start_time: Timestamp,
 
     has_current_game_been_active: bool,
+    /// Whether a game mode asked for a new game with [GameContext::new_game], which
+    /// [HQMServer::start_requested_game] carries out.
+    new_game_requested: bool,
 
     pub(crate) ban: Box<dyn BanCheck>,
     pub(crate) save_recording: Box<dyn RecordingSaveMethod>,
@@ -392,6 +456,7 @@ impl HQMServer {
             game_id: 1,
 
             has_current_game_been_active: false,
+            new_game_requested: false,
             ban,
             save_recording,
 
@@ -569,14 +634,15 @@ impl HQMServer {
             return;
         }
 
-        if let Some(player_index) = self.add_player(&name, addr) {
-            behaviour.after_player_join(self.into(), player_index);
+        if let Some(player_id) = self.add_player(&name, addr) {
+            behaviour.after_player_join(&mut self.context(), player_id);
             info!(
                 "{} ({}) joined server from address {:?}",
-                name, player_index, addr
+                name, player_id, addr
             );
             let msg = format!("{name} joined");
             self.state.player_message_state.add_server_chat_message(msg);
+            self.start_requested_game(behaviour);
         }
     }
 
@@ -609,14 +675,15 @@ impl HQMServer {
                 self.kick_all_matching(player_id, name, true, behaviour);
             }
             ChatCommand::Builtin(BuiltinCommand::ClearBans) => self.clear_bans(player_id),
+            ChatCommand::Builtin(BuiltinCommand::Reset) => self.reset_game(player_id),
             ChatCommand::Builtin(BuiltinCommand::SetRecording(rule)) => {
                 self.set_recording(player_id, rule);
             }
             ChatCommand::Builtin(BuiltinCommand::Lefty) => {
-                self.state.set_hand(SkaterHand::Left, player_id);
+                self.set_hand(SkaterHand::Left, player_id, behaviour);
             }
             ChatCommand::Builtin(BuiltinCommand::Righty) => {
-                self.state.set_hand(SkaterHand::Right, player_id);
+                self.set_hand(SkaterHand::Right, player_id, behaviour);
             }
             ChatCommand::Builtin(BuiltinCommand::Admin(password)) => {
                 self.admin_login(player_id, password);
@@ -686,8 +753,30 @@ impl HQMServer {
             }
             ChatCommand::Builtin(_) => {}
             ChatCommand::GameMode { command, arg } => {
-                behaviour.handle_command(self.into(), command, arg, player_id);
+                let result = behaviour.handle_command(&mut self.context(), command, arg, player_id);
+                if result == CommandResult::Unknown {
+                    self.state
+                        .player_message_state
+                        .add_directed_server_chat_message(
+                            format!("Unknown command /{command}"),
+                            player_id,
+                        );
+                }
             }
+        }
+    }
+
+    fn set_hand<B: GameMode>(&mut self, hand: SkaterHand, player_id: PlayerId, behaviour: &B) {
+        if !self
+            .state
+            .set_hand(hand, player_id, behaviour.hand_change_allowed())
+        {
+            self.state
+                .player_message_state
+                .add_directed_server_chat_message(
+                    "Stick hand will change when play has stopped",
+                    player_id,
+                );
         }
     }
 
@@ -733,37 +822,29 @@ impl HQMServer {
         {
             let view_player_name = view_player.player_name.clone();
 
+            // A player on the ice becomes a spectator to view someone else.
+            if player_id != view_player_id {
+                self.state.skater_links().move_to_spectator(player_id);
+            }
+
             if let Some(player) = self
                 .state
                 .player_message_state
                 .players
                 .get_player_mut(player_id)
+                && let ServerPlayerData::NetworkPlayer { data } = &mut player.data
+                && view_player_index != data.view_player_index
             {
-                let has_skater = player.has_skater();
-                if let ServerPlayerData::NetworkPlayer { data } = &mut player.data {
-                    if has_skater {
-                        self.state
-                            .player_message_state
-                            .add_directed_server_chat_message(
-                                "You must be a spectator to change view",
-                                player_id,
-                            );
-                    } else if view_player_index != data.view_player_index {
-                        data.view_player_index = view_player_id.index;
-                        if player_id != view_player_id {
-                            let msg = format!("You are now viewing {view_player_name}");
-                            self.state
-                                .player_message_state
-                                .add_directed_server_chat_message(msg, player_id);
-                        } else {
-                            self.state
-                                .player_message_state
-                                .add_directed_server_chat_message(
-                                    "View has been restored",
-                                    player_id,
-                                );
-                        }
-                    }
+                data.view_player_index = view_player_id.index;
+                if player_id != view_player_id {
+                    let msg = format!("You are now viewing {view_player_name}");
+                    self.state
+                        .player_message_state
+                        .add_directed_server_chat_message(msg, player_id);
+                } else {
+                    self.state
+                        .player_message_state
+                        .add_directed_server_chat_message("View has been restored", player_id);
                 }
             }
         } else {
@@ -905,6 +986,7 @@ impl HQMServer {
                 let command = &split[0][1..];
                 let arg = if split.len() < 2 { "" } else { split[1] };
                 self.process_command(command, arg, player_id, behaviour);
+                self.start_requested_game(behaviour);
             } else if !self.is_muted {
                 match player.is_muted {
                     MuteStatus::NotMuted => {
@@ -940,6 +1022,7 @@ impl HQMServer {
             let msg = format!("{player_name} exited");
             self.state.player_message_state.add_server_chat_message(msg);
         }
+        self.start_requested_game(behaviour);
     }
 
     fn disconnect_player<B: GameMode>(
@@ -955,7 +1038,7 @@ impl HQMServer {
             .get_player(player_id)?
             .player_name
             .clone();
-        behaviour.before_player_exit(self.into(), player_id, reason);
+        behaviour.before_player_exit(&mut self.context(), player_id, reason);
         self.state
             .remove_player(player_id, true)
             .then_some(player_name)
@@ -981,7 +1064,7 @@ impl HQMServer {
         self.state.replay.advance_step();
 
         let events = self.simulate_step();
-        let scoreboard = behaviour.after_tick(self.into(), &events);
+        let scoreboard = behaviour.after_tick(&mut self.context(), &events);
         self.state.replication.last_scoreboard = Some(scoreboard);
 
         let packets = self.get_packets();
@@ -991,7 +1074,7 @@ impl HQMServer {
         self.state.replication.history.push(packets);
 
         if self.config.recording_enabled != ReplayRecording::Off
-            && behaviour.include_tick_in_recording((&*self).into())
+            && behaviour.include_tick_in_recording()
         {
             self.write_recording_tick(&scoreboard);
         }
@@ -1004,7 +1087,7 @@ impl HQMServer {
             packets[i] = match object {
                 None => ObjectPacket::None,
                 Some(GameObject::Skater(_, skater)) => ObjectPacket::Skater(skater.get_packet()),
-                Some(GameObject::Puck(puck)) => ObjectPacket::Puck(puck.get_packet()),
+                Some(GameObject::Puck(_, puck)) => ObjectPacket::Puck(puck.get_packet()),
             };
         }
 
@@ -1045,23 +1128,30 @@ impl HQMServer {
     }
 
     fn advance_tick<B: GameMode>(&mut self, behaviour: &mut B) -> Option<TickOutput> {
+        // A new game asked for in after_tick starts here, so that the tick it was asked for in
+        // is still sent and recorded as part of the old game.
+        self.start_requested_game(behaviour);
+
         if self.real_player_count() == 0 {
             if self.has_current_game_been_active {
                 info!("Game {} abandoned", self.game_id);
+                behaviour.game_abandoned(&mut self.context());
                 self.new_game();
             }
             return None;
         }
 
         if !self.has_current_game_been_active {
-            self.start_time = Timestamp::now();
-            self.has_current_game_been_active = true;
-            behaviour.game_started(self.into());
-            info!("New game {} started", self.game_id);
+            self.start_game(behaviour);
         }
 
         self.remove_inactive_players(behaviour);
-        behaviour.before_tick(self.into());
+        self.start_requested_game(behaviour);
+        behaviour.before_tick(&mut self.context());
+        self.start_requested_game(behaviour);
+        self.state
+            .skater_links()
+            .update_hands(behaviour.hand_change_allowed());
 
         let (game_step, forced_view, scoreboard) =
             if let Some((forced_view, tick)) = self.state.replay.pop_replay_tick() {
@@ -1090,6 +1180,7 @@ impl HQMServer {
         behaviour: &mut B,
     ) {
         let tick_output = tokio::task::block_in_place(|| self.advance_tick(behaviour));
+        self.state.player_message_state.flush_messages();
         if let Some(tick_output) = tick_output {
             send_updates(
                 self.game_id,
@@ -1104,28 +1195,85 @@ impl HQMServer {
         }
     }
 
-    fn save_recording(&mut self, old_recording_data: &[u8]) {
-        let size = old_recording_data.len();
-        let mut recording_data = BytesMut::with_capacity(size + 8);
-        recording_data.put_u32_le(0u32);
-        recording_data.put_u32_le(size as u32);
-        recording_data.put_slice(old_recording_data);
-        let recording_data = recording_data.freeze();
-        self.save_recording
-            .save_recording_data(&self.config, recording_data, self.start_time);
+    /// Gets a [GameContext] for passing to game mode hooks.
+    pub(crate) fn context(&mut self) -> GameContext<'_> {
+        GameContext::from(self.split())
     }
+
+    /// Splits the server state that game modes can reach into parts that can be borrowed
+    /// independently.
+    pub(crate) fn split(&mut self) -> ServerSplit<'_> {
+        let HQMServerState {
+            player_message_state: ServerPlayersAndMessages { players, messages },
+            objects,
+            puck_counter,
+            replay,
+            ..
+        } = &mut self.state;
+        ServerSplit {
+            players,
+            messages,
+            objects,
+            puck_counter,
+            replay,
+            rink: &mut self.rink,
+            config: &mut self.config,
+            physics_config: &mut self.physics_config,
+            new_game_requested: &mut self.new_game_requested,
+        }
+    }
+
+    /// Starts a game and calls [GameMode::game_started].
+    fn start_game<B: GameMode>(&mut self, behaviour: &mut B) {
+        self.start_time = Timestamp::now();
+        self.has_current_game_been_active = true;
+        behaviour.game_started(&mut self.context());
+        info!("New game {} started", self.game_id);
+    }
+
+    /// Carries out a new game that a game mode asked for with [GameContext::new_game].
+    ///
+    /// This is called once the server is done with the event in which the game mode asked for it,
+    /// such as a tick's [GameMode::before_tick], a chat command or a player leaving. The new game
+    /// starts right away if there are players, and otherwise on the first tick with a player.
+    pub(crate) fn start_requested_game<B: GameMode>(&mut self, behaviour: &mut B) {
+        if !self.new_game_requested {
+            return;
+        }
+        info!("Game {} ended", self.game_id);
+        self.new_game();
+        if self.real_player_count() > 0 {
+            self.start_game(behaviour);
+        }
+    }
+
+    /// Ends the current game and resets the server state.
     pub fn new_game(&mut self) {
         self.game_id += 1;
-
         self.has_current_game_been_active = false;
+        self.new_game_requested = false;
 
         let old_recording_data = self.state.recording.take_data();
-
         if self.config.recording_enabled == ReplayRecording::On && !old_recording_data.is_empty() {
-            self.save_recording(&old_recording_data);
+            let size = old_recording_data.len();
+            let mut recording_data = BytesMut::with_capacity(size + 8);
+            recording_data.put_u32_le(0u32);
+            recording_data.put_u32_le(size as u32);
+            recording_data.put_slice(&old_recording_data);
+            let recording_data = recording_data.freeze();
+            self.save_recording
+                .save_recording_data(&self.config, recording_data, self.start_time);
         }
 
-        self.state.new_game();
+        let state = &mut self.state;
+        let player_message_state = &mut state.player_message_state;
+        player_message_state
+            .messages
+            .new_game(&mut player_message_state.players);
+        state.replay.clear();
+        state.replication.new_game();
+        state.recording.new_game();
+        state.objects.fill(None);
     }
 
     fn write_recording_tick(&mut self, scoreboard: &ScoreboardValues) {
@@ -1195,6 +1343,7 @@ enum BuiltinCommand<'a> {
     Ban(Option<PlayerIndex>),
     BanAll(&'a str),
     ClearBans,
+    Reset,
     SetRecording(&'a str),
     Lefty,
     Righty,
@@ -1229,6 +1378,7 @@ fn parse_chat_command<'a>(command: &'a str, arg: &'a str) -> ChatCommand<'a> {
         "ban" => BuiltinCommand::Ban(arg.parse().ok()),
         "banall" => BuiltinCommand::BanAll(arg),
         "clearbans" => BuiltinCommand::ClearBans,
+        "reset" | "resetgame" => BuiltinCommand::Reset,
         "replay" | "record" => BuiltinCommand::SetRecording(arg),
         "lefty" => BuiltinCommand::Lefty,
         "righty" => BuiltinCommand::Righty,
@@ -1298,7 +1448,8 @@ pub async fn run_server<B: GameMode>(
     let mut server = HQMServer::new(config, physics_config, ban, recording);
     info!("Server started");
 
-    behaviour.init((&mut server).into());
+    behaviour.init(&mut server.context());
+    server.start_requested_game(&mut behaviour);
 
     // Set up timers
     let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
@@ -1366,32 +1517,41 @@ pub async fn run_server<B: GameMode>(
     }
 }
 
+/// A server with default settings and recording turned off, for tests.
+#[cfg(test)]
+pub(crate) fn test_server() -> HQMServer {
+    HQMServer::new(
+        ServerConfiguration {
+            welcome: vec![],
+            password: None,
+            player_max: 16,
+            recording_enabled: ReplayRecording::Off,
+            server_name: "test".to_owned(),
+            server_service: None,
+        },
+        PhysicsConfiguration::default(),
+        Box::new(ban::InMemoryBanCheck::new()),
+        Box::new(recording::RecordingSaveToFile::new(".".into())),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::{RulesState, SkaterHand};
+    use crate::gamemode::standard_match::test_game::{MatchGame, ice_the_puck, match_server};
+    use crate::gamemode::standard_match::{
+        IcingConfiguration, MatchConfiguration, StandardMatchGameMode,
+    };
+    use crate::gamemode::util::SpawnPoint;
+    use crate::gamemode::warmup::PermanentWarmup;
+    use crate::players::ServerPlayerData;
     use tokio_util::codec::Encoder;
 
-    use crate::ban::InMemoryBanCheck;
     use crate::game::PhysicsEvent;
-    use crate::gamemode::ServerMut;
-    use crate::players::ServerPlayer;
-    use crate::record::RecordingSaveToFile;
-
-    fn test_server() -> HQMServer {
-        HQMServer::new(
-            ServerConfiguration {
-                welcome: vec![],
-                password: None,
-                player_max: 16,
-                recording_enabled: ReplayRecording::Off,
-                server_name: "test".to_owned(),
-                server_service: None,
-            },
-            PhysicsConfiguration::default(),
-            Box::new(InMemoryBanCheck::new()),
-            Box::new(RecordingSaveToFile::new(".".into())),
-        )
-    }
+    use crate::gamemode::{BotLifetime, ServerPlayerType};
+    use crate::players::{MAX_PLAYERS, ServerPlayer};
+    use crate::server::test_server::{EmptyGameMode, Received, TestServer, chats, received};
 
     fn network_player() -> ServerPlayer {
         ServerPlayer::new_network_player(
@@ -1424,6 +1584,10 @@ mod tests {
         assert_eq!(
             parse_chat_command("view", "not-a-player"),
             ChatCommand::Builtin(BuiltinCommand::View(None))
+        );
+        assert_eq!(
+            parse_chat_command("resetgame", ""),
+            ChatCommand::Builtin(BuiltinCommand::Reset)
         );
     }
 
@@ -1523,12 +1687,14 @@ mod tests {
             history.record_tick([const { ObjectPacket::None }; 32]);
         }
 
-        history.add_replay_to_queue(0, 3, None);
+        assert_eq!(history.add_replay_to_queue(0, 3, None), 2);
         let queued_steps: Vec<_> = std::iter::from_fn(|| history.pop_replay_tick())
             .map(|(_, tick)| tick.game_step)
             .collect();
 
         assert_eq!(queued_steps, vec![1, 2]);
+        assert_eq!(history.add_replay_to_queue(2, 1, None), 0);
+        assert!(!history.is_in_replay());
     }
 
     #[test]
@@ -1539,7 +1705,13 @@ mod tests {
             .add_player("test", "127.0.0.1:12345".parse().unwrap())
             .unwrap();
 
-        assert!(state.spawn_skater(player_id, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false,));
+        assert!(state.skater_links().spawn_skater(
+            player_id,
+            Team::Red,
+            Vec3::ZERO,
+            Rot3::IDENTITY,
+            false
+        ));
         let object_slot = state
             .player_message_state
             .players
@@ -1552,7 +1724,7 @@ mod tests {
             Some(GameObject::Skater(id, _)) if id == player_id
         ));
 
-        assert!(state.move_to_spectator(player_id));
+        assert!(state.skater_links().move_to_spectator(player_id));
         assert!(
             state
                 .player_message_state
@@ -1568,16 +1740,14 @@ mod tests {
         struct SpawnsPuckAfterTick;
 
         impl GameMode for SpawnsPuckAfterTick {
-            fn before_tick(&mut self, _server: ServerMut) {}
+            fn before_tick(&mut self, _ctx: &mut GameContext) {}
 
             fn after_tick(
                 &mut self,
-                mut server: ServerMut,
+                ctx: &mut GameContext,
                 _events: &[PhysicsEvent],
             ) -> ScoreboardValues {
-                server
-                    .state_mut()
-                    .objects_mut()
+                ctx.objects
                     .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
                 ScoreboardValues::default()
             }
@@ -1591,5 +1761,697 @@ mod tests {
             server.state.replication.history.current_objects()[0],
             ObjectPacket::Puck(_)
         ));
+    }
+
+    #[test]
+    fn context_new_game_resets_state_once_requested_and_keeps_later_messages() {
+        let mut server = test_server();
+        let player_id = server
+            .state
+            .player_message_state
+            .add_player("test", "127.0.0.1:12345".parse().unwrap())
+            .unwrap();
+        server.has_current_game_been_active = true;
+        let game_id = server.game_id;
+
+        let mut ctx = server.context();
+        ctx.objects
+            .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+        assert!(ctx.spawn_skater(player_id, Team::Red, Vec3::X, Rot3::IDENTITY, false));
+        ctx.messages.add_server_chat_message("before");
+        ctx.new_game();
+        ctx.messages.add_server_chat_message("after");
+
+        // The current game goes on until the server carries out the request.
+        assert_eq!(server.game_id, game_id);
+        assert!(server.state.objects.iter().any(Option::is_some));
+
+        server.start_requested_game(&mut EmptyGameMode);
+
+        assert_eq!(server.game_id, game_id + 1);
+        // A player is on the server, so the new game has started right away.
+        assert!(server.has_current_game_been_active);
+        assert!(server.state.objects.iter().all(Option::is_none));
+        server.state.player_message_state.flush_messages();
+        let player = server
+            .state
+            .player_message_state
+            .players
+            .get_player(player_id)
+            .unwrap();
+        assert!(!player.has_skater());
+        let players = &server.state.player_message_state.players;
+        assert_eq!(chats(received(players, player_id)), ["after"]);
+    }
+
+    #[test]
+    fn all_message_kinds_keep_their_order_per_player() {
+        let mut state = HQMServerState::new();
+        let red = state
+            .player_message_state
+            .add_player("red", "127.0.0.1:1".parse().unwrap())
+            .unwrap();
+        let blue = state
+            .player_message_state
+            .add_player("blue", "127.0.0.1:2".parse().unwrap())
+            .unwrap();
+        let spectator = state
+            .player_message_state
+            .add_player("spectator", "127.0.0.1:3".parse().unwrap())
+            .unwrap();
+        state.player_message_state.flush_messages();
+        let start = [red, blue].map(|id| received(&state.player_message_state.players, id).len());
+
+        let links = &mut state.skater_links();
+        assert!(links.spawn_skater(red, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false));
+        links
+            .messages
+            .add_goal_message(links.players, Team::Red, Some(red), None);
+        links.messages.add_server_chat_message("a");
+        links.messages.add_directed_server_chat_message("b", red);
+        state.player_message_state.add_user_team_message("c", red);
+        state.player_message_state.add_server_chat_message("d");
+        assert!(state.skater_links().remove_player(spectator, true));
+        state.player_message_state.flush_messages();
+
+        let messages_since = |player_id, start: usize| {
+            received(&state.player_message_state.players, player_id).split_off(start)
+        };
+        let red_update = |name: &str| Received::PlayerUpdate {
+            index: red.index,
+            name: name.to_owned(),
+            team: Some(Team::Red),
+        };
+        let goal = Received::Goal {
+            team: Team::Red,
+            scorer: Some(red.index),
+            assist: None,
+        };
+        let chat = |from: Option<PlayerId>, text: &str| Received::Chat {
+            from: from.map(|player_id| player_id.index),
+            text: text.to_owned(),
+        };
+        let removed = Received::PlayerRemoved {
+            index: spectator.index,
+        };
+        assert_eq!(
+            messages_since(red, start[0]),
+            [
+                red_update("red"),
+                goal.clone(),
+                chat(None, "a"),
+                chat(None, "b"),
+                red_update("[Red] red"),
+                chat(Some(red), "c"),
+                red_update("red"),
+                chat(None, "d"),
+                removed.clone(),
+            ]
+        );
+        assert_eq!(
+            messages_since(blue, start[1]),
+            [
+                red_update("red"),
+                goal,
+                chat(None, "a"),
+                chat(None, "d"),
+                removed,
+            ]
+        );
+    }
+
+    #[test]
+    fn game_abandoned_is_called_before_the_game_is_reset() {
+        #[derive(Default)]
+        struct TracksLifecycle {
+            started: u32,
+            abandoned_with_pucks: Vec<usize>,
+        }
+
+        impl GameMode for TracksLifecycle {
+            fn before_tick(&mut self, _ctx: &mut GameContext) {}
+
+            fn after_tick(
+                &mut self,
+                _ctx: &mut GameContext,
+                _events: &[PhysicsEvent],
+            ) -> ScoreboardValues {
+                ScoreboardValues::default()
+            }
+
+            fn game_started(&mut self, ctx: &mut GameContext) {
+                self.started += 1;
+                ctx.objects
+                    .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+            }
+
+            fn game_abandoned(&mut self, ctx: &mut GameContext) {
+                self.abandoned_with_pucks.push(ctx.objects.pucks().count());
+            }
+        }
+
+        let address = "127.0.0.1:12345".parse().unwrap();
+        let mut server = test_server();
+        let mut behaviour = TracksLifecycle::default();
+
+        let player_id = server
+            .state
+            .player_message_state
+            .add_player("test", address)
+            .unwrap();
+        server.advance_tick(&mut behaviour);
+        assert_eq!(behaviour.started, 1);
+
+        server.state.remove_player(player_id, true);
+        server.advance_tick(&mut behaviour);
+        server.advance_tick(&mut behaviour);
+        assert_eq!(behaviour.abandoned_with_pucks, [1]);
+        assert!(server.state.objects.iter().all(Option::is_none));
+
+        server
+            .state
+            .player_message_state
+            .add_player("test", address)
+            .unwrap();
+        server.advance_tick(&mut behaviour);
+        assert_eq!(behaviour.started, 2);
+    }
+
+    #[test]
+    fn bots_are_controlled_by_the_game_mode_and_do_not_keep_a_game_going() {
+        #[derive(Default)]
+        struct DrivesBots {
+            skating: Option<PlayerId>,
+            standing: Option<PlayerId>,
+            abandoned: u32,
+        }
+
+        impl GameMode for DrivesBots {
+            fn before_tick(&mut self, ctx: &mut GameContext) {
+                let skating = self.skating.unwrap();
+                ctx.players.get_mut(skating).unwrap().input_mut().fwbw = 1.0;
+            }
+
+            fn after_tick(
+                &mut self,
+                _ctx: &mut GameContext,
+                _events: &[PhysicsEvent],
+            ) -> ScoreboardValues {
+                ScoreboardValues::default()
+            }
+
+            fn game_started(&mut self, ctx: &mut GameContext) {
+                let skating = ctx.add_bot("skating", BotLifetime::Game).unwrap();
+                let standing = ctx.add_bot("standing", BotLifetime::Game).unwrap();
+                let rot = Rot3::IDENTITY;
+                assert!(ctx.spawn_skater(
+                    skating,
+                    Team::Red,
+                    Vec3::new(10.0, 1.5, 30.0),
+                    rot,
+                    false
+                ));
+                assert!(ctx.spawn_skater(
+                    standing,
+                    Team::Red,
+                    Vec3::new(20.0, 1.5, 30.0),
+                    rot,
+                    false
+                ));
+                self.skating = Some(skating);
+                self.standing = Some(standing);
+            }
+
+            fn game_abandoned(&mut self, ctx: &mut GameContext) {
+                self.abandoned += 1;
+                // The bots are still here, and leave when the game is reset.
+                assert!(ctx.players.get(self.skating.take().unwrap()).is_some());
+                assert!(ctx.players.get(self.standing.take().unwrap()).is_some());
+            }
+        }
+
+        fn distance_moved(ctx: &GameContext, bot: PlayerId, start: Vec3) -> f32 {
+            let pos = ctx.objects.skater(bot).unwrap().body.pos;
+            (pos - start).with_y(0.0).length()
+        }
+
+        let mut t = TestServer::new(DrivesBots::default());
+        let player = t.join("test");
+        t.ticks(100);
+
+        let skating = t.mode.skating.unwrap();
+        let standing = t.mode.standing.unwrap();
+        let ctx = t.ctx();
+        for bot in [skating, standing] {
+            let bot = ctx.players.get(bot).unwrap();
+            assert!(bot.player_type() == ServerPlayerType::Bot);
+            assert_eq!(bot.team(), Some(Team::Red));
+        }
+        let skated = distance_moved(&ctx, skating, Vec3::new(10.0, 1.5, 30.0));
+        let stood = distance_moved(&ctx, standing, Vec3::new(20.0, 1.5, 30.0));
+        assert!(
+            skated > 0.1 && skated > 10.0 * stood,
+            "skated {skated} m, stood {stood} m"
+        );
+        assert!(t.take_messages(player).contains(&Received::PlayerUpdate {
+            index: skating.index,
+            name: "skating".to_owned(),
+            team: Some(Team::Red),
+        }));
+
+        t.leave(player);
+        t.tick();
+        assert_eq!(t.mode.abandoned, 1);
+        assert_eq!(t.ctx().players.iter().count(), 0);
+        assert!(t.server.state.objects.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn add_bot_returns_none_when_all_player_slots_are_taken() {
+        let mut t = TestServer::new(EmptyGameMode);
+        let mut ctx = t.ctx();
+        let bots: Vec<_> = (0..MAX_PLAYERS)
+            .map(|i| {
+                ctx.add_bot(&format!("bot {i}"), BotLifetime::Server)
+                    .unwrap()
+            })
+            .collect();
+        assert!(ctx.add_bot("one too many", BotLifetime::Server).is_none());
+
+        assert!(ctx.remove_player(bots[3]));
+        let replacement = ctx.add_bot("replacement", BotLifetime::Server).unwrap();
+        assert_eq!(replacement.index, bots[3].index);
+        assert!(ctx.players.get(bots[3]).is_none());
+    }
+
+    #[test]
+    fn new_game_removes_game_bots_and_keeps_server_bots() {
+        let mut t = TestServer::new(EmptyGameMode);
+        let player = t.join("player");
+        t.tick();
+        let mut ctx = t.ctx();
+        let game_bot = ctx.add_bot("game bot", BotLifetime::Game).unwrap();
+        let server_bot = ctx.add_bot("server bot", BotLifetime::Server).unwrap();
+
+        ctx.new_game();
+        t.server.start_requested_game(&mut t.mode);
+
+        let ctx = t.ctx();
+        assert!(ctx.players.get(game_bot).is_none());
+        assert!(ctx.players.get(server_bot).is_some());
+        let messages = t.take_messages(player);
+        assert!(messages.contains(&Received::PlayerRemoved {
+            index: game_bot.index
+        }));
+        assert!(messages.contains(&Received::PlayerUpdate {
+            index: server_bot.index,
+            name: "server bot".to_owned(),
+            team: None,
+        }));
+    }
+
+    #[test]
+    fn a_requested_new_game_starts_once_the_event_is_handled() {
+        #[derive(Default)]
+        struct RestartsOnRequest {
+            events: Vec<String>,
+        }
+
+        impl GameMode for RestartsOnRequest {
+            fn before_tick(&mut self, _ctx: &mut GameContext) {}
+
+            fn after_tick(
+                &mut self,
+                _ctx: &mut GameContext,
+                _events: &[PhysicsEvent],
+            ) -> ScoreboardValues {
+                ScoreboardValues::default()
+            }
+
+            fn handle_command(
+                &mut self,
+                ctx: &mut GameContext,
+                _cmd: &str,
+                _arg: &str,
+                _player_id: PlayerId,
+            ) -> CommandResult {
+                ctx.new_game();
+                // The current game is still there for the rest of the hook.
+                let pucks = ctx.objects.pucks().count();
+                self.events.push(format!("restart with {pucks} puck"));
+                ctx.messages.add_server_chat_message("Restarting");
+                CommandResult::Handled
+            }
+
+            fn game_started(&mut self, ctx: &mut GameContext) {
+                self.events.push("started".to_owned());
+                ctx.objects
+                    .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
+            }
+
+            fn game_abandoned(&mut self, _ctx: &mut GameContext) {
+                self.events.push("abandoned".to_owned());
+            }
+
+            fn before_player_exit(
+                &mut self,
+                ctx: &mut GameContext,
+                _player_id: PlayerId,
+                _reason: ExitReason,
+            ) {
+                ctx.new_game();
+            }
+        }
+
+        let mut t = TestServer::new(RestartsOnRequest::default());
+        let player = t.join("player");
+        t.tick();
+        assert_eq!(t.mode.events, ["started"]);
+        t.take_messages(player);
+
+        t.chat(player, "/restart");
+        assert_eq!(t.mode.events, ["started", "restart with 1 puck", "started"]);
+        assert_eq!(t.ctx().objects.pucks().count(), 1);
+        assert_eq!(t.take_chats(player), ["Restarting"]);
+
+        // The last player leaving asks for a new game, which waits for a player to join, and
+        // the game it ended is not abandoned.
+        t.leave(player);
+        t.tick();
+        assert_eq!(t.ctx().objects.pucks().count(), 0);
+        assert_eq!(t.mode.events.len(), 3);
+        t.join("next");
+        t.tick();
+        assert_eq!(t.mode.events.last().unwrap(), "started");
+        assert!(!t.mode.events.contains(&"abandoned".to_owned()));
+    }
+
+    #[test]
+    fn bots_can_chat_to_everyone_and_to_their_team() {
+        let mut t = TestServer::new(EmptyGameMode);
+        let red = t.join("red");
+        let blue = t.join("blue");
+        let mut ctx = t.ctx();
+        let bot = ctx.add_bot("bot", BotLifetime::Server).unwrap();
+        let benched_bot = ctx.add_bot("benched", BotLifetime::Server).unwrap();
+        for (player, team) in [(red, Team::Red), (blue, Team::Blue), (bot, Team::Red)] {
+            assert!(ctx.spawn_skater(player, team, Vec3::ZERO, Rot3::IDENTITY, false));
+        }
+        t.take_messages(red);
+        t.take_messages(blue);
+
+        let mut ctx = t.ctx();
+        ctx.add_user_chat_message("hello everyone", bot);
+        ctx.add_user_team_message("hello red", bot);
+        ctx.add_user_team_message("not on the ice", benched_bot);
+
+        let chat = |text: &str| Received::Chat {
+            from: Some(bot.index),
+            text: text.to_owned(),
+        };
+        let update = |name: &str| Received::PlayerUpdate {
+            index: bot.index,
+            name: name.to_owned(),
+            team: Some(Team::Red),
+        };
+        assert_eq!(
+            t.take_messages(red),
+            [
+                chat("hello everyone"),
+                update("[Red] bot"),
+                chat("hello red"),
+                update("bot"),
+            ]
+        );
+        assert_eq!(t.take_messages(blue), [chat("hello everyone")]);
+    }
+
+    #[test]
+    fn unknown_game_mode_commands_get_a_reply_to_the_sender() {
+        #[derive(Default)]
+        struct KnowsOneCommand {
+            received: Vec<String>,
+        }
+
+        impl GameMode for KnowsOneCommand {
+            fn before_tick(&mut self, _ctx: &mut GameContext) {}
+
+            fn after_tick(
+                &mut self,
+                _ctx: &mut GameContext,
+                _events: &[PhysicsEvent],
+            ) -> ScoreboardValues {
+                ScoreboardValues::default()
+            }
+
+            fn handle_command(
+                &mut self,
+                _ctx: &mut GameContext,
+                cmd: &str,
+                arg: &str,
+                _player_id: PlayerId,
+            ) -> CommandResult {
+                self.received.push(format!("{cmd}({arg})"));
+                if cmd == "known" {
+                    CommandResult::Handled
+                } else {
+                    CommandResult::Unknown
+                }
+            }
+        }
+
+        let mut t = TestServer::new(KnowsOneCommand::default());
+        let player = t.join("player");
+        let other = t.join("other");
+        t.take_messages(player);
+        t.take_messages(other);
+
+        t.chat(player, "/known with args");
+        t.chat(player, "/version");
+        t.chat(player, "/typo");
+
+        assert_eq!(t.mode.received, ["known(with args)", "typo()"]);
+        let chats = t.take_chats(player);
+        assert_eq!(chats.len(), 2, "{chats:?}");
+        assert!(chats[0].starts_with("Migo HQM Server, version"));
+        assert_eq!(chats[1], "Unknown command /typo");
+        assert_eq!(t.take_chats(other), Vec::<String>::new());
+    }
+
+    #[test]
+    fn welcome_messages_are_sent_to_joining_players() {
+        let mut t = TestServer::new(StandardMatchGameMode::new(
+            MatchConfiguration::default(),
+            5,
+            SpawnPoint::Center,
+        ));
+        t.server.config.welcome = vec!["Welcome!".to_owned(), "Have fun".to_owned()];
+        let player = t.join("player");
+        let chats = t.take_chats(player);
+        assert_eq!(chats[..2], ["Welcome!", "Have fun"]);
+    }
+
+    #[test]
+    fn player_max_limits_the_players_on_the_server() {
+        let mut t = TestServer::new(PermanentWarmup::new(1, SpawnPoint::Center));
+        t.server.config.player_max = 2;
+        t.join("first");
+        t.join("second");
+        assert!(t.try_join("third").is_none());
+    }
+
+    #[test]
+    fn team_chat_reaches_only_team_mates() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 2, 1);
+        let (red0, red1, blue) = (game.red[0], game.red[1], game.blue[0]);
+        game.t.take_messages(red1);
+        game.t.take_messages(blue);
+        game.chat(red0, "/t go left");
+        assert!(game.t.take_chats(red1).contains(&"go left".to_owned()));
+        assert!(!game.t.take_chats(blue).contains(&"go left".to_owned()));
+    }
+
+    #[test]
+    fn list_shows_up_to_five_player_ids_from_an_optional_start() {
+        let mut t = match_server();
+        let players: Vec<_> = (0..7).map(|i| t.join(&format!("player{i}"))).collect();
+        let asker = players[0];
+        t.take_messages(asker);
+        t.chat(asker, "/list");
+        assert_eq!(
+            t.take_chats(asker),
+            [
+                "0: player0",
+                "1: player1",
+                "2: player2",
+                "3: player3",
+                "4: player4"
+            ]
+        );
+        t.chat(asker, "/list 5");
+        assert_eq!(t.take_chats(asker), ["5: player5", "6: player6"]);
+    }
+
+    #[test]
+    fn search_lists_players_whose_name_contains_the_text() {
+        let mut t = match_server();
+        let asker = t.join("asker");
+        t.join("MigoMipo");
+        t.join("Other");
+        t.take_messages(asker);
+        t.chat(asker, "/search Mipo");
+        assert_eq!(t.take_chats(asker), ["1: MigoMipo"]);
+    }
+
+    #[test]
+    fn view_enters_first_person_view_of_a_player() {
+        let mut t = match_server();
+        let viewer = t.join("viewer");
+        t.join("target");
+        t.take_messages(viewer);
+        t.chat(viewer, "/view 1");
+        assert_eq!(t.take_chats(viewer), ["You are now viewing target"]);
+        t.chat(viewer, "/restoreview");
+        assert_eq!(t.take_chats(viewer), ["View has been restored"]);
+    }
+
+    #[test]
+    fn view_from_the_ice_makes_the_player_a_spectator() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        let viewer = game.red[0];
+        game.chat(viewer, "/view 1");
+        assert!(game.heard("You are now viewing blue0"), "{:?}", game.heard);
+        assert!(game.t.ctx().objects.skater(viewer).is_none());
+    }
+
+    #[test]
+    fn views_finds_a_player_by_name_or_lists_the_matches() {
+        let mut t = match_server();
+        let viewer = t.join("viewer");
+        t.join("target one");
+        t.join("target two");
+        t.take_messages(viewer);
+        t.chat(viewer, "/views one");
+        assert_eq!(t.take_chats(viewer), ["You are now viewing target one"]);
+        t.chat(viewer, "/views target");
+        assert_eq!(
+            t.take_chats(viewer),
+            [
+                "Multiple matches found, use /view X",
+                "1: target one",
+                "2: target two"
+            ]
+        );
+    }
+
+    fn add_ping(t: &mut TestServer<impl GameMode>, player: PlayerId, seconds: f32) {
+        let player = t
+            .server
+            .state
+            .player_message_state
+            .players
+            .get_player_mut(player)
+            .unwrap();
+        let ServerPlayerData::NetworkPlayer { data } = &mut player.data else {
+            panic!("expected a network player");
+        };
+        data.last_ping.push_front(seconds);
+    }
+
+    #[test]
+    fn ping_and_pings_show_a_players_server_side_ping() {
+        let mut t = match_server();
+        let asker = t.join("asker");
+        let target = t.join("target");
+        add_ping(&mut t, target, 0.05);
+        t.take_messages(asker);
+        t.chat(asker, "/ping 1");
+        let chats = t.take_chats(asker);
+        assert_eq!(chats[0], "target ping: avg 50 ms");
+        t.chat(asker, "/pings targ");
+        assert_eq!(t.take_chats(asker), chats);
+    }
+
+    fn hand(game: &MatchGame, player: PlayerId) -> SkaterHand {
+        game.server_objects()
+            .find_map(|object| match object {
+                crate::server::GameObject::Skater(id, skater) if *id == player => Some(skater.hand),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn lefty_during_play_applies_after_play_has_stopped() {
+        let config = MatchConfiguration {
+            icing: IcingConfiguration::NoTouch,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        let player = game.red[0];
+        assert_eq!(hand(&game, player), SkaterHand::Right);
+        game.chat(player, "/lefty");
+        assert!(
+            game.heard("Stick hand will change when play has stopped"),
+            "{:?}",
+            game.heard
+        );
+        game.tick();
+        assert_eq!(hand(&game, player), SkaterHand::Right);
+
+        // Play stops for icing, and the hand changes during the stoppage.
+        ice_the_puck(&mut game);
+        game.tick_until(100, |game| game.scoreboard.rules_state == RulesState::Icing);
+        assert_eq!(hand(&game, player), SkaterHand::Left);
+        game.wait_for_play();
+        assert_eq!(hand(&game, player), SkaterHand::Left);
+    }
+
+    #[test]
+    fn players_who_have_not_been_on_the_ice_can_change_hands_during_play() {
+        let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
+        let late = game.t.join("late");
+        game.t.take_chats(late);
+        game.chat(late, "/lefty");
+        assert_eq!(game.t.take_chats(late), Vec::<String>::new());
+        game.t.press_join(late, Team::Red);
+        game.ticks(2);
+        assert_eq!(hand(&game, late), SkaterHand::Left);
+    }
+
+    #[test]
+    fn leaving_the_ice_during_play_does_not_allow_changing_hands() {
+        let config = MatchConfiguration {
+            time_period: 5,
+            ..MatchGame::quick_config()
+        };
+        let mut game = MatchGame::start(config, 1, 1);
+        let player = game.red[0];
+        game.chat(player, "/view 1");
+        assert!(game.t.ctx().objects.skater(player).is_none());
+        game.heard.clear();
+        game.chat(player, "/lefty");
+        assert!(
+            game.heard("Stick hand will change when play has stopped"),
+            "{:?}",
+            game.heard
+        );
+        game.t.press_join(player, Team::Red);
+        game.ticks(2);
+        assert_eq!(hand(&game, player), SkaterHand::Right);
+
+        game.tick_until(1000, |game| game.scoreboard.period == 2);
+        assert_eq!(hand(&game, player), SkaterHand::Left);
+    }
+
+    #[test]
+    fn lefty_outside_of_play_applies_at_once() {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 1, 0);
+        game.ticks(2);
+        let player = game.red[0];
+        game.chat(player, "/lefty");
+        assert_eq!(hand(&game, player), SkaterHand::Left);
+        game.chat(player, "/righty");
+        assert_eq!(hand(&game, player), SkaterHand::Right);
     }
 }

@@ -70,17 +70,20 @@ impl HQMTickHistory {
         self.retained_ticks.truncate(self.history_capacity);
     }
 
+    /// Queues the retained ticks from `start_step` to `end_step` for replay, and returns how many
+    /// ticks were queued.
     pub fn add_replay_to_queue(
         &mut self,
         start_step: u32,
         end_step: u32,
         force_view: Option<PlayerId>,
-    ) {
+    ) -> u32 {
         if start_step > end_step {
             warn!("start_step must be less than or equal to end_step");
-            return;
+            return 0;
         }
 
+        let queue_length = self.pending_replay.len();
         let data = self
             .retained_ticks
             .iter()
@@ -88,6 +91,15 @@ impl HQMTickHistory {
             .filter(|tick| (start_step..=end_step).contains(&tick.game_step))
             .map(|tick| (force_view, tick.clone()));
         self.pending_replay.extend(data);
+        let queued = (self.pending_replay.len() - queue_length) as u32;
+        let requested = u64::from(end_step - start_step) + 1;
+        if u64::from(queued) < requested {
+            warn!(
+                start_step,
+                end_step, queued, "only part of the replay is in the history"
+            );
+        }
+        queued
     }
 
     pub(super) fn pop_replay_tick(&mut self) -> Option<(Option<PlayerId>, ReplayTick)> {
