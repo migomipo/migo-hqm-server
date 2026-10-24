@@ -7,7 +7,9 @@ use crate::game::RinkSideOfLine::{BlueSide, RedSide};
 use crate::game::{
     PhysicsEvent, PlayerId, PlayerIndex, Puck, PuckId, RulesState, ScoreboardValues, Team,
 };
-use crate::gamemode::util::{GameProgress, SpawnPoint, TeamSelection, get_spawnpoint};
+use crate::gamemode::util::{
+    GameProgress, SpawnPoint, TeamSelection, get_spawnpoint, spawn_warmup_pucks,
+};
 use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 
 mod commands;
@@ -130,7 +132,7 @@ impl Default for MatchConfiguration {
             use_mph: false,
             goal_replay: false,
             spawn_point_offset: 2.75,
-            spawn_player_altitude: 2.75,
+            spawn_player_altitude: 1.5,
             spawn_puck_altitude: 1.5,
             spawn_keep_stick_position: false,
         }
@@ -1310,19 +1312,8 @@ impl GameMode for StandardMatchGameMode {
         self.settings
             .preferred_positions
             .retain(|player_id, _| ctx.players.get(*player_id).is_some());
-        let (width, length) = (ctx.rink.width, ctx.rink.length);
-        let first_x =
-            width / 2.0 - 0.4 * self.settings.config.warmup_pucks.saturating_sub(1) as f32;
-        for index in 0..self.settings.config.warmup_pucks {
-            ctx.objects.spawn_puck(Puck::new(
-                Vec3::new(
-                    first_x + 0.8 * index as f32,
-                    self.settings.config.spawn_puck_altitude,
-                    length / 2.0,
-                ),
-                Rot3::IDENTITY,
-            ));
-        }
+        let config = &self.settings.config;
+        spawn_warmup_pucks(ctx, config.warmup_pucks, config.spawn_puck_altitude);
     }
     fn before_player_exit(
         &mut self,

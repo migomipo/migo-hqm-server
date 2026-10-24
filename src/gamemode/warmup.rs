@@ -1,9 +1,7 @@
+use crate::game::ScoreboardValues;
 use crate::game::{PhysicsEvent, PlayerId};
-use crate::game::{Puck, ScoreboardValues};
-use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint};
+use crate::gamemode::util::{SpawnPoint, TeamSelection, get_spawnpoint, spawn_warmup_pucks};
 use crate::gamemode::{ExitReason, GameContext, GameMode};
-use glam::Vec3;
-use glamx::Rot3;
 
 pub struct PermanentWarmup {
     pucks: usize,
@@ -36,17 +34,7 @@ impl GameMode for PermanentWarmup {
     }
 
     fn game_started(&mut self, ctx: &mut GameContext) {
-        let warmup_pucks = self.pucks;
-        let rink = &*ctx.rink;
-        let width = rink.width;
-        let length = rink.length;
-        let puck_line_start = width / 2.0 - 0.4 * warmup_pucks.saturating_sub(1) as f32;
-
-        for i in 0..warmup_pucks {
-            let pos = Vec3::new(puck_line_start + 0.8 * (i as f32), 1.5, length / 2.0);
-            let rot = Rot3::IDENTITY;
-            ctx.objects.spawn_puck(Puck::new(pos, rot));
-        }
+        spawn_warmup_pucks(ctx, self.pucks, 1.5);
     }
 
     fn before_player_exit(

@@ -1,4 +1,4 @@
-use crate::game::{PlayerId, Rink, Team};
+use crate::game::{PlayerId, Puck, Rink, Team};
 use crate::gamemode::GameContext;
 use glam::Vec3;
 use glamx::Rot3;
@@ -131,6 +131,16 @@ impl TeamSelection {
 pub(crate) enum GameProgress {
     Continue,
     Finished,
+}
+
+/// Puts `count` warmup pucks in a row across the center line, `altitude` meters above the ice.
+pub fn spawn_warmup_pucks(ctx: &mut GameContext, count: usize, altitude: f32) {
+    let (width, length) = (ctx.rink.width, ctx.rink.length);
+    let first_x = width / 2.0 - 0.4 * count.saturating_sub(1) as f32;
+    for index in 0..count {
+        let pos = Vec3::new(first_x + 0.8 * index as f32, altitude, length / 2.0);
+        ctx.objects.spawn_puck(Puck::new(pos, Rot3::IDENTITY));
+    }
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
