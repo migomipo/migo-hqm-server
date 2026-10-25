@@ -1191,7 +1191,7 @@ impl HQMServer {
         socket: &mut HQMFramedSocket,
         behaviour: &mut B,
     ) {
-        let tick_output = tokio::task::block_in_place(|| self.advance_tick(behaviour));
+        let tick_output = self.advance_tick(behaviour);
         self.state.player_message_state.flush_messages();
         if let Some(tick_output) = tick_output {
             send_updates(
