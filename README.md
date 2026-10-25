@@ -24,7 +24,7 @@ Run `migo-hqm-server` to start the server with `config.toml` in the current work
 | log_name         | (optional) Log name prefix. Log files will end up in a "log" folder in the current working directory, and be named *log_name*-*date*. Default log name prefix is the server name + ".log".             |
 | team_max         | Number of players allowed in each team.                                                                                                                                                                |
 | player_max       | Number of players allowed in the server.                                                                                                                                                               |
-| password         | Administrator password.                                                                                                                                                                                |
+| password         | (optional) Administrator password. If not set, or empty, administrator login is disabled.                                                                                                             |
 | welcome          | Welcome message that is sent to all players when they're joining. \n will create a new line. The client can only show 7 chat lines at a time, and it is not recommended to have more than three lines. |
 | replays          | (optional) "off" (default), "on" or "standby". With "on", all matches that start will be saved as replays; games that ended before the warmup ended will not be saved. With "standby", games are recorded but only saved if replays are turned on with /replay on before the game ends. |
 | service          | Service name for Linux based systems. Command /serverrestart for restarting the service.                                                                                                               |
@@ -88,7 +88,7 @@ Run `migo-hqm-server` to start the server with `config.toml` in the current work
 | /lefty                 | Makes player left-handed. If done during play after having been on the ice, it will only be applied after play has stopped.                                       |
 | /righty                | Makes player right-handed. If done during play after having been on the ice, it will only be applied after play has stopped.                                      |
 | /rules                 | Shows the current offside, icing, two-line pass, mercy and first-to-goals rules. Match mode only.                                                                 |
-| /admin *PASSWORD*      | Logs in as administrator, if the password is correct.                                                                                                             |
+| /admin *PASSWORD*      | Logs in as administrator, if the password is correct. Not available if the server has no administrator password.                                                  |
 
 ### Administrators only
 

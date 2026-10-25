@@ -6,8 +6,9 @@ port = 27585
 public = true
 team_max = 5
 player_max = 15
-# Set a password to enable admin mode.
-password = "12345"
+# password = "change-me"
+# Set a password to let players log in as administrator with /admin. Without
+# one, administrator login is disabled.
 welcome = """
 Welcome message 1
 Welcome message 2

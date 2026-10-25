@@ -157,14 +157,13 @@ impl HQMServer {
             .players
             .get_player_mut(player_id)
         {
+            // An empty password counts as none, so a bare /admin can never log in
+            let configured_password = self.config.password.as_deref().filter(|x| !x.is_empty());
             let msg = if player.is_admin {
                 "You are already logged in as administrator"
-            } else if self
-                .config
-                .password
-                .as_deref()
-                .is_some_and(|x| x == password)
-            {
+            } else if configured_password.is_none() {
+                "Administrator login is disabled on this server"
+            } else if configured_password == Some(password) {
                 player.is_admin = true;
                 info!("{} ({}) is now admin", player.player_name, player_id);
                 "Successfully logged in as administrator"
@@ -502,6 +501,26 @@ mod tests {
         );
         t.chat(player, "/mutechat");
         assert_eq!(t.take_chats(player), ["Chat muted by player"]);
+    }
+
+    #[test]
+    fn admin_login_is_disabled_without_a_password() {
+        for password in [None, Some(String::new())] {
+            let mut t = match_server();
+            t.server.config.password = password;
+            let player = t.join("player");
+            t.take_messages(player);
+            t.chat(player, "/admin");
+            assert_eq!(
+                t.take_chats(player),
+                ["Administrator login is disabled on this server"]
+            );
+            t.chat(player, "/mutechat");
+            assert_eq!(
+                t.take_chats(player),
+                ["Please log in before using that command"]
+            );
+        }
     }
 
     #[test]
