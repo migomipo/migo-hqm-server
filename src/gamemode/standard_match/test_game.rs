@@ -4,7 +4,7 @@
 use glam::Vec3;
 use glamx::Rot3;
 
-use crate::game::{PhysicsEvent, PlayerId, ScoreboardValues, Team};
+use crate::game::{HALF_TURN_Y, PhysicsEvent, PlayerId, ScoreboardValues, Team};
 use crate::gamemode::util::SpawnPoint;
 use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 use crate::players::PlayerListExt;
@@ -244,7 +244,7 @@ impl MatchGame {
     pub(crate) fn rotation(team: Team) -> Rot3 {
         match team {
             Team::Red => Rot3::IDENTITY,
-            Team::Blue => Rot3::from_rotation_y(std::f32::consts::PI),
+            Team::Blue => HALF_TURN_Y,
         }
     }
 

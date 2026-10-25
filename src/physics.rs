@@ -1,7 +1,7 @@
 use crate::game::RinkSideOfLine::{BlueSide, RedSide};
 use crate::game::{
-    PhysicsConfiguration, PlayerInput, Puck, Rink, RinkNet, SkaterCollisionBall, SkaterHand,
-    SkaterObject, Team,
+    NetPost, NetSurface, PhysicsConfiguration, PlayerInput, Puck, Rink, RinkNet,
+    SkaterCollisionBall, SkaterHand, SkaterObject, Team,
 };
 use crate::game::{PhysicsEvent, PlayerId, PuckId};
 use crate::players::PlayerListExt;
@@ -145,11 +145,14 @@ fn update_sticks_and_pucks(
 
             let puck_linear_velocity_before = puck.body.linear_velocity;
             let puck_angular_velocity_before = puck.body.angular_velocity;
-            let puck_vertices = puck.get_puck_vertices();
+            // The forces below only change the velocities of the puck, so the vertices stay the
+            // same for the whole substep and are only computed if something is close enough to
+            // touch them.
+            let mut puck_vertices = None;
             if i == 0 {
                 do_puck_rink_forces(
                     puck,
-                    &puck_vertices,
+                    puck_vertices.insert(puck.get_puck_vertices()),
                     rink,
                     puck_linear_velocity_before,
                     puck_angular_velocity_before,
@@ -159,10 +162,12 @@ fn update_sticks_and_pucks(
             for (player_index, player, _) in players.iter_mut() {
                 let old_stick_velocity = player.stick_velocity;
                 if (puck.body.pos - player.stick_pos).length() < 1.0 {
+                    let puck_vertices =
+                        puck_vertices.get_or_insert_with(|| puck.get_puck_vertices());
                     let has_touched = do_puck_stick_forces(
                         puck,
                         player,
-                        &puck_vertices,
+                        puck_vertices,
                         puck_linear_velocity_before,
                         puck_angular_velocity_before,
                         old_stick_velocity,
@@ -175,33 +180,39 @@ fn update_sticks_and_pucks(
                     }
                 }
             }
-            let red_net_collision = do_puck_post_forces(
-                puck,
-                &rink.red_net,
-                puck_linear_velocity_before,
-                puck_angular_velocity_before,
-            );
-            let blue_net_collision = do_puck_post_forces(
-                puck,
-                &rink.blue_net,
-                puck_linear_velocity_before,
-                puck_angular_velocity_before,
-            );
-
-            let red_net_collision = red_net_collision
-                | do_puck_net_forces(
+            let near_red_net = is_near_net(puck.body.pos, puck.radius, &rink.red_net);
+            let near_blue_net = is_near_net(puck.body.pos, puck.radius, &rink.blue_net);
+            let red_net_collision = near_red_net
+                && do_puck_post_forces(
                     puck,
                     &rink.red_net,
                     puck_linear_velocity_before,
                     puck_angular_velocity_before,
                 );
-            let blue_net_collision = blue_net_collision
-                | do_puck_net_forces(
+            let blue_net_collision = near_blue_net
+                && do_puck_post_forces(
                     puck,
                     &rink.blue_net,
                     puck_linear_velocity_before,
                     puck_angular_velocity_before,
                 );
+
+            let red_net_collision = red_net_collision
+                | (near_red_net
+                    && do_puck_net_forces(
+                        puck,
+                        &rink.red_net,
+                        puck_linear_velocity_before,
+                        puck_angular_velocity_before,
+                    ));
+            let blue_net_collision = blue_net_collision
+                | (near_blue_net
+                    && do_puck_net_forces(
+                        puck,
+                        &rink.blue_net,
+                        puck_linear_velocity_before,
+                        puck_angular_velocity_before,
+                    ));
 
             if red_net_collision {
                 events.push(PhysicsEvent::PuckTouchedNet {
@@ -825,6 +836,14 @@ fn do_puck_rink_forces(
     }
 }
 
+/// Whether a puck is close enough to touch a net. A puck that is not can be left out of
+/// [do_puck_post_forces] and [do_puck_net_forces], as they would not find a collision.
+fn is_near_net(pos: Vec3, radius: f32, net: &RinkNet) -> bool {
+    // Some extra margin, so rounding in the collision tests can not make a difference
+    let margin = radius + 0.01;
+    pos.cmpge(net.bounds_min - margin).all() && pos.cmple(net.bounds_max + margin).all()
+}
+
 fn inside_surface(pos: Vec3, surface: &(Vec3, Vec3, Vec3, Vec3), normal: Vec3) -> bool {
     let (p1, p2, p3, p4) = surface;
     (pos - p1).cross(p2 - p1).dot(normal) >= 0.0
@@ -841,11 +860,12 @@ fn collision_between_sphere_and_net(
     let mut max_overlap = 0.0;
     let mut res: Option<(Vec3, f32, Vec3)> = None;
 
-    for surface in net.surfaces.iter() {
-        let normal = (surface.3 - surface.0)
-            .cross(surface.1 - surface.0)
-            .normalize();
-
+    for NetSurface {
+        corners: surface,
+        normal,
+    } in net.surfaces.iter()
+    {
+        let normal = *normal;
         let diff = surface.0 - pos;
         let dot = diff.dot(normal);
         let overlap = dot + radius;
@@ -872,14 +892,13 @@ fn collision_between_sphere_and_net(
 fn collision_between_sphere_and_post(
     pos: Vec3,
     radius: f32,
-    post: &(Vec3, Vec3, f32),
+    post: &NetPost,
 ) -> Option<(f32, Vec3)> {
-    let (p1, p2, post_radius) = post;
-    let a = post_radius + radius;
-    let direction_vector = p2 - p1;
+    let a = post.radius + radius;
+    let direction_vector = post.direction;
 
-    let diff = pos - p1;
-    let t0 = diff.dot(direction_vector) / direction_vector.length_squared();
+    let diff = pos - post.start;
+    let t0 = diff.dot(direction_vector) / post.length_squared;
     let dot = t0.clamp(0.0, 1.0);
 
     let projection = dot * direction_vector;

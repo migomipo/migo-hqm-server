@@ -8,6 +8,13 @@ use glamx::Rot3;
 use std::f32::consts::PI;
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use std::sync::LazyLock;
+
+/// A half-turn around the Y axis, such as for facing the other end of the rink.
+///
+/// Use this instead of `Rot3::from_rotation_y(PI)`, which is slightly off as π is rounded in f32,
+/// so that it does not turn directions exactly onto the axes.
+pub const HALF_TURN_Y: Rot3 = Rot3::from_xyzw(0.0, 1.0, 0.0, 0.0);
 
 /// Various time and scoreboard-related values.
 ///
@@ -106,11 +113,51 @@ pub enum RinkSideOfLine {
     RedSide,
 }
 
+/// A post of a net, as a capsule from `start` to `start + direction`.
+#[derive(Debug, Clone)]
+pub(crate) struct NetPost {
+    pub(crate) start: Vec3,
+    pub(crate) direction: Vec3,
+    pub(crate) length_squared: f32,
+    pub(crate) radius: f32,
+}
+
+impl NetPost {
+    fn new(start: Vec3, end: Vec3, radius: f32) -> Self {
+        let direction = end - start;
+        NetPost {
+            start,
+            direction,
+            length_squared: direction.length_squared(),
+            radius,
+        }
+    }
+}
+
+/// A surface of a net, with its corners in order and its normal.
+#[derive(Debug, Clone)]
+pub(crate) struct NetSurface {
+    pub(crate) corners: (Vec3, Vec3, Vec3, Vec3),
+    pub(crate) normal: Vec3,
+}
+
+impl NetSurface {
+    fn new(corners: (Vec3, Vec3, Vec3, Vec3)) -> Self {
+        let normal = (corners.3 - corners.0)
+            .cross(corners.1 - corners.0)
+            .normalize();
+        NetSurface { corners, normal }
+    }
+}
+
 /// A rink net.
 #[derive(Debug, Clone)]
 pub(crate) struct RinkNet {
-    pub(crate) posts: Vec<(Vec3, Vec3, f32)>,
-    pub(crate) surfaces: Vec<(Vec3, Vec3, Vec3, Vec3)>,
+    pub(crate) posts: Vec<NetPost>,
+    pub(crate) surfaces: Vec<NetSurface>,
+    /// The corners of a box that holds the whole net, posts included.
+    pub(crate) bounds_min: Vec3,
+    pub(crate) bounds_max: Vec3,
     pub(crate) left_post: Vec3,
     pub(crate) right_post: Vec3,
     pub(crate) normal: Vec3,
@@ -148,46 +195,63 @@ impl RinkNet {
             pos + rot * Vec3::new(back_half_width, 0.0, -lower_depth),
         );
 
+        let posts = vec![
+            NetPost::new(front_lower_right, front_upper_right, 0.1875),
+            NetPost::new(front_lower_left, front_upper_left, 0.1875),
+            NetPost::new(front_upper_right, front_upper_left, 0.125),
+            NetPost::new(front_lower_left, back_lower_left, 0.125),
+            NetPost::new(front_lower_right, back_lower_right, 0.125),
+            NetPost::new(front_upper_left, back_upper_left, 0.125),
+            NetPost::new(back_upper_right, front_upper_right, 0.125),
+            NetPost::new(back_lower_left, back_upper_left, 0.125),
+            NetPost::new(back_lower_right, back_upper_right, 0.125),
+            NetPost::new(back_lower_left, back_lower_right, 0.125),
+            NetPost::new(back_upper_left, back_upper_right, 0.125),
+        ];
+        let corners = [
+            front_upper_left,
+            front_upper_right,
+            front_lower_left,
+            front_lower_right,
+            back_upper_left,
+            back_upper_right,
+            back_lower_left,
+            back_lower_right,
+        ];
+        let max_post_radius = posts.iter().map(|post| post.radius).fold(0.0, f32::max);
+        let bounds_min = corners.into_iter().fold(Vec3::INFINITY, Vec3::min) - max_post_radius;
+        let bounds_max = corners.into_iter().fold(Vec3::NEG_INFINITY, Vec3::max) + max_post_radius;
+
         RinkNet {
-            posts: vec![
-                (front_lower_right, front_upper_right, 0.1875),
-                (front_lower_left, front_upper_left, 0.1875),
-                (front_upper_right, front_upper_left, 0.125),
-                (front_lower_left, back_lower_left, 0.125),
-                (front_lower_right, back_lower_right, 0.125),
-                (front_upper_left, back_upper_left, 0.125),
-                (back_upper_right, front_upper_right, 0.125),
-                (back_lower_left, back_upper_left, 0.125),
-                (back_lower_right, back_upper_right, 0.125),
-                (back_lower_left, back_lower_right, 0.125),
-                (back_upper_left, back_upper_right, 0.125),
-            ],
+            posts,
             surfaces: vec![
-                (
+                NetSurface::new((
                     back_upper_left,
                     back_upper_right,
                     back_lower_right,
                     back_lower_left,
-                ),
-                (
+                )),
+                NetSurface::new((
                     front_upper_left,
                     back_upper_left,
                     back_lower_left,
                     front_lower_left,
-                ),
-                (
+                )),
+                NetSurface::new((
                     front_upper_right,
                     front_lower_right,
                     back_lower_right,
                     back_upper_right,
-                ),
-                (
+                )),
+                NetSurface::new((
                     front_upper_left,
                     front_upper_right,
                     back_upper_right,
                     back_upper_left,
-                ),
+                )),
             ],
+            bounds_min,
+            bounds_max,
             left_post: front_lower_left,
             right_post: front_lower_right,
             normal: rot * Vec3::Z,
@@ -271,7 +335,7 @@ impl Rink {
         let blue_net = RinkNet::new(Vec3::new(center_x, 0.0, goal_line_distance), Rot3::IDENTITY);
         let red_net = RinkNet::new(
             Vec3::new(center_x, 0.0, length - goal_line_distance),
-            Rot3::from_rotation_y(PI),
+            HALF_TURN_Y,
         );
 
         let red_zone_blue_line = RinkLine {
@@ -621,9 +685,12 @@ impl Puck {
     }
 
     pub(crate) fn get_puck_vertices(&self) -> [Vec3; 48] {
+        // Computed at run time, as the vertices were before the table, so the values stay exactly
+        // the same
+        static ANGLES: LazyLock<[(f32, f32); 16]> =
+            LazyLock::new(|| std::array::from_fn(|i| ((i as f32) * PI / 8.0).sin_cos()));
         let mut res = [Vec3::ZERO; 48];
-        for i in 0..16 {
-            let (sin, cos) = ((i as f32) * PI / 8.0).sin_cos();
+        for (i, &(sin, cos)) in ANGLES.iter().enumerate() {
             for j in -1..=1 {
                 let point = Vec3::new(
                     cos * self.radius,
@@ -631,7 +698,7 @@ impl Puck {
                     sin * self.radius,
                 );
                 let point2 = self.body.rot * point;
-                let index = i * 3 + 1 - j;
+                let index = i as i32 * 3 + 1 - j;
                 res[index as usize] = self.body.pos + point2;
             }
         }
@@ -783,6 +850,47 @@ pub enum PhysicsEvent {
 mod tests {
     use super::*;
     use std::f32::consts::FRAC_PI_2;
+
+    #[test]
+    fn half_turn_turns_the_axes_exactly() {
+        assert_eq!(HALF_TURN_Y * Vec3::X, Vec3::NEG_X);
+        assert_eq!(HALF_TURN_Y * Vec3::Y, Vec3::Y);
+        assert_eq!(HALF_TURN_Y * Vec3::Z, Vec3::NEG_Z);
+        assert!(HALF_TURN_Y.abs_diff_eq(Rot3::from_rotation_y(PI), 1e-7));
+    }
+
+    #[test]
+    fn red_net_is_the_blue_net_turned_half_around_the_rink_center() {
+        let rink = Rink::new(30.0, 61.0, 8.5);
+        let (red, blue) = (&rink.red_net, &rink.blue_net);
+        let turn_point = |v: Vec3| Vec3::new(30.0 - v.x, v.y, 61.0 - v.z);
+        let turn_direction = |v: Vec3| Vec3::new(-v.x, v.y, -v.z);
+
+        assert_eq!(blue.normal, Vec3::Z);
+        assert_eq!(red.normal, Vec3::NEG_Z);
+        assert_eq!(red.left_post_inside, Vec3::NEG_X);
+        assert_eq!(red.right_post_inside, Vec3::X);
+        assert_eq!(red.left_post, turn_point(blue.left_post));
+        assert_eq!(red.right_post, turn_point(blue.right_post));
+        for (red, blue) in red.posts.iter().zip(&blue.posts) {
+            assert_eq!(red.start, turn_point(blue.start));
+            assert_eq!(red.direction, turn_direction(blue.direction));
+            assert_eq!(red.length_squared, blue.length_squared);
+        }
+        for (red, blue) in red.surfaces.iter().zip(&blue.surfaces) {
+            let (a, b, c, d) = blue.corners;
+            let corners = (turn_point(a), turn_point(b), turn_point(c), turn_point(d));
+            assert_eq!(red.corners, corners);
+            assert_eq!(red.normal, turn_direction(blue.normal));
+        }
+    }
+
+    #[test]
+    fn net_bounds_hold_the_whole_net_and_its_posts() {
+        let net = &Rink::new(30.0, 61.0, 8.5).blue_net;
+        assert_eq!(net.bounds_min, Vec3::new(13.5, 0.0, 3.0) - 0.1875);
+        assert_eq!(net.bounds_max, Vec3::new(16.5, 1.0, 4.0) + 0.1875);
+    }
 
     #[test]
     fn both_sides_of_a_line_start_at_its_edges() {

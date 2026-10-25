@@ -1,13 +1,12 @@
 //! Faceoff placement and player-position assignment for standard matches.
 
 use std::collections::HashMap;
-use std::f32::consts::PI;
 
 use glam::Vec3;
 use glamx::Rot3;
 
 use super::{ALLOWED_POSITIONS, Faceoff, RinkSide};
-use crate::game::{PlayerId, Rink, Team};
+use crate::game::{HALF_TURN_Y, PlayerId, Rink, Team};
 
 pub(super) struct FaceoffPositions {
     pub(super) center: Vec3,
@@ -111,7 +110,7 @@ pub(super) fn faceoff_spot(
         let rotation = if team == Team::Red {
             Rot3::IDENTITY
         } else {
-            Rot3::from_rotation_y(PI)
+            HALF_TURN_Y
         };
         let defensive = if team == Team::Red {
             center.z > length - 11.0

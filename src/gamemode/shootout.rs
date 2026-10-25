@@ -1,9 +1,8 @@
 use glam::Vec3;
 use glamx::Rot3;
-use std::f32::consts::PI;
 
+use crate::game::{HALF_TURN_Y, Puck, PuckId, ScoreboardValues, Team};
 use crate::game::{PhysicsEvent, PlayerId, RulesState};
-use crate::game::{Puck, PuckId, ScoreboardValues, Team};
 use crate::gamemode::util::{GameProgress, SpawnPoint, TeamSelection, get_spawnpoint};
 use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 
@@ -205,7 +204,7 @@ impl AttackState {
 
         let red_rot = Rot3::IDENTITY;
 
-        let blue_rot = Rot3::from_rotation_y(PI);
+        let blue_rot = HALF_TURN_Y;
 
         let red_goalie_pos = Vec3::new(width / 2.0, 1.5, length - 5.0);
         let blue_goalie_pos = Vec3::new(width / 2.0, 1.5, 5.0);

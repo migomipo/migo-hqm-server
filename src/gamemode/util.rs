@@ -1,10 +1,10 @@
-use crate::game::{PlayerId, PlayerIndex, Puck, Rink, Team};
+use crate::game::{HALF_TURN_Y, PlayerId, PlayerIndex, Puck, Rink, Team};
 use crate::gamemode::GameContext;
 use glam::Vec3;
 use glamx::Rot3;
 use smallvec::SmallVec;
 use std::collections::HashMap;
-use std::f32::consts::{FRAC_PI_2, PI};
+use std::f32::consts::FRAC_PI_2;
 use std::rc::Rc;
 use tracing::info;
 
@@ -189,10 +189,9 @@ pub fn get_spawnpoint(rink: &Rink, team: Team, spawn_point: SpawnPoint) -> (Vec3
     match team {
         Team::Red => match spawn_point {
             SpawnPoint::Center => {
-                let (z, rot) = ((rink.length / 2.0) + 3.0, 0.0);
+                let z = (rink.length / 2.0) + 3.0;
                 let pos = Vec3::new(rink.width / 2.0, 2.0, z);
-                let rot = Rot3::from_rotation_y(rot);
-                (pos, rot)
+                (pos, Rot3::IDENTITY)
             }
             SpawnPoint::Bench => {
                 let z = (rink.length / 2.0) + 4.0;
@@ -203,10 +202,9 @@ pub fn get_spawnpoint(rink: &Rink, team: Team, spawn_point: SpawnPoint) -> (Vec3
         },
         Team::Blue => match spawn_point {
             SpawnPoint::Center => {
-                let (z, rot) = ((rink.length / 2.0) - 3.0, PI);
+                let z = (rink.length / 2.0) - 3.0;
                 let pos = Vec3::new(rink.width / 2.0, 2.0, z);
-                let rot = Rot3::from_rotation_y(rot);
-                (pos, rot)
+                (pos, HALF_TURN_Y)
             }
             SpawnPoint::Bench => {
                 let z = (rink.length / 2.0) - 4.0;
