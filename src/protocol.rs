@@ -28,24 +28,20 @@ const NEW_GAME_PACKET_TYPE: u8 = 6;
 const MAX_MESSAGES_PER_UPDATE: usize = 15;
 
 pub enum HQMClientToServerMessage {
-    Join {
-        version: u32,
-        player_name: String,
-    },
-    Update {
-        current_game_id: u32,
-        input: PlayerInput,
-        deltatime: Option<u32>,
-        new_known_packet: u32,
-        known_msg_pos: usize,
-        chat: Option<(u8, String)>,
-        version: HQMClientVersion,
-    },
+    Join { version: u32, player_name: String },
+    Update(PlayerUpdate),
     Exit,
-    ServerInfo {
-        version: u32,
-        ping: u32,
-    },
+    ServerInfo { version: u32, ping: u32 },
+}
+
+pub struct PlayerUpdate {
+    pub current_game_id: u32,
+    pub input: PlayerInput,
+    pub deltatime: Option<u32>,
+    pub new_known_packet: u32,
+    pub known_msg_pos: usize,
+    pub chat: Option<(u8, String)>,
+    pub version: HQMClientVersion,
 }
 
 pub struct HQMMessageCodec;
@@ -144,7 +140,7 @@ impl HQMMessageCodec {
             }
         };
 
-        Ok(HQMClientToServerMessage::Update {
+        Ok(HQMClientToServerMessage::Update(PlayerUpdate {
             current_game_id,
             input,
             deltatime,
@@ -152,7 +148,7 @@ impl HQMMessageCodec {
             known_msg_pos,
             chat,
             version: client_version,
-        })
+        }))
     }
 }
 
@@ -246,7 +242,7 @@ impl Encoder<HQMMasterServerRegistration> for HQMMessageCodec {
 }
 
 fn write_update_packet(
-    mut writer: &mut HQMMessageWriter,
+    writer: &mut HQMMessageWriter,
     update: HQMServerUpdate<'_>,
     player: &NetworkPlayerData,
 ) {
@@ -287,7 +283,7 @@ fn write_update_packet(
         writer.write_u32_aligned(rules);
     }
 
-    write_objects(&mut writer, update.history, player.known_packet);
+    write_objects(writer, update.history, player.known_packet);
 
     let start = player.known_msgpos.min(player.messages.len());
     let remaining_messages = (player.messages.len() - start).min(MAX_MESSAGES_PER_UPDATE);
@@ -295,36 +291,37 @@ fn write_update_packet(
     writer.write_bits(16, start as u32);
 
     for message in &player.messages[start..start + remaining_messages] {
-        write_message(&mut writer, Rc::as_ref(message));
+        write_message(writer, Rc::as_ref(message));
     }
 }
 
+// Bad packets are dropped without looking at why, so the errors carry no details
 pub enum HQMDecodeError {
-    IoError(std::io::Error),
+    IoError,
     WrongHeader,
     UnknownType,
-    StringDecoding(FromUtf8Error),
+    StringDecoding,
 }
 
 impl From<std::io::Error> for HQMDecodeError {
-    fn from(value: Error) -> Self {
-        HQMDecodeError::IoError(value)
+    fn from(_: Error) -> Self {
+        HQMDecodeError::IoError
     }
 }
 
 impl From<FromUtf8Error> for HQMDecodeError {
-    fn from(value: FromUtf8Error) -> Self {
-        HQMDecodeError::StringDecoding(value)
+    fn from(_: FromUtf8Error) -> Self {
+        HQMDecodeError::StringDecoding
     }
 }
 
 pub enum HQMEncodeError {
-    IoError(std::io::Error),
+    IoError,
 }
 
 impl From<std::io::Error> for HQMEncodeError {
-    fn from(value: Error) -> Self {
-        HQMEncodeError::IoError(value)
+    fn from(_: Error) -> Self {
+        HQMEncodeError::IoError
     }
 }
 
@@ -496,7 +493,7 @@ impl<'a> HQMMessageWriter<'a> {
         let v = if n < 32 { v & !(u32::MAX << n) } else { v };
         let staged: u64 = (v as u64) << self.bit_pos;
         let total_bits = self.bit_pos + n;
-        let total_bytes = (total_bits + 7) / 8;
+        let total_bytes = total_bits.div_ceil(8);
 
         if self.bit_pos > 0 {
             *self.buf.last_mut().unwrap() |= staged as u8;
@@ -551,8 +548,8 @@ impl<'a> HQMMessageReader<'a> {
         self.align();
         let n = out.len();
 
-        for i in 0..n {
-            out[i] = self.safe_get_byte(self.pos + i)
+        for (i, byte) in out.iter_mut().enumerate() {
+            *byte = self.safe_get_byte(self.pos + i)
         }
         self.pos += n;
     }
@@ -622,7 +619,7 @@ impl<'a> HQMMessageReader<'a> {
     pub fn read_bits(&mut self, b: u8) -> u32 {
         debug_assert!(b <= 32);
 
-        let total_bytes = ((self.bit_pos + b + 7) / 8) as usize;
+        let total_bytes = (self.bit_pos + b).div_ceil(8) as usize;
 
         let mut staged = 0u64;
         for i in 0..total_bytes {
@@ -1063,7 +1060,7 @@ mod tests {
 
         assert!(matches!(
             HQMMessageCodec.parse_message(&packet),
-            Err(HQMDecodeError::StringDecoding(_))
+            Err(HQMDecodeError::StringDecoding)
         ));
     }
 
@@ -1104,7 +1101,7 @@ mod tests {
         for (command, version, deltatime) in versions {
             let packet = update_packet(command, deltatime, no_chat);
 
-            let HQMClientToServerMessage::Update {
+            let HQMClientToServerMessage::Update(PlayerUpdate {
                 current_game_id,
                 input,
                 deltatime: parsed_deltatime,
@@ -1112,7 +1109,7 @@ mod tests {
                 known_msg_pos,
                 chat,
                 version: parsed_version,
-            } = parse(&packet)
+            }) = parse(&packet)
             else {
                 panic!("expected an update");
             };
@@ -1137,7 +1134,7 @@ mod tests {
         let text = "hello /fs".as_bytes();
         let packet = update_packet(8, Some(16), with_chat(5, text.len(), text));
 
-        let HQMClientToServerMessage::Update { chat, .. } = parse(&packet) else {
+        let HQMClientToServerMessage::Update(PlayerUpdate { chat, .. }) = parse(&packet) else {
             panic!("expected an update");
         };
         assert_eq!(chat, Some((5, "hello /fs".to_owned())));
@@ -1149,19 +1146,19 @@ mod tests {
 
         assert!(matches!(
             HQMMessageCodec.parse_message(&packet),
-            Err(HQMDecodeError::StringDecoding(_))
+            Err(HQMDecodeError::StringDecoding)
         ));
     }
 
     #[test]
     fn truncated_updates_read_missing_bytes_as_zero() {
-        let HQMClientToServerMessage::Update {
+        let HQMClientToServerMessage::Update(PlayerUpdate {
             current_game_id,
             deltatime,
             new_known_packet,
             chat,
             ..
-        } = parse(b"Hock\x08")
+        }) = parse(b"Hock\x08")
         else {
             panic!("expected an update");
         };
@@ -1173,10 +1170,10 @@ mod tests {
         // A chat message claiming more bytes than the packet holds is padded instead of
         // reading out of bounds
         let packet = update_packet(4, None, with_chat(0, 10, b"hi"));
-        let HQMClientToServerMessage::Update {
+        let HQMClientToServerMessage::Update(PlayerUpdate {
             chat: Some((_, text)),
             ..
-        } = parse(&packet)
+        }) = parse(&packet)
         else {
             panic!("expected an update with chat");
         };

@@ -509,7 +509,7 @@ impl SkaterCollisionBall {
         SkaterCollisionBall {
             offset,
             pos,
-            velocity: velocity.clone(),
+            velocity: *velocity,
             radius,
             mass,
         }

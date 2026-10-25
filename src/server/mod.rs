@@ -23,12 +23,13 @@ use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 use self::ban::{BanCheck, BanCheckResponse};
 use self::recording::RecordingSaveMethod;
 use crate::game::{
-    PhysicsConfiguration, PlayerId, PlayerIndex, PlayerInput, Puck, PuckId, Rink, ScoreboardValues,
-    SkaterHand, SkaterObject, Team,
+    PhysicsConfiguration, PlayerId, PlayerIndex, Puck, PuckId, Rink, ScoreboardValues, SkaterHand,
+    SkaterObject, Team,
 };
 use crate::protocol::{
     HQMClientToServerMessage, HQMMasterServerRegistration, HQMMessageCodec, HQMMessageWriter,
-    HQMServerToClientMessage, HQMServerUpdate, ObjectPacket, write_message, write_objects,
+    HQMServerToClientMessage, HQMServerUpdate, ObjectPacket, PlayerUpdate, write_message,
+    write_objects,
 };
 use crate::{ReplayRecording, ServerConfiguration};
 pub(crate) use players::{
@@ -479,25 +480,7 @@ impl HQMServer {
             } => {
                 self.player_join(addr, version, player_name, behaviour);
             }
-            HQMClientToServerMessage::Update {
-                current_game_id,
-                input,
-                deltatime,
-                new_known_packet,
-                known_msg_pos,
-                chat,
-                version,
-            } => self.player_update(
-                addr,
-                current_game_id,
-                input,
-                deltatime,
-                new_known_packet,
-                known_msg_pos,
-                chat,
-                version,
-                behaviour,
-            ),
+            HQMClientToServerMessage::Update(update) => self.player_update(addr, update, behaviour),
             HQMClientToServerMessage::Exit => self.player_exit(addr, behaviour),
             HQMClientToServerMessage::ServerInfo { version, ping } => {
                 self.request_info(socket, addr, version, ping, behaviour)
@@ -540,15 +523,18 @@ impl HQMServer {
     fn player_update<B: GameMode>(
         &mut self,
         addr: SocketAddr,
-        current_game_id: u32,
-        input: PlayerInput,
-        deltatime: Option<u32>,
-        new_known_packet: u32,
-        known_msgpos: usize,
-        chat: Option<(u8, String)>,
-        client_version: HQMClientVersion,
+        update: PlayerUpdate,
         behaviour: &mut B,
     ) {
+        let PlayerUpdate {
+            current_game_id,
+            input,
+            deltatime,
+            new_known_packet,
+            known_msg_pos: known_msgpos,
+            chat,
+            version: client_version,
+        } = update;
         let (player_id, player) = match self
             .state
             .player_message_state
@@ -595,11 +581,11 @@ impl HQMServer {
                 data.deltatime = deltatime;
             }
 
-            if let Some((rep, message)) = chat {
-                if data.chat_rep != Some(rep) {
-                    data.chat_rep = Some(rep);
-                    self.process_message(message, player_id, behaviour);
-                }
+            if let Some((rep, message)) = chat
+                && data.chat_rep != Some(rep)
+            {
+                data.chat_rep = Some(rep);
+                self.process_message(message, player_id, behaviour);
             }
         }
     }
@@ -712,18 +698,13 @@ impl HQMServer {
                     .player_message_state
                     .players
                     .get_player_mut(player_id)
+                    && let ServerPlayerData::NetworkPlayer { data } = &mut player.data
+                    && data.view_player_index != player_id.index
                 {
-                    if let ServerPlayerData::NetworkPlayer { data } = &mut player.data {
-                        if data.view_player_index != player_id.index {
-                            data.view_player_index = player_id.index;
-                            self.state
-                                .player_message_state
-                                .add_directed_server_chat_message(
-                                    "View has been restored",
-                                    player_id,
-                                );
-                        }
-                    }
+                    data.view_player_index = player_id.index;
+                    self.state
+                        .player_message_state
+                        .add_directed_server_chat_message("View has been restored", player_id);
                 }
             }
             ChatCommand::Builtin(BuiltinCommand::TeamChat(message)) => {

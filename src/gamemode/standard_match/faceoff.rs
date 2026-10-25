@@ -43,14 +43,13 @@ pub(super) fn assign_team_positions(
     }
 
     // If no one requested center, move the first non-goalie there.
-    if available.contains(&"C") {
-        if let Some(&id) = players
+    if available.contains(&"C")
+        && let Some(&id) = players
             .iter()
             .find(|&&id| assignments[&id] != "G")
             .or_else(|| players.first())
-        {
-            assignments.insert(id, "C");
-        }
+    {
+        assignments.insert(id, "C");
     }
 
     assignments

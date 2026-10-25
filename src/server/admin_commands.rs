@@ -186,16 +186,15 @@ impl HQMServer {
             .state
             .player_message_state
             .check_admin_or_deny(admin_player_id)
+            && let Some(server_service) = self.config.server_service.as_deref()
         {
-            if let Some(server_service) = self.config.server_service.as_deref() {
-                let msg = format!("{} started server restart", player.player_name);
-                self.state.player_message_state.add_server_chat_message(msg);
-                let ctl = systemctl::SystemCtl::default();
-                if ctl.restart(server_service).is_err() {
-                    self.state
-                        .player_message_state
-                        .add_directed_server_chat_message("Restart failed", admin_player_id);
-                }
+            let msg = format!("{} started server restart", player.player_name);
+            self.state.player_message_state.add_server_chat_message(msg);
+            let ctl = systemctl::SystemCtl::default();
+            if ctl.restart(server_service).is_err() {
+                self.state
+                    .player_message_state
+                    .add_directed_server_chat_message("Restart failed", admin_player_id);
             }
         }
     }
@@ -256,10 +255,10 @@ impl HQMServer {
                 .players
                 .iter_players()
                 .filter_map(|(player_index, player)| {
-                    if let ServerPlayerData::NetworkPlayer { data } = &player.data {
-                        if matching.is_matching(&player.player_name) {
-                            return Some((player_index, player.player_name.clone(), data.addr));
-                        }
+                    if let ServerPlayerData::NetworkPlayer { data } = &player.data
+                        && matching.is_matching(&player.player_name)
+                    {
+                        return Some((player_index, player.player_name.clone(), data.addr));
                     }
                     None
                 })
@@ -363,40 +362,33 @@ impl HQMServer {
                     .player_message_state
                     .players
                     .get_player_by_index(kick_player_index)
+                    && let ServerPlayerData::NetworkPlayer { data } = &kick_player.data
                 {
-                    if let ServerPlayerData::NetworkPlayer { data } = &kick_player.data {
-                        let kick_player_name = kick_player.player_name.clone();
-                        let kick_ip = data.addr.ip();
-                        behaviour.before_player_exit(
-                            &mut self.context(),
-                            kick_player_id,
-                            ExitReason::AdminKicked,
+                    let kick_player_name = kick_player.player_name.clone();
+                    let kick_ip = data.addr.ip();
+                    behaviour.before_player_exit(
+                        &mut self.context(),
+                        kick_player_id,
+                        ExitReason::AdminKicked,
+                    );
+                    self.state.remove_player(kick_player_id, true);
+
+                    if ban_player {
+                        self.ban.ban_ip(kick_ip);
+
+                        info!(
+                            "{} ({}) banned {} ({})",
+                            admin_player_name, admin_player_id, kick_player_name, kick_player_id
                         );
-                        self.state.remove_player(kick_player_id, true);
-
-                        if ban_player {
-                            self.ban.ban_ip(kick_ip);
-
-                            info!(
-                                "{} ({}) banned {} ({})",
-                                admin_player_name,
-                                admin_player_id,
-                                kick_player_name,
-                                kick_player_id
-                            );
-                            let msg = format!("{kick_player_name} banned by {admin_player_name}");
-                            self.state.player_message_state.add_server_chat_message(msg);
-                        } else {
-                            info!(
-                                "{} ({}) kicked {} ({})",
-                                admin_player_name,
-                                admin_player_id,
-                                kick_player_name,
-                                kick_player_id
-                            );
-                            let msg = format!("{kick_player_name} kicked by {admin_player_name}");
-                            self.state.player_message_state.add_server_chat_message(msg);
-                        }
+                        let msg = format!("{kick_player_name} banned by {admin_player_name}");
+                        self.state.player_message_state.add_server_chat_message(msg);
+                    } else {
+                        info!(
+                            "{} ({}) kicked {} ({})",
+                            admin_player_name, admin_player_id, kick_player_name, kick_player_id
+                        );
+                        let msg = format!("{kick_player_name} kicked by {admin_player_name}");
+                        self.state.player_message_state.add_server_chat_message(msg);
                     }
                 }
             } else if ban_player {

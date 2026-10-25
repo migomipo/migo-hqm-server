@@ -295,10 +295,10 @@ impl AttackState {
                         }
                     }
                 }
-                PhysicsEvent::PuckTouchedNet { team: net_team, .. } => {
-                    if net_team.get_other_team() == attacking_team {
-                        self.no_more_touch = true;
-                    }
+                PhysicsEvent::PuckTouchedNet { team: net_team, .. }
+                    if net_team.get_other_team() == attacking_team =>
+                {
+                    self.no_more_touch = true;
                 }
                 _ => {}
             }

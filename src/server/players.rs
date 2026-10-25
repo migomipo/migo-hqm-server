@@ -205,7 +205,7 @@ impl PlayerListExt for PlayerSlots {
         self.slots
             .iter()
             .position(|slot| slot.player.is_none())
-            .map(|x| PlayerIndex(x))
+            .map(PlayerIndex)
     }
 }
 

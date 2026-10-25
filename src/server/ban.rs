@@ -84,7 +84,8 @@ impl BanCheck for InMemoryBanCheck {
 pub struct FileBanCheck {
     file: PathBuf,
     ban_list: Arc<Mutex<HashSet<IpAddr>>>,
-    watcher: Debouncer<RecommendedWatcher, RecommendedCache>,
+    // Only held so the ban file stays watched while this exists
+    _watcher: Debouncer<RecommendedWatcher, RecommendedCache>,
 }
 
 impl FileBanCheck {
@@ -127,7 +128,7 @@ impl FileBanCheck {
         Ok(Self {
             ban_list,
             file: path,
-            watcher,
+            _watcher: watcher,
         })
     }
 }

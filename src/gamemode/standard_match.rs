@@ -642,10 +642,10 @@ impl PlayingState {
         team: Team,
         puck: PuckId,
     ) -> BreakState {
-        if let Offside::Warning(warning) = playing.offside {
-            if warning.offending_team == team {
-                return Self::call_offside(config, ctx, team, warning.side, warning.pass_origin);
-            }
+        if let Offside::Warning(warning) = playing.offside
+            && warning.offending_team == team
+        {
+            return Self::call_offside(config, ctx, team, warning.side, warning.pass_origin);
         }
         let puck_speed_across_line = ctx
             .objects
@@ -725,9 +725,7 @@ impl PlayingState {
         player: PlayerId,
         puck: PuckId,
     ) -> Option<BreakState> {
-        let Some(team) = ctx.players.get(player).and_then(|p| p.team()) else {
-            return None;
-        };
+        let team = ctx.players.get(player).and_then(|p| p.team())?;
         let side = Self::side(ctx, puck);
         if let Some(puck_object) = ctx.objects.get_puck(puck) {
             let touches = playing
@@ -756,16 +754,16 @@ impl PlayingState {
             from: None,
             player,
         });
-        if let Offside::Warning(warning) = playing.offside {
-            if warning.offending_team == team {
-                return Some(Self::call_offside(
-                    config,
-                    ctx,
-                    team,
-                    warning.side,
-                    warning.pass_origin,
-                ));
-            }
+        if let Offside::Warning(warning) = playing.offside
+            && warning.offending_team == team
+        {
+            return Some(Self::call_offside(
+                config,
+                ctx,
+                team,
+                warning.side,
+                warning.pass_origin,
+            ));
         }
         if let TwoLine::Warning(warning) = playing.twoline.clone() {
             if warning.passing_team == team && warning.twoline_offside_players.contains(&player) {
@@ -797,19 +795,20 @@ impl PlayingState {
         None
     }
     fn update_pass(playing: &mut PlayingState, team: Team, at: PassLocation) {
-        if let Some(pass) = &mut playing.pass {
-            if pass.team == team && pass.from.is_none() {
-                pass.from = Some(at);
-            }
+        if let Some(pass) = &mut playing.pass
+            && pass.team == team
+            && pass.from.is_none()
+        {
+            pass.from = Some(at);
         }
     }
     fn wave_off_twoline(ctx: &mut GameContext, playing: &mut PlayingState, team: Team) {
-        if let TwoLine::Warning(warning) = &playing.twoline {
-            if warning.passing_team != team {
-                playing.twoline = TwoLine::No;
-                ctx.messages
-                    .add_server_chat_message("Two-line pass waved off");
-            }
+        if let TwoLine::Warning(warning) = &playing.twoline
+            && warning.passing_team != team
+        {
+            playing.twoline = TwoLine::No;
+            ctx.messages
+                .add_server_chat_message("Two-line pass waved off");
         }
     }
     fn enter_zone(
@@ -913,25 +912,24 @@ impl PlayingState {
                     ));
                 }
                 PhysicsEvent::PuckPassedGoalLine { team, puck: _ } => {
-                    if let Some(pass) = playing.pass {
-                        if pass.team == team.get_other_team()
-                            && pass.from.is_some_and(|p| p <= PassLocation::ReachedCenter)
-                        {
-                            match config.icing {
-                                IcingConfiguration::Touch => {
-                                    playing.icing = Icing::Warning(IcingWarning {
-                                        icing_team: pass.team,
-                                        side: pass.side,
-                                    });
-                                    ctx.messages.add_server_chat_message("Icing warning");
-                                }
-                                IcingConfiguration::NoTouch => {
-                                    return MatchTransition::Break(Self::call_icing(
-                                        config, ctx, pass.team, pass.side,
-                                    ));
-                                }
-                                IcingConfiguration::Off => {}
+                    if let Some(pass) = playing.pass
+                        && pass.team == team.get_other_team()
+                        && pass.from.is_some_and(|p| p <= PassLocation::ReachedCenter)
+                    {
+                        match config.icing {
+                            IcingConfiguration::Touch => {
+                                playing.icing = Icing::Warning(IcingWarning {
+                                    icing_team: pass.team,
+                                    side: pass.side,
+                                });
+                                ctx.messages.add_server_chat_message("Icing warning");
                             }
+                            IcingConfiguration::NoTouch => {
+                                return MatchTransition::Break(Self::call_icing(
+                                    config, ctx, pass.team, pass.side,
+                                ));
+                            }
+                            IcingConfiguration::Off => {}
                         }
                     }
                 }
@@ -942,10 +940,10 @@ impl PlayingState {
                 PhysicsEvent::PuckPassedDefensiveLine { team, .. } => {
                     Self::update_pass(playing, team, PassLocation::PassedOwnBlue);
                     if config.offside_line == OffsideLineConfiguration::OffensiveBlue {
-                        if let Offside::Warning(warning) = playing.offside {
-                            if team.get_other_team() == warning.offending_team {
-                                ctx.messages.add_server_chat_message("Offside waved off");
-                            }
+                        if let Offside::Warning(warning) = playing.offside
+                            && team.get_other_team() == warning.offending_team
+                        {
+                            ctx.messages.add_server_chat_message("Offside waved off");
                         }
                         playing.offside = Offside::Neutral;
                     }
@@ -959,10 +957,10 @@ impl PlayingState {
                     if let Some(stoppage) = Self::enter_zone(config, ctx, playing, team, false) {
                         return MatchTransition::Break(stoppage);
                     }
-                    if let Offside::Warning(warning) = playing.offside {
-                        if warning.offending_team != team {
-                            ctx.messages.add_server_chat_message("Offside waved off");
-                        }
+                    if let Offside::Warning(warning) = playing.offside
+                        && warning.offending_team != team
+                    {
+                        ctx.messages.add_server_chat_message("Offside waved off");
                     }
                 }
                 PhysicsEvent::PuckReachedOffensiveZone { team, .. } => {
@@ -977,11 +975,11 @@ impl PlayingState {
                 _ => {}
             }
         }
-        if let Offside::Warning(warning) = playing.offside {
-            if !Self::team_in_zone(config, ctx, warning.offending_team, None) {
-                playing.offside = Offside::InZone(warning.offending_team);
-                ctx.messages.add_server_chat_message("Offside waved off");
-            }
+        if let Offside::Warning(warning) = playing.offside
+            && !Self::team_in_zone(config, ctx, warning.offending_team, None)
+        {
+            playing.offside = Offside::InZone(warning.offending_team);
+            ctx.messages.add_server_chat_message("Offside waved off");
         }
         MatchTransition::Continue
     }
