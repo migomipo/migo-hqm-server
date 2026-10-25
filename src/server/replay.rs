@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use tracing::warn;
 
 use crate::game::PlayerId;
+use crate::history::History;
 use crate::protocol::ObjectPacket;
 
 #[derive(Clone, Debug)]
@@ -16,8 +17,7 @@ pub(super) struct ReplayTick {
 pub struct HQMTickHistory {
     current_step: u32,
     pending_replay: VecDeque<(Option<PlayerId>, ReplayTick)>,
-    retained_ticks: VecDeque<ReplayTick>,
-    history_capacity: usize,
+    retained_ticks: History<ReplayTick>,
 }
 
 impl HQMTickHistory {
@@ -25,8 +25,7 @@ impl HQMTickHistory {
         Self {
             current_step: u32::MAX,
             pending_replay: Default::default(),
-            retained_ticks: Default::default(),
-            history_capacity: 0,
+            retained_ticks: History::new(0),
         }
     }
 
@@ -45,8 +44,7 @@ impl HQMTickHistory {
     }
 
     pub(crate) fn set_history_capacity(&mut self, history_capacity: usize) {
-        self.history_capacity = history_capacity;
-        self.trim_history();
+        self.retained_ticks.set_capacity(history_capacity);
     }
 
     pub(crate) fn advance_step(&mut self) {
@@ -54,20 +52,10 @@ impl HQMTickHistory {
     }
 
     pub(crate) fn record_tick(&mut self, packets: [ObjectPacket; 32]) {
-        if self.history_capacity == 0 {
-            self.retained_ticks.clear();
-            return;
-        }
-
-        self.retained_ticks.truncate(self.history_capacity - 1);
-        self.retained_ticks.push_front(ReplayTick {
+        self.retained_ticks.push(ReplayTick {
             game_step: self.current_step,
             packets,
         });
-    }
-
-    fn trim_history(&mut self) {
-        self.retained_ticks.truncate(self.history_capacity);
     }
 
     /// Queues the retained ticks from `start_step` to `end_step` for replay, and returns how many
@@ -86,8 +74,7 @@ impl HQMTickHistory {
         let queue_length = self.pending_replay.len();
         let data = self
             .retained_ticks
-            .iter()
-            .rev()
+            .iter_oldest_first()
             .filter(|tick| (start_step..=end_step).contains(&tick.game_step))
             .map(|tick| (force_view, tick.clone()));
         self.pending_replay.extend(data);

@@ -1,6 +1,7 @@
 pub mod gamemode;
 
 pub mod game;
+mod history;
 pub mod physics;
 mod protocol;
 mod server;

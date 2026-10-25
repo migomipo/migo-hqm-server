@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use glam::Vec3;
 use glamx::Rot3;
@@ -9,6 +9,7 @@ use crate::gamemode::util::{
     GameProgress, SpawnPoint, TeamSelection, get_spawnpoint, spawn_warmup_pucks,
 };
 use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
+use crate::history::History;
 
 mod commands;
 mod faceoff;
@@ -28,6 +29,8 @@ const MIN_PAUSE_AFTER_REPLAY: u32 = 300;
 /// Ticks of game history kept for replays. Must cover the longest goal replay.
 const REPLAY_HISTORY_LENGTH: u32 = 1000;
 const _: () = assert!(REPLAY_BEFORE_GOAL + REPLAY_AFTER_GOAL < REPLAY_HISTORY_LENGTH);
+/// Touches remembered per puck for crediting goals and assists.
+const PUCK_TOUCH_HISTORY_LEN: usize = 16;
 
 pub const ALLOWED_POSITIONS: [&str; 18] = [
     "C", "LW", "RW", "LD", "RD", "G", "LM", "RM", "LLM", "RRM", "LLD", "RRD", "CM", "CD", "LW2",
@@ -275,7 +278,7 @@ struct PlayingState {
     twoline: TwoLine,
     pass: Option<Pass>,
     started_goalies: HashSet<PlayerId>,
-    puck_touches: HashMap<PuckId, VecDeque<PuckTouch>>,
+    puck_touches: HashMap<PuckId, History<PuckTouch>>,
     faceoff_step: u32,
 }
 impl BreakState {
@@ -656,9 +659,9 @@ impl PlayingState {
             let last_touch = playing
                 .puck_touches
                 .get(&puck)
-                .and_then(|touches| touches.front().map(|touch| touch.player));
+                .and_then(|touches| touches.newest().map(|touch| touch.player));
             if let Some(touches) = playing.puck_touches.get(&puck) {
-                for touch in touches {
+                for touch in touches.iter_newest_first() {
                     if goal_scorer.is_none() && touch.team == team {
                         goal_scorer = Some(touch.player);
                         scorer_first_touch = touch.first_time;
@@ -727,16 +730,18 @@ impl PlayingState {
         };
         let side = Self::side(ctx, puck);
         if let Some(puck_object) = ctx.objects.get_puck(puck) {
-            let touches = playing.puck_touches.entry(puck).or_default();
+            let touches = playing
+                .puck_touches
+                .entry(puck)
+                .or_insert_with(|| History::new(PUCK_TOUCH_HISTORY_LEN));
             if let Some(last_touch) = touches
-                .front_mut()
+                .newest_mut()
                 .filter(|touch| touch.player == player && touch.team == team)
             {
                 last_touch.last_time = game_state.time;
                 last_touch.puck_speed = puck_object.body.linear_velocity.length();
             } else {
-                touches.truncate(15);
-                touches.push_front(PuckTouch {
+                touches.push(PuckTouch {
                     player,
                     team,
                     puck_speed: puck_object.body.linear_velocity.length(),

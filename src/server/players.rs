@@ -1,8 +1,7 @@
 use crate::game::{PlayerId, PlayerIndex, PlayerInput, SkaterHand, Team};
 use crate::gamemode::BotLifetime;
+use crate::history::History;
 use crate::server::{HQMClientVersion, ObjectSlot, PacketNumber};
-use arraydeque::ArrayDeque;
-use arraydeque::behavior::Wrapping;
 use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::rc::Rc;
@@ -73,6 +72,8 @@ pub(crate) trait PlayerListExt {
 }
 
 pub(crate) const MAX_PLAYERS: usize = 64;
+/// Server-side ping samples kept per player for /ping.
+const PING_HISTORY_LEN: usize = 100;
 
 struct PlayerSlot {
     generation: u32,
@@ -660,7 +661,7 @@ pub(crate) struct NetworkPlayerData {
     pub known_msgpos: usize,
     pub(crate) chat_rep: Option<u8>,
     pub deltatime: u32,
-    pub(crate) last_ping: Box<ArrayDeque<f32, 100, Wrapping>>,
+    pub(crate) last_ping: History<f32>,
     pub view_player_index: PlayerIndex,
     pub game_id: u32,
     pub messages: Vec<Rc<HQMMessage>>,
@@ -711,7 +712,7 @@ impl ServerPlayer {
                     chat_rep: None,
                     // store latest deltime client sends you to respond with it
                     deltatime: 0,
-                    last_ping: Box::new(ArrayDeque::new()),
+                    last_ping: History::new(PING_HISTORY_LEN),
                     view_player_index: player_index,
                     game_id: u32::MAX,
                     messages: global_messages.to_vec(),
@@ -783,7 +784,7 @@ impl ServerPlayer {
                 let mut min = f32::INFINITY;
                 let mut max = f32::NEG_INFINITY;
                 let mut sum = 0f32;
-                for i in last_ping.iter() {
+                for i in last_ping.iter_newest_first() {
                     min = min.min(*i);
                     max = max.max(*i);
                     sum += *i;
@@ -791,7 +792,7 @@ impl ServerPlayer {
                 let avg = sum / n;
                 let dev = {
                     let mut s = 0f32;
-                    for i in last_ping.iter() {
+                    for i in last_ping.iter_newest_first() {
                         s += (*i - avg).powi(2);
                     }
                     (s / n).sqrt()

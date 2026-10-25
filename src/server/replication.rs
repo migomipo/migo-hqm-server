@@ -2,13 +2,14 @@
 
 use std::time::Instant;
 
-use arraydeque::{ArrayDeque, Wrapping};
-
 use crate::game::ScoreboardValues;
+use crate::history::History;
 use crate::protocol::ObjectPacket;
 
 pub(super) const PACKET_HISTORY_LEN: usize = 192;
 const NO_PACKET_SEQUENCE: u32 = u32::MAX;
+/// Packet numbers use every `u32` except [NO_PACKET_SEQUENCE], so they count modulo this.
+const PACKET_NUMBER_COUNT: u64 = NO_PACKET_SEQUENCE as u64;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PacketNumber(pub(crate) u32);
@@ -23,17 +24,18 @@ impl PacketNumber {
     }
 
     pub(crate) fn next(self) -> Self {
-        let next = self.0.wrapping_add(1);
-        if next == NO_PACKET_SEQUENCE {
-            Self(0)
-        } else {
-            Self(next)
-        }
+        Self(((u64::from(self.0) + 1) % PACKET_NUMBER_COUNT) as u32)
+    }
+
+    /// How many packets were sent after `older` up to and including this one.
+    pub(crate) fn steps_since(self, older: Self) -> u32 {
+        ((u64::from(self.0) + PACKET_NUMBER_COUNT - u64::from(older.0)) % PACKET_NUMBER_COUNT)
+            as u32
     }
 
     pub(crate) fn is_newer_than(self, other: Self) -> bool {
-        let distance = self.0.wrapping_sub(other.0);
-        distance != 0 && distance < u32::MAX / 2
+        let distance = self.steps_since(other);
+        distance != 0 && distance < NO_PACKET_SEQUENCE / 2
     }
 }
 
@@ -44,57 +46,49 @@ struct ReplicationFrame {
 }
 
 pub(crate) struct PacketHistory {
-    latest: Option<PacketNumber>,
-    frames: Box<ArrayDeque<ReplicationFrame, PACKET_HISTORY_LEN, Wrapping>>,
+    frames: History<ReplicationFrame>,
 }
 
 impl PacketHistory {
     pub(crate) fn new() -> Self {
         Self {
-            latest: None,
-            frames: Box::new(ArrayDeque::new()),
+            frames: History::new(PACKET_HISTORY_LEN),
         }
     }
 
     pub(crate) fn clear(&mut self) {
-        self.latest = None;
         self.frames.clear();
     }
 
     pub(crate) fn push(&mut self, objects: [ObjectPacket; 32]) -> PacketNumber {
-        let sequence = self
-            .latest
-            .map(PacketNumber::next)
-            .unwrap_or(PacketNumber(0));
-        self.frames.push_front(ReplicationFrame {
+        let sequence = self.latest().map_or(PacketNumber(0), PacketNumber::next);
+        self.frames.push(ReplicationFrame {
             sequence,
             objects,
             created_at: Instant::now(),
         });
-        self.latest = Some(sequence);
         sequence
     }
 
+    fn latest(&self) -> Option<PacketNumber> {
+        self.frames.newest().map(|frame| frame.sequence)
+    }
+
     pub(crate) fn latest_sequence(&self) -> PacketNumber {
-        self.latest
+        self.latest()
             .expect("packet history must have a frame before serialization")
     }
 
     pub(crate) fn current_objects(&self) -> &[ObjectPacket; 32] {
         &self
             .frames
-            .front()
+            .newest()
             .expect("packet history must have a frame before serialization")
             .objects
     }
 
     fn frame(&self, sequence: PacketNumber) -> Option<&ReplicationFrame> {
-        let latest = self.latest?;
-        let mut age = latest.0.wrapping_sub(sequence.0);
-        // Numbering skips NO_PACKET_SEQUENCE, so frames from before a wraparound are one step newer
-        if sequence.0 > latest.0 {
-            age = age.wrapping_sub(1);
-        }
+        let age = self.latest()?.steps_since(sequence);
         self.frames
             .get(age as usize)
             .filter(|frame| frame.sequence == sequence)
@@ -108,7 +102,7 @@ impl PacketHistory {
         &self,
         sequence: PacketNumber,
     ) -> Option<&[ObjectPacket; 32]> {
-        if self.latest == Some(sequence) {
+        if self.latest() == Some(sequence) {
             None
         } else {
             self.objects_for(sequence)
@@ -175,6 +169,15 @@ mod tests {
     }
 
     #[test]
+    fn steps_between_packet_numbers_count_across_wraparound() {
+        assert_eq!(PacketNumber(6).steps_since(PacketNumber(5)), 1);
+        assert_eq!(PacketNumber(5).steps_since(PacketNumber(5)), 0);
+        assert_eq!(PacketNumber(0).steps_since(PacketNumber(u32::MAX - 1)), 1);
+        assert_eq!(PacketNumber(1).steps_since(PacketNumber(u32::MAX - 2)), 3);
+        assert_eq!(PacketNumber(5).steps_since(PacketNumber(6)), u32::MAX - 1);
+    }
+
+    #[test]
     fn history_numbers_frames_from_zero_and_restarts_after_clear() {
         let mut history = PacketHistory::new();
         assert_eq!(history.push(objects(0)), PacketNumber(0));
@@ -226,7 +229,11 @@ mod tests {
     #[test]
     fn history_looks_up_frames_across_wraparound() {
         let mut history = PacketHistory::new();
-        history.latest = Some(PacketNumber(u32::MAX - 3));
+        history.frames.push(ReplicationFrame {
+            sequence: PacketNumber(u32::MAX - 3),
+            objects: objects(99),
+            created_at: Instant::now(),
+        });
         let pushed: Vec<_> = (0..4)
             .map(|marker| (history.push(objects(marker)), marker))
             .collect();

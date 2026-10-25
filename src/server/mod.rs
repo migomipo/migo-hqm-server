@@ -581,8 +581,7 @@ impl HQMServer {
             };
 
             if let Some(duration_since_packet) = duration_since_packet {
-                data.last_ping
-                    .push_front(duration_since_packet.as_secs_f32());
+                data.last_ping.push(duration_since_packet.as_secs_f32());
             }
 
             data.inactivity = 0;
@@ -2355,7 +2354,7 @@ mod tests {
         let ServerPlayerData::NetworkPlayer { data } = &mut player.data else {
             panic!("expected a network player");
         };
-        data.last_ping.push_front(seconds);
+        data.last_ping.push(seconds);
     }
 
     #[test]

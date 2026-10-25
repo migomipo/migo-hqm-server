@@ -27,7 +27,6 @@ itertools = "0.14.0"
 parking_lot = "0.12.2"
 notify-debouncer-full = "0.5"
 anyhow = "1"
-arraydeque = "0.5"
 cached = "0.54"
 
 [build-dependencies]
