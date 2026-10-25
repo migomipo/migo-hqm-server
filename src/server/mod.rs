@@ -14,7 +14,7 @@ use glam::Vec3;
 use glamx::Rot3;
 use std::error::Error;
 use tokio::net::UdpSocket;
-use tokio::time::MissedTickBehavior;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio_util::udp::UdpFramed;
 use tracing::{info, warn};
 
@@ -1420,6 +1420,104 @@ fn parse_chat_command<'a>(command: &'a str, arg: &'a str) -> ChatCommand<'a> {
     ChatCommand::Builtin(builtin)
 }
 
+const TICKS_PER_SECOND: f64 = 100.0;
+
+const TICK_PERIOD: Duration = Duration::from_millis(10);
+/// How many ticks are made up at most when the server or the tick thread falls behind.
+const MAX_CATCH_UP_TICKS: u32 = 5;
+
+/// The deadlines of the ticks, [TICK_PERIOD] apart, so the tick rate averages 100 per second even
+/// when a tick comes late. After a stall of more than [MAX_CATCH_UP_TICKS] ticks the deadlines
+/// restart from the end of the stall.
+struct TickDeadlines {
+    next: Instant,
+}
+
+impl TickDeadlines {
+    fn new(now: Instant) -> Self {
+        Self {
+            next: now + TICK_PERIOD,
+        }
+    }
+
+    /// Moves on to the deadline after the one that was reached at `now`.
+    fn advance(&mut self, now: Instant) {
+        if now.saturating_duration_since(self.next) > TICK_PERIOD * MAX_CATCH_UP_TICKS {
+            self.next = now;
+        }
+        self.next += TICK_PERIOD;
+    }
+}
+
+/// Starts a thread that sends a tick to the returned receiver at each tick deadline. The thread
+/// sleeps with [std::thread::sleep], which uses high-resolution timers, while tokio's timers
+/// only wake up on whole milliseconds, and on Windows often only every 15.6 ms. Up to
+/// [MAX_CATCH_UP_TICKS] ticks wait in the channel when the server falls behind, and the rest are
+/// dropped. The thread stops when the receiver is dropped.
+fn spawn_tick_thread() -> std::io::Result<tokio::sync::mpsc::Receiver<()>> {
+    let (sender, receiver) = tokio::sync::mpsc::channel(MAX_CATCH_UP_TICKS as usize);
+    std::thread::Builder::new()
+        .name("tick".to_owned())
+        .spawn(move || {
+            let mut deadlines = TickDeadlines::new(Instant::now());
+            loop {
+                std::thread::sleep(deadlines.next.saturating_duration_since(Instant::now()));
+                if let Err(TrySendError::Closed(())) = sender.try_send(()) {
+                    return;
+                }
+                deadlines.advance(Instant::now());
+            }
+        })?;
+    Ok(receiver)
+}
+
+/// Measures how often the tick timer fires, to catch a server that runs slower than the game
+/// clock assumes.
+struct TickRateMeter {
+    window_start: Instant,
+    ticks: u32,
+    reported_once: bool,
+}
+
+impl TickRateMeter {
+    const WINDOW: Duration = Duration::from_secs(60);
+
+    fn new(now: Instant) -> Self {
+        Self {
+            window_start: now,
+            ticks: 0,
+            reported_once: false,
+        }
+    }
+
+    /// Counts a tick, and returns the measured rate in ticks per second when a window is done.
+    fn tick(&mut self, now: Instant) -> Option<f64> {
+        self.ticks += 1;
+        let elapsed = now - self.window_start;
+        if elapsed < Self::WINDOW {
+            return None;
+        }
+        let rate = f64::from(self.ticks) / elapsed.as_secs_f64();
+        self.window_start = now;
+        self.ticks = 0;
+        Some(rate)
+    }
+
+    fn tick_and_report(&mut self) {
+        let Some(rate) = self.tick(Instant::now()) else {
+            return;
+        };
+        if rate < TICKS_PER_SECOND * 0.99 {
+            warn!(
+                "Tick rate is {rate:.2} ticks/s, expected {TICKS_PER_SECOND}; game time runs slow"
+            );
+        } else if !self.reported_once {
+            info!("Tick rate is {rate:.2} ticks/s");
+        }
+        self.reported_once = true;
+    }
+}
+
 async fn send_updates(
     game_id: u32,
     history: &PacketHistory,
@@ -1466,9 +1564,7 @@ pub async fn run_server<B: GameMode>(
     behaviour.init(&mut server.context());
     server.start_requested_game(&mut behaviour);
 
-    // Set up timers
-    let mut tick_timer = tokio::time::interval(Duration::from_millis(10));
-    tick_timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut ticks = spawn_tick_thread()?;
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
@@ -1517,9 +1613,16 @@ pub async fn run_server<B: GameMode>(
         });
     }
     let mut socket = UdpFramed::new(socket, HQMMessageCodec);
+    let mut tick_rate = TickRateMeter::new(Instant::now());
     loop {
         tokio::select! {
-            _ = tick_timer.tick() => server.tick(&mut socket, &mut behaviour).await,
+            tick = ticks.recv() => {
+                if tick.is_none() {
+                    return Err(std::io::Error::other("the tick thread stopped"));
+                }
+                tick_rate.tick_and_report();
+                server.tick(&mut socket, &mut behaviour).await
+            },
             message = socket.next() => {
                 let Some(Ok((data, addr))) = message else {
                     continue;
@@ -1685,6 +1788,65 @@ mod tests {
 
         assert!(history.objects_for(first).is_none());
         assert!(history.objects_for(history.latest_sequence()).is_some());
+    }
+
+    fn tick_deadlines(start: Instant, reached_at_ms: &[u64]) -> Vec<u128> {
+        let mut deadlines = TickDeadlines::new(start);
+        reached_at_ms
+            .iter()
+            .map(|&ms| {
+                deadlines.advance(start + Duration::from_millis(ms));
+                (deadlines.next - start).as_millis()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tick_deadlines_are_10_ms_apart() {
+        let start = Instant::now();
+        assert_eq!(tick_deadlines(start, &[10, 20, 30]), [20, 30, 40]);
+    }
+
+    #[test]
+    fn tick_deadlines_stay_on_schedule_after_a_short_delay() {
+        let start = Instant::now();
+        // The ticks due at 20 and 30 ms come at 35 ms, and the next one is due on time at 40 ms
+        assert_eq!(tick_deadlines(start, &[10, 35, 35]), [20, 30, 40]);
+    }
+
+    #[test]
+    fn tick_deadlines_restart_after_a_long_stall() {
+        let start = Instant::now();
+        assert_eq!(tick_deadlines(start, &[10, 210, 220]), [20, 220, 230]);
+    }
+
+    #[test]
+    fn tick_thread_keeps_a_limited_number_of_ticks_waiting() {
+        let mut ticks = spawn_tick_thread().unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let waiting = std::iter::from_fn(|| ticks.try_recv().ok()).count();
+        assert_eq!(waiting, MAX_CATCH_UP_TICKS as usize);
+    }
+
+    #[test]
+    fn tick_rate_meter_reports_the_rate_of_each_window() {
+        let start = Instant::now();
+        let mut meter = TickRateMeter::new(start);
+        let tick_at = |ms: u64| start + Duration::from_millis(ms);
+
+        // 100 ticks per second for the first window
+        for i in 1..6000 {
+            assert_eq!(meter.tick(tick_at(i * 10)), None);
+        }
+        assert_eq!(meter.tick(tick_at(60_000)), Some(100.0));
+
+        // 64 ticks per second for the next window
+        let ticks: Vec<_> = (1..=3840)
+            .map(|i| meter.tick(tick_at(60_000 + i * 15_625 / 1000)))
+            .collect();
+        assert!(ticks[..3839].iter().all(Option::is_none));
+        let rate = ticks[3839].unwrap();
+        assert!((rate - 64.0).abs() < 0.01, "{rate}");
     }
 
     #[test]
