@@ -669,6 +669,158 @@ impl<'a> HQMMessageReader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::Team;
+    use std::borrow::Cow;
+    use std::f32::consts::PI;
+
+    fn write(f: impl FnOnce(&mut HQMMessageWriter)) -> Vec<u8> {
+        let mut buf = BytesMut::new();
+        f(&mut HQMMessageWriter::new(&mut buf));
+        buf.to_vec()
+    }
+
+    fn mask(width: u8) -> u32 {
+        if width == 32 {
+            u32::MAX
+        } else {
+            (1 << width) - 1
+        }
+    }
+
+    fn parse(packet: &[u8]) -> HQMClientToServerMessage {
+        match HQMMessageCodec.parse_message(packet) {
+            Ok(message) => message,
+            Err(_) => panic!("packet should parse"),
+        }
+    }
+
+    fn client_packet(command: u8, body: impl FnOnce(&mut HQMMessageWriter)) -> Vec<u8> {
+        write(|w| {
+            w.write_bytes_aligned(GAME_HEADER);
+            w.write_byte_aligned(command);
+            body(w);
+        })
+    }
+
+    fn update_packet(
+        command: u8,
+        deltatime: Option<u32>,
+        chat: impl FnOnce(&mut HQMMessageWriter),
+    ) -> Vec<u8> {
+        client_packet(command, |w| {
+            w.write_u32_aligned(7); // Game ID
+            // Stick angle, turn, unused, forward/back, stick x/y, head and body rotation
+            for value in [0.5, -1.0, 99.0, 0.25, 0.1, -0.2, 1.5, -1.5] {
+                w.write_f32_aligned(value);
+            }
+            w.write_u32_aligned(0b1010); // Keys
+            if let Some(deltatime) = deltatime {
+                w.write_u32_aligned(deltatime);
+            }
+            w.write_u32_aligned(321); // Known packet
+            w.write_bytes_aligned(&17u16.to_le_bytes()); // Known message position
+            chat(w);
+        })
+    }
+
+    fn no_chat(w: &mut HQMMessageWriter) {
+        w.write_bits(1, 0);
+    }
+
+    fn with_chat(rep: u32, length: usize, text: &[u8]) -> impl FnOnce(&mut HQMMessageWriter) {
+        move |w| {
+            w.write_bits(1, 1);
+            w.write_bits(3, rep);
+            w.write_bits(8, length as u32);
+            w.write_bytes_aligned(text);
+        }
+    }
+
+    fn read_objects(
+        reader: &mut HQMMessageReader,
+        baseline: Option<&[ObjectPacket; 32]>,
+    ) -> Vec<ObjectPacket> {
+        (0..32)
+            .map(|i| {
+                if reader.read_bits(1) == 0 {
+                    return ObjectPacket::None;
+                }
+                let old = baseline.map(|objects| &objects[i]);
+                match reader.read_bits(2) {
+                    0 => {
+                        let old = match old {
+                            Some(ObjectPacket::Skater(skater)) => Some(skater),
+                            _ => None,
+                        };
+                        ObjectPacket::Skater(SkaterPacket {
+                            pos: (
+                                reader.read_pos(17, old.map(|s| s.pos.0)),
+                                reader.read_pos(17, old.map(|s| s.pos.1)),
+                                reader.read_pos(17, old.map(|s| s.pos.2)),
+                            ),
+                            rot: (
+                                reader.read_pos(31, old.map(|s| s.rot.0)),
+                                reader.read_pos(31, old.map(|s| s.rot.1)),
+                            ),
+                            stick_pos: (
+                                reader.read_pos(13, old.map(|s| s.stick_pos.0)),
+                                reader.read_pos(13, old.map(|s| s.stick_pos.1)),
+                                reader.read_pos(13, old.map(|s| s.stick_pos.2)),
+                            ),
+                            stick_rot: (
+                                reader.read_pos(25, old.map(|s| s.stick_rot.0)),
+                                reader.read_pos(25, old.map(|s| s.stick_rot.1)),
+                            ),
+                            head_rot: reader.read_pos(16, old.map(|s| s.head_rot)),
+                            body_rot: reader.read_pos(16, old.map(|s| s.body_rot)),
+                        })
+                    }
+                    1 => {
+                        let old = match old {
+                            Some(ObjectPacket::Puck(puck)) => Some(puck),
+                            _ => None,
+                        };
+                        ObjectPacket::Puck(PuckPacket {
+                            pos: (
+                                reader.read_pos(17, old.map(|p| p.pos.0)),
+                                reader.read_pos(17, old.map(|p| p.pos.1)),
+                                reader.read_pos(17, old.map(|p| p.pos.2)),
+                            ),
+                            rot: (
+                                reader.read_pos(31, old.map(|p| p.rot.0)),
+                                reader.read_pos(31, old.map(|p| p.rot.1)),
+                            ),
+                        })
+                    }
+                    object_type => panic!("unknown object type {object_type}"),
+                }
+            })
+            .collect()
+    }
+
+    fn objects(f: impl FnOnce(&mut [ObjectPacket; 32])) -> [ObjectPacket; 32] {
+        let mut objects = std::array::from_fn(|_| ObjectPacket::None);
+        f(&mut objects);
+        objects
+    }
+
+    fn puck(x: u32) -> ObjectPacket {
+        ObjectPacket::Puck(PuckPacket {
+            pos: (x, 200, x + 300),
+            rot: (x * 7, x * 11),
+        })
+    }
+
+    fn skater(x: u32) -> ObjectPacket {
+        ObjectPacket::Skater(SkaterPacket {
+            pos: (x, 100, x + 50),
+            rot: (x * 3, x * 5),
+            stick_pos: (x, x + 1, x + 2),
+            stick_rot: (x * 2, x * 4),
+            head_rot: x + 10,
+            body_rot: x + 20,
+        })
+    }
 
     #[test]
     fn decoder_discards_invalid_datagrams() {
@@ -678,16 +830,496 @@ mod tests {
         assert!(codec.decode(&mut datagram).is_err());
         assert!(datagram.is_empty());
     }
+
+    #[test]
+    fn bits_round_trip_at_every_offset_and_width() {
+        for offset in 0..8 {
+            for width in 1..=32 {
+                for value in [0, mask(width), 0xA5C3_96E1 & mask(width)] {
+                    let packet = write(|w| {
+                        w.write_bits(offset, 0);
+                        w.write_bits(width, value);
+                        w.write_bits(5, 0b10110);
+                    });
+                    let mut reader = HQMMessageReader::new(&packet);
+                    reader.read_bits(offset);
+
+                    assert_eq!(
+                        reader.read_bits(width),
+                        value,
+                        "offset {offset}, width {width}"
+                    );
+                    assert_eq!(reader.read_bits(5), 0b10110);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn write_bits_drops_bits_beyond_the_field_width() {
+        let packet = write(|w| {
+            w.write_bits(3, 0xFF);
+            w.write_bits(5, 0);
+        });
+
+        assert_eq!(packet, [0b0000_0111]);
+    }
+
+    #[test]
+    fn aligned_values_start_on_the_next_byte() {
+        let packet = write(|w| {
+            w.write_bits(3, 0b101);
+            w.write_u32_aligned(0xDEAD_BEEF);
+            w.write_bits(1, 1);
+            w.write_f32_aligned(-1.25);
+            w.write_byte_aligned(0x42);
+            w.write_bytes_aligned_padded(6, b"abc");
+            w.write_bytes_aligned_padded(2, b"xyz");
+        });
+        assert_eq!(packet.len(), 1 + 4 + 1 + 4 + 1 + 6 + 2);
+
+        let mut reader = HQMMessageReader::new(&packet);
+        assert_eq!(reader.read_bits(3), 0b101);
+        assert_eq!(reader.read_u32_aligned(), 0xDEAD_BEEF);
+        assert_eq!(reader.read_bits(1), 1);
+        assert_eq!(reader.read_f32_aligned(), -1.25);
+        assert_eq!(reader.read_byte_aligned(), 0x42);
+        let mut padded = [0xFF; 6];
+        reader.read_bytes_aligned(&mut padded);
+        assert_eq!(&padded, b"abc\0\0\0");
+        let mut truncated = [0; 2];
+        reader.read_bytes_aligned(&mut truncated);
+        assert_eq!(&truncated, b"xy");
+    }
+
+    #[test]
+    fn reads_past_the_end_return_zeros() {
+        let mut reader = HQMMessageReader::new(&[0xFF]);
+
+        assert_eq!(reader.read_bits(4), 0xF);
+        assert_eq!(reader.read_bits(8), 0xF);
+        assert_eq!(reader.read_u32_aligned(), 0);
+        assert_eq!(reader.read_u16_aligned(), 0);
+    }
+
+    #[test]
+    fn positions_round_trip_with_the_smallest_delta_encoding() {
+        let old = 5000;
+        // (new value, expected size tag)
+        let cases = [
+            (old, 0),
+            (old - 4, 0),
+            (old + 3, 0),
+            (old - 5, 1),
+            (old + 4, 1),
+            (old - 32, 1),
+            (old + 31, 1),
+            (old - 33, 2),
+            (old + 32, 2),
+            (old - 2048, 2),
+            (old + 2047, 2),
+            (old - 2049, 3),
+            (old + 2048, 3),
+            (0, 3),
+            (mask(17), 3),
+        ];
+
+        for (value, tag) in cases {
+            let packet = write(|w| w.write_pos(17, value, Some(old)));
+
+            assert_eq!(
+                HQMMessageReader::new(&packet).read_bits(2),
+                tag,
+                "value {value}"
+            );
+            assert_eq!(
+                HQMMessageReader::new(&packet).read_pos(17, Some(old)),
+                value,
+                "value {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn positions_without_a_baseline_are_sent_in_full() {
+        for value in [0, 1, 5000, mask(17)] {
+            let packet = write(|w| w.write_pos(17, value, None));
+
+            assert_eq!(HQMMessageReader::new(&packet).read_bits(2), 3);
+            assert_eq!(HQMMessageReader::new(&packet).read_pos(17, None), value);
+        }
+    }
+
+    #[test]
+    fn directions_in_every_octant_survive_the_network_encoding() {
+        for i in 0..12 {
+            for j in 0..24 {
+                let polar = PI * (i as f32 + 0.5) / 12.0;
+                let azimuth = 2.0 * PI * j as f32 / 24.0;
+                let direction = Vec3::new(
+                    polar.sin() * azimuth.cos(),
+                    polar.cos(),
+                    polar.sin() * azimuth.sin(),
+                );
+
+                let encoded = convert_rot_column_to_network(31, direction);
+                let decoded = convert_rot_column_from_network(31, encoded);
+
+                assert!(
+                    decoded.abs_diff_eq(direction, 1e-3),
+                    "{direction} decoded as {decoded}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rotations_survive_the_network_encoding() {
+        let rotations = [
+            Rot3::IDENTITY,
+            Rot3::from_rotation_y(PI),
+            Rot3::from_rotation_y(1.0) * Rot3::from_rotation_x(-0.7),
+            Rot3::from_rotation_z(2.5) * Rot3::from_rotation_y(-2.0) * Rot3::from_rotation_x(0.4),
+        ];
+
+        // Pucks and skaters use 31 bits, sticks 25
+        for (bits, tolerance) in [(31, 1e-3), (25, 1e-2)] {
+            for rot in rotations {
+                let (v1, v2) = convert_matrix_to_network(bits, &rot);
+                let decoded = convert_matrix_from_network(bits, v1, v2);
+
+                for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+                    assert!(
+                        (decoded * axis).abs_diff_eq(rot * axis, tolerance),
+                        "{bits} bits: {axis} became {} instead of {}",
+                        decoded * axis,
+                        rot * axis
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parses_server_info_requests() {
+        let packet = client_packet(0, |w| {
+            w.write_bits(8, 55);
+            w.write_u32_aligned(1234);
+        });
+
+        let HQMClientToServerMessage::ServerInfo { version, ping } = parse(&packet) else {
+            panic!("expected a server info request");
+        };
+        assert_eq!((version, ping), (55, 1234));
+    }
+
+    #[test]
+    fn parses_join_requests() {
+        let packet = client_packet(2, |w| {
+            w.write_bits(8, 55);
+            w.write_bytes_aligned_padded(32, b"Migo");
+        });
+
+        let HQMClientToServerMessage::Join {
+            version,
+            player_name,
+        } = parse(&packet)
+        else {
+            panic!("expected a join request");
+        };
+        assert_eq!(version, 55);
+        assert_eq!(player_name, "Migo");
+    }
+
+    #[test]
+    fn join_names_without_a_terminator_use_all_32_bytes() {
+        let packet = client_packet(2, |w| {
+            w.write_bits(8, 55);
+            w.write_bytes_aligned(&[b'x'; 32]);
+        });
+
+        let HQMClientToServerMessage::Join { player_name, .. } = parse(&packet) else {
+            panic!("expected a join request");
+        };
+        assert_eq!(player_name, "x".repeat(32));
+    }
+
+    #[test]
+    fn empty_join_names_become_noname() {
+        let packet = client_packet(2, |w| w.write_bits(8, 55));
+
+        let HQMClientToServerMessage::Join { player_name, .. } = parse(&packet) else {
+            panic!("expected a join request");
+        };
+        assert_eq!(player_name, "Noname");
+    }
+
+    #[test]
+    fn join_names_must_be_utf8() {
+        let packet = client_packet(2, |w| {
+            w.write_bits(8, 55);
+            w.write_bytes_aligned_padded(32, &[0xFF, 0xFE]);
+        });
+
+        assert!(matches!(
+            HQMMessageCodec.parse_message(&packet),
+            Err(HQMDecodeError::StringDecoding(_))
+        ));
+    }
+
+    #[test]
+    fn parses_exit_requests() {
+        assert!(matches!(
+            parse(&client_packet(7, |_| {})),
+            HQMClientToServerMessage::Exit
+        ));
+    }
+
+    #[test]
+    fn rejects_unknown_headers_and_commands() {
+        let codec = HQMMessageCodec;
+
+        assert!(matches!(
+            codec.parse_message(b""),
+            Err(HQMDecodeError::WrongHeader)
+        ));
+        assert!(matches!(
+            codec.parse_message(b"Hack\x02"),
+            Err(HQMDecodeError::WrongHeader)
+        ));
+        assert!(matches!(
+            codec.parse_message(b"Hock\x03"),
+            Err(HQMDecodeError::UnknownType)
+        ));
+    }
+
+    #[test]
+    fn parses_updates_from_each_client_version() {
+        let versions = [
+            (4, HQMClientVersion::Vanilla, None),
+            (8, HQMClientVersion::Ping, Some(16)),
+            (0x10, HQMClientVersion::PingRules, Some(16)),
+        ];
+
+        for (command, version, deltatime) in versions {
+            let packet = update_packet(command, deltatime, no_chat);
+
+            let HQMClientToServerMessage::Update {
+                current_game_id,
+                input,
+                deltatime: parsed_deltatime,
+                new_known_packet,
+                known_msg_pos,
+                chat,
+                version: parsed_version,
+            } = parse(&packet)
+            else {
+                panic!("expected an update");
+            };
+            assert_eq!(current_game_id, 7);
+            assert_eq!(input.stick_angle, 0.5);
+            assert_eq!(input.turn, -1.0);
+            assert_eq!(input.fwbw, 0.25);
+            assert_eq!(input.stick, Vec2::new(0.1, -0.2));
+            assert_eq!(input.head_rot, 1.5);
+            assert_eq!(input.body_rot, -1.5);
+            assert_eq!(input.keys, 0b1010);
+            assert_eq!(parsed_deltatime, deltatime);
+            assert_eq!(new_known_packet, 321);
+            assert_eq!(known_msg_pos, 17);
+            assert_eq!(chat, None);
+            assert!(parsed_version == version);
+        }
+    }
+
+    #[test]
+    fn parses_chat_in_updates() {
+        let text = "hello /fs".as_bytes();
+        let packet = update_packet(8, Some(16), with_chat(5, text.len(), text));
+
+        let HQMClientToServerMessage::Update { chat, .. } = parse(&packet) else {
+            panic!("expected an update");
+        };
+        assert_eq!(chat, Some((5, "hello /fs".to_owned())));
+    }
+
+    #[test]
+    fn chat_must_be_utf8() {
+        let packet = update_packet(4, None, with_chat(0, 2, &[0xC3, 0x28]));
+
+        assert!(matches!(
+            HQMMessageCodec.parse_message(&packet),
+            Err(HQMDecodeError::StringDecoding(_))
+        ));
+    }
+
+    #[test]
+    fn truncated_updates_read_missing_bytes_as_zero() {
+        let HQMClientToServerMessage::Update {
+            current_game_id,
+            deltatime,
+            new_known_packet,
+            chat,
+            ..
+        } = parse(b"Hock\x08")
+        else {
+            panic!("expected an update");
+        };
+        assert_eq!(current_game_id, 0);
+        assert_eq!(deltatime, Some(0));
+        assert_eq!(new_known_packet, 0);
+        assert_eq!(chat, None);
+
+        // A chat message claiming more bytes than the packet holds is padded instead of
+        // reading out of bounds
+        let packet = update_packet(4, None, with_chat(0, 10, b"hi"));
+        let HQMClientToServerMessage::Update {
+            chat: Some((_, text)),
+            ..
+        } = parse(&packet)
+        else {
+            panic!("expected an update with chat");
+        };
+        assert_eq!(text, "hi\0\0\0\0\0\0\0\0");
+    }
+
+    #[test]
+    fn encodes_server_info_responses() {
+        let mut buf = BytesMut::new();
+        let message = HQMServerToClientMessage::ServerInfo {
+            ping: 1234,
+            player_count: 9,
+            team_size: 5,
+            server_name: "Migo",
+        };
+        assert!(HQMMessageCodec.encode(message, &mut buf).is_ok());
+
+        let mut reader = HQMMessageReader::new(&buf);
+        let mut header = [0; 4];
+        reader.read_bytes_aligned(&mut header);
+        assert_eq!(&header, GAME_HEADER);
+        assert_eq!(reader.read_byte_aligned(), 1);
+        assert_eq!(reader.read_bits(8), 55);
+        assert_eq!(reader.read_u32_aligned(), 1234);
+        assert_eq!(reader.read_bits(8), 9);
+        assert_eq!(reader.read_bits(4), 4);
+        assert_eq!(reader.read_bits(4), 5);
+        let mut name = [0xFF; 32];
+        reader.read_bytes_aligned(&mut name);
+        assert_eq!(&name[..5], b"Migo\0");
+        assert_eq!(buf.len(), 4 + 1 + 1 + 4 + 1 + 1 + 32);
+    }
+
+    #[test]
+    fn chat_messages_are_sent_as_seven_bit_text() {
+        let message = HQMMessage::Chat {
+            player_index: Some(PlayerIndex(3)),
+            message: Cow::Borrowed("Good game!"),
+        };
+        let packet = write(|w| write_message(w, &message));
+
+        let mut reader = HQMMessageReader::new(&packet);
+        assert_eq!(reader.read_bits(6), 2);
+        assert_eq!(reader.read_bits(6), 3);
+        let length = reader.read_bits(6);
+        let text: String = (0..length)
+            .map(|_| reader.read_bits(7) as u8 as char)
+            .collect();
+        assert_eq!(text, "Good game!");
+    }
+
+    #[test]
+    fn server_chat_has_no_sender_and_is_cut_to_63_bytes() {
+        let message = HQMMessage::Chat {
+            player_index: None,
+            message: Cow::Owned("x".repeat(100)),
+        };
+        let packet = write(|w| write_message(w, &message));
+
+        let mut reader = HQMMessageReader::new(&packet);
+        assert_eq!(reader.read_bits(6), 2);
+        assert_eq!(reader.read_bits(6), 63);
+        assert_eq!(reader.read_bits(6), 63);
+    }
+
+    #[test]
+    fn goal_messages_name_the_team_scorer_and_assist() {
+        let message = HQMMessage::Goal {
+            team: Team::Blue,
+            goal_player_index: Some(PlayerIndex(4)),
+            assist_player_index: None,
+        };
+        let packet = write(|w| write_message(w, &message));
+
+        let mut reader = HQMMessageReader::new(&packet);
+        assert_eq!(reader.read_bits(6), 1);
+        assert_eq!(reader.read_bits(2), Team::Blue.get_num());
+        assert_eq!(reader.read_bits(6), 4);
+        assert_eq!(reader.read_bits(6), 63);
+    }
+
+    #[test]
+    fn objects_are_delta_encoded_against_the_clients_known_packet() {
+        let mut history = PacketHistory::new();
+        let known = history.push(objects(|o| {
+            o[0] = skater(1000);
+            o[1] = puck(2000);
+            o[3] = puck(500);
+            o[5] = skater(3000);
+        }));
+        // A small move, a big jump, a new object, an object changing type and one removed
+        let current = objects(|o| {
+            o[0] = skater(1002);
+            o[1] = puck(9000);
+            o[2] = puck(50);
+            o[3] = skater(500);
+        });
+        let latest = history.push(current.clone());
+
+        let delta = write(|w| write_objects(w, &history, Some(known)));
+        let mut reader = HQMMessageReader::new(&delta);
+        assert_eq!(reader.read_u32_aligned(), latest.to_wire());
+        assert_eq!(reader.read_u32_aligned(), known.to_wire());
+        assert_eq!(
+            read_objects(&mut reader, history.objects_for(known)),
+            current
+        );
+
+        let full = write(|w| write_objects(w, &history, None));
+        assert!(delta.len() < full.len());
+    }
+
+    #[test]
+    fn objects_are_sent_in_full_without_a_usable_baseline() {
+        let mut history = PacketHistory::new();
+        let current = objects(|o| {
+            o[0] = skater(1000);
+            o[1] = puck(2000);
+        });
+        let latest = history.push(current.clone());
+
+        for known in [None, Some(latest), Some(PacketNumber(12345))] {
+            let packet = write(|w| write_objects(w, &history, known));
+
+            let mut reader = HQMMessageReader::new(&packet);
+            assert_eq!(reader.read_u32_aligned(), latest.to_wire());
+            assert_eq!(
+                reader.read_u32_aligned(),
+                known.map_or(u32::MAX, PacketNumber::to_wire)
+            );
+            assert_eq!(read_objects(&mut reader, None), current);
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ObjectPacket {
     None,
     Puck(PuckPacket),
     Skater(SkaterPacket),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SkaterPacket {
     pub pos: (u32, u32, u32),
     pub rot: (u32, u32),
@@ -697,7 +1329,7 @@ pub(crate) struct SkaterPacket {
     pub body_rot: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PuckPacket {
     pub pos: (u32, u32, u32),
     pub rot: (u32, u32),
