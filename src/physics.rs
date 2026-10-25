@@ -337,7 +337,7 @@ fn update_player(
     let feet_pos = player.body.pos - player.body.rot * (player.height * Vec3::Y);
     if feet_pos[1] < 0.0 {
         // If feet is below ground
-        let fwbw_from_client = input.fwbw.clamp(-1.0, 1.0);
+        let fwbw_from_client = replace_nan(input.fwbw, 0.0).clamp(-1.0, 1.0);
         if fwbw_from_client != 0.0 {
             let mut skate_direction = if fwbw_from_client > 0.0 {
                 player.body.rot * Vec3::NEG_Z // Which direction do we want to accelerate in
@@ -376,7 +376,7 @@ fn update_player(
     player.jumped_last_frame = input.jump();
 
     // Turn player
-    let turn = input.turn.clamp(-1.0, 1.0);
+    let turn = replace_nan(input.turn, 0.0).clamp(-1.0, 1.0);
     if input.shift() {
         let mut velocity_direction = player.body.rot * Vec3::X; // Axis pointing towards the side (left, right? I forgot)
         velocity_direction[1] = 0.0;
@@ -403,11 +403,11 @@ fn update_player(
     }
     adjust_head_body_rot(
         &mut player.head_rot,
-        input.head_rot.clamp(-7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8),
+        replace_nan(input.head_rot, 0.0).clamp(-7.0 * FRAC_PI_8, 7.0 * FRAC_PI_8),
     );
     adjust_head_body_rot(
         &mut player.body_rot,
-        input.body_rot.clamp(-FRAC_PI_2, FRAC_PI_2),
+        replace_nan(input.body_rot, 0.0).clamp(-FRAC_PI_2, FRAC_PI_2),
     );
     for (collision_ball_index, collision_ball) in player.collision_balls.iter_mut().enumerate() {
         let mut new_rot = player.body.rot;
@@ -1039,3 +1039,6 @@ pub fn limit_friction(v: &mut Vec3, normal: Vec3, d: f32) {
         *v += rejection.clamp_length_max(projection.length() * d);
     }
 }
+
+#[cfg(test)]
+mod tests;
