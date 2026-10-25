@@ -44,11 +44,14 @@ pub mod ban;
 pub(crate) mod players;
 pub mod recording;
 mod replay;
+mod replay_players;
 mod replication;
 #[cfg(test)]
 pub(crate) mod test_server;
 
 pub use replay::HQMTickHistory;
+use replay::{SkaterOwner, SkaterOwners};
+use replay_players::ReplayPlayers;
 use replication::ReplicationState;
 pub(crate) use replication::{PacketHistory, PacketNumber};
 
@@ -156,6 +159,7 @@ pub(crate) struct HQMServerState {
     pub(crate) puck_counter: u32,
 
     pub(crate) replay: HQMTickHistory,
+    replay_players: ReplayPlayers,
     replication: ReplicationState,
     recording: RecordingState,
 }
@@ -167,9 +171,33 @@ impl HQMServerState {
             objects: vec![None; 32],
             puck_counter: 0,
             replay: HQMTickHistory::new(),
+            replay_players: ReplayPlayers::new(),
             replication: ReplicationState::new(),
             recording: RecordingState::new(),
         }
+    }
+
+    /// Shows the player list for a replayed tick with the given skater owners, or for the live
+    /// game if `owners` is `None`.
+    fn show_replay_players(&mut self, owners: Option<&SkaterOwners>) {
+        let ServerPlayersAndMessages { players, messages } = &mut self.player_message_state;
+        self.replay_players.update(players, messages, owners);
+    }
+
+    /// The owners of the skater objects, by object slot.
+    fn skater_owners(&self) -> SkaterOwners {
+        let players = &self.player_message_state.players;
+        std::array::from_fn(|slot| match self.objects.get(slot)? {
+            Some(GameObject::Skater(player_id, _)) => {
+                let player = players.get_player(*player_id)?;
+                Some(SkaterOwner {
+                    player_id: *player_id,
+                    player_name: player.player_name.clone(),
+                    team: player.team()?,
+                })
+            }
+            _ => None,
+        })
     }
 
     pub(crate) fn skater_links(&mut self) -> SkaterLinks<'_> {
@@ -1047,9 +1075,10 @@ impl HQMServer {
         let scoreboard = behaviour.after_tick(&mut self.context(), &events);
         self.state.replication.last_scoreboard = Some(scoreboard);
 
-        let packets = self.get_packets();
+        let packets = Rc::new(self.get_packets());
 
-        self.state.replay.record_tick(packets.clone());
+        let owners = self.state.skater_owners();
+        self.state.replay.record_tick(packets.clone(), owners);
 
         self.state.replication.history.push(packets);
 
@@ -1137,13 +1166,16 @@ impl HQMServer {
             if let Some((forced_view, tick)) = self.state.replay.pop_replay_tick() {
                 let scoreboard = self.state.replication.last_scoreboard.unwrap_or_default();
                 self.state.replication.history.push(tick.packets);
-                (
-                    tick.game_step,
-                    forced_view.map(|player_id| player_id.index),
-                    scoreboard,
-                )
+                self.state.show_replay_players(Some(&tick.owners));
+                let forced_view = forced_view.and_then(|player_id| {
+                    self.state
+                        .replay_players
+                        .shown_index(&self.state.player_message_state.players, player_id)
+                });
+                (tick.game_step, forced_view, scoreboard)
             } else {
                 let scoreboard = self.game_step(behaviour);
+                self.state.show_replay_players(None);
                 (self.state.replay.game_step(), None, scoreboard)
             };
 
@@ -1250,6 +1282,9 @@ impl HQMServer {
         player_message_state
             .messages
             .new_game(&mut player_message_state.players);
+        state
+            .replay_players
+            .clear(&mut player_message_state.players);
         state.replay.clear();
         state.replication.new_game();
         state.recording.new_game();
@@ -1664,7 +1699,10 @@ mod tests {
         history.set_history_capacity(2);
         for _ in 0..3 {
             history.advance_step();
-            history.record_tick([const { ObjectPacket::None }; 32]);
+            history.record_tick(
+                [const { ObjectPacket::None }; 32],
+                std::array::from_fn(|_| None),
+            );
         }
 
         assert_eq!(history.add_replay_to_queue(0, 3, None), 2);

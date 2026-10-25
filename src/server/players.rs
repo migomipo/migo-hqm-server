@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use tracing::info;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlayerUpdateData {
     pub player_name: Rc<str>,
     pub object: Option<(ObjectSlot, Team)>,
@@ -77,7 +77,45 @@ const PING_HISTORY_LEN: usize = 100;
 
 struct PlayerSlot {
     generation: u32,
-    player: Option<ServerPlayer>,
+    state: SlotState,
+}
+
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the slots are a fixed array, so every slot has room for a player either way"
+)]
+enum SlotState {
+    Free,
+    /// Kept free for a replay placeholder, so it is not given to new players and bots.
+    Reserved,
+    Occupied(ServerPlayer),
+}
+
+impl SlotState {
+    fn player(&self) -> Option<&ServerPlayer> {
+        match self {
+            SlotState::Occupied(player) => Some(player),
+            SlotState::Free | SlotState::Reserved => None,
+        }
+    }
+
+    fn player_mut(&mut self) -> Option<&mut ServerPlayer> {
+        match self {
+            SlotState::Occupied(player) => Some(player),
+            SlotState::Free | SlotState::Reserved => None,
+        }
+    }
+
+    /// Takes the player out of an occupied slot, which leaves it free.
+    fn take_player(&mut self) -> Option<ServerPlayer> {
+        match std::mem::replace(self, SlotState::Free) {
+            SlotState::Occupied(player) => Some(player),
+            state => {
+                *self = state;
+                None
+            }
+        }
+    }
 }
 
 /// Fixed-size player storage with generation-checked player identifiers.
@@ -90,15 +128,39 @@ impl PlayerSlots {
         Self {
             slots: std::array::from_fn(|_| PlayerSlot {
                 generation: 0,
-                player: None,
+                state: SlotState::Free,
             }),
+        }
+    }
+
+    /// Whether a new player or bot can be given the index.
+    pub(crate) fn is_free(&self, index: PlayerIndex) -> bool {
+        self.slots
+            .get(index.0)
+            .is_some_and(|slot| matches!(slot.state, SlotState::Free))
+    }
+
+    /// Keeps a free index from being given to new players and bots, or gives it back. Occupied
+    /// slots are left as they are.
+    pub(crate) fn set_reserved(&mut self, index: PlayerIndex, reserved: bool) {
+        let state = &mut self.slots[index.0].state;
+        debug_assert!(
+            !matches!(state, SlotState::Occupied(_)),
+            "only free slots can be reserved"
+        );
+        if !matches!(state, SlotState::Occupied(_)) {
+            *state = if reserved {
+                SlotState::Reserved
+            } else {
+                SlotState::Free
+            };
         }
     }
 
     fn insert(&mut self, index: PlayerIndex, player: ServerPlayer) -> PlayerId {
         let slot = &mut self.slots[index.0];
-        debug_assert!(slot.player.is_none());
-        slot.player = Some(player);
+        debug_assert!(matches!(slot.state, SlotState::Free));
+        slot.state = SlotState::Occupied(player);
         PlayerId {
             index,
             counter: slot.generation,
@@ -111,7 +173,7 @@ impl PlayerSlots {
             return None;
         }
 
-        let player = slot.player.take()?;
+        let player = slot.state.take_player()?;
         slot.generation = slot.generation.wrapping_add(1);
         Some(player)
     }
@@ -120,7 +182,7 @@ impl PlayerSlots {
 impl PlayerListExt for PlayerSlots {
     fn get_player_by_index(&self, player_index: PlayerIndex) -> Option<(PlayerId, &ServerPlayer)> {
         self.slots.get(player_index.0).and_then(|slot| {
-            slot.player.as_ref().map(|player| {
+            slot.state.player().map(|player| {
                 (
                     PlayerId {
                         index: player_index,
@@ -135,7 +197,7 @@ impl PlayerListExt for PlayerSlots {
     fn get_player(&self, player_id: PlayerId) -> Option<&ServerPlayer> {
         self.slots
             .get(player_id.index.0)
-            .and_then(|slot| match &slot.player {
+            .and_then(|slot| match slot.state.player() {
                 Some(player) if slot.generation == player_id.counter => Some(player),
                 _ => None,
             })
@@ -146,7 +208,7 @@ impl PlayerListExt for PlayerSlots {
         player_index: PlayerIndex,
     ) -> Option<(PlayerId, &mut ServerPlayer)> {
         self.slots.get_mut(player_index.0).and_then(|slot| {
-            slot.player.as_mut().map(|player| {
+            slot.state.player_mut().map(|player| {
                 (
                     PlayerId {
                         index: player_index,
@@ -161,7 +223,7 @@ impl PlayerListExt for PlayerSlots {
     fn get_player_mut(&mut self, player_id: PlayerId) -> Option<&mut ServerPlayer> {
         self.slots
             .get_mut(player_id.index.0)
-            .and_then(|slot| match &mut slot.player {
+            .and_then(|slot| match slot.state.player_mut() {
                 Some(player) if slot.generation == player_id.counter => Some(player),
                 _ => None,
             })
@@ -172,7 +234,7 @@ impl PlayerListExt for PlayerSlots {
             .iter()
             .enumerate()
             .filter_map(|(player_index, slot)| {
-                slot.player.as_ref().map(|player| {
+                slot.state.player().map(|player| {
                     (
                         PlayerId {
                             index: PlayerIndex(player_index),
@@ -189,7 +251,7 @@ impl PlayerListExt for PlayerSlots {
             .iter_mut()
             .enumerate()
             .filter_map(|(player_index, slot)| {
-                slot.player.as_mut().map(|player| {
+                slot.state.player_mut().map(|player| {
                     (
                         PlayerId {
                             index: PlayerIndex(player_index),
@@ -202,10 +264,9 @@ impl PlayerListExt for PlayerSlots {
     }
 
     fn find_empty_slot(&self) -> Option<PlayerIndex> {
-        self.slots
-            .iter()
-            .position(|slot| slot.player.is_none())
+        (0..MAX_PLAYERS)
             .map(PlayerIndex)
+            .find(|&index| self.is_free(index))
     }
 }
 
@@ -242,6 +303,9 @@ pub(crate) struct ServerMessages {
     /// Messages sent after a new game was asked for, which are sent in the new game. `None` while
     /// no new game has been asked for.
     next_game: Option<Vec<NextGameMessage>>,
+    /// The player list as last sent to all players, by player index. During a replay, this is
+    /// the list the replay shows rather than the players on the server.
+    shown_players: [Option<PlayerUpdateData>; MAX_PLAYERS],
 }
 
 /// A message held back for the next game by [ServerMessages::defer_to_next_game].
@@ -257,6 +321,7 @@ impl ServerMessages {
             persistent_messages: vec![],
             recording_messages: vec![],
             next_game: None,
+            shown_players: std::array::from_fn(|_| None),
         }
     }
 
@@ -322,6 +387,9 @@ impl ServerMessages {
             next_game.push(NextGameMessage::Broadcast(message, retention, recording));
             return;
         }
+        if let HQMMessage::PlayerUpdate { player_index, data } = &message {
+            self.shown_players[player_index.0] = data.clone();
+        }
         let rc = Rc::new(message);
         if matches!(recording, MessageRecording::Include) {
             self.recording_messages.push(rc.clone());
@@ -330,6 +398,52 @@ impl ServerMessages {
             self.persistent_messages.push(rc.clone());
         }
         self.pending.push((MessageRecipients::All, rc));
+    }
+
+    /// Sends all players the entries of `shown` that differ from the player list they were last
+    /// sent.
+    ///
+    /// This is for showing the player list of a replay, so the updates are not held back for the
+    /// next game, kept for late joiners or recorded.
+    pub(crate) fn show_players(&mut self, shown: &[Option<PlayerUpdateData>; MAX_PLAYERS]) {
+        // Entries without a skater are sent first, so that a skater moving to another entry is
+        // let go of before it is claimed again.
+        for with_skater in [false, true] {
+            for (index, data) in shown.iter().enumerate() {
+                let has_skater = data.as_ref().is_some_and(|data| data.object.is_some());
+                if has_skater != with_skater || self.shown_players[index] == *data {
+                    continue;
+                }
+                self.shown_players[index] = data.clone();
+                let update = HQMMessage::PlayerUpdate {
+                    player_index: PlayerIndex(index),
+                    data: data.clone(),
+                };
+                self.pending.push((MessageRecipients::All, Rc::new(update)));
+            }
+        }
+    }
+
+    /// Sends a player who just joined the entries of the shown player list that the persistent
+    /// messages they got do not have, such as the players a replay shows.
+    fn send_shown_players(&mut self, receiver_id: PlayerId) {
+        let mut known: [Option<&PlayerUpdateData>; MAX_PLAYERS] = [None; MAX_PLAYERS];
+        for message in &self.persistent_messages {
+            if let HQMMessage::PlayerUpdate { player_index, data } = &**message {
+                known[player_index.0] = data.as_ref();
+            }
+        }
+        let missing: Vec<_> = (0..MAX_PLAYERS)
+            .filter(|&index| self.shown_players[index].as_ref() != known[index])
+            .map(|index| HQMMessage::PlayerUpdate {
+                player_index: PlayerIndex(index),
+                data: self.shown_players[index].clone(),
+            })
+            .collect();
+        for update in missing {
+            self.pending
+                .push((MessageRecipients::Player(receiver_id), Rc::new(update)));
+        }
     }
 
     /// Delivers all queued messages to the players' message queues.
@@ -373,15 +487,21 @@ impl ServerMessages {
             .collect();
         for player_id in game_bots {
             players.remove(player_id);
-            // Clients knew the bot in the previous game, so tell them it is gone.
-            self.broadcast_message(
-                HQMMessage::PlayerUpdate {
-                    player_index: player_id.index,
-                    data: None,
-                },
-                MessageRetention::Transient,
-                MessageRecording::Exclude,
-            );
+        }
+        // Clients still list the removed bots and any replay placeholders from the previous game,
+        // so tell them they are gone.
+        for index in (0..MAX_PLAYERS).map(PlayerIndex) {
+            if self.shown_players[index.0].is_some() && players.get_player_by_index(index).is_none()
+            {
+                self.broadcast_message(
+                    HQMMessage::PlayerUpdate {
+                        player_index: index,
+                        data: None,
+                    },
+                    MessageRetention::Transient,
+                    MessageRecording::Exclude,
+                );
+            }
         }
 
         for (player_id, player) in players.iter_players_mut() {
@@ -563,10 +683,12 @@ impl ServerMessages {
                     "{} ({}) to team {}: {}",
                     &player.player_name, sender_id, team, message
                 );
-                let object = player
-                    .object
-                    .as_ref()
-                    .map(|(object_index, team)| (*object_index, *team));
+                // The skater is the one players are shown, which differs from the player's own
+                // during a replay.
+                let object = match &self.shown_players[sender_id.index.0] {
+                    Some(shown) => shown.object,
+                    None => player.object,
+                };
 
                 let team_tag_name = match team {
                     Team::Red => player.player_name_red.clone(),
@@ -631,6 +753,7 @@ impl ServerPlayersAndMessages {
                 let update = new_player.get_update_message(player_index);
 
                 let player_id = self.players.insert(player_index, new_player);
+                self.messages.send_shown_players(player_id);
 
                 self.broadcast_message(
                     update,

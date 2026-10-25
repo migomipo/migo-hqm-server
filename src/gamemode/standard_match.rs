@@ -1511,10 +1511,10 @@ mod tests {
         let mut server = crate::server::test_server();
         server.state.replay.set_history_capacity(10);
         server.state.replay.advance_step();
-        server
-            .state
-            .replay
-            .record_tick(std::array::from_fn(|_| crate::protocol::ObjectPacket::None));
+        server.state.replay.record_tick(
+            std::array::from_fn(|_| crate::protocol::ObjectPacket::None),
+            std::array::from_fn(|_| None),
+        );
         let step = server.state.replay.game_step();
         let mut ctx = server.context();
         let config = MatchConfiguration::default();
@@ -1954,7 +1954,10 @@ mod tests {
         history.set_history_capacity(3);
         for _ in 0..5 {
             history.advance_step();
-            history.record_tick(std::array::from_fn(|_| crate::protocol::ObjectPacket::None));
+            history.record_tick(
+                std::array::from_fn(|_| crate::protocol::ObjectPacket::None),
+                std::array::from_fn(|_| None),
+            );
         }
         t.take_messages(player);
         let config = MatchConfiguration::default();

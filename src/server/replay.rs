@@ -1,17 +1,32 @@
 //! Replay tick retention and playback queue management.
 
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 use tracing::warn;
 
-use crate::game::PlayerId;
+use crate::game::{PlayerId, Team};
 use crate::history::History;
 use crate::protocol::ObjectPacket;
+
+/// The player a skater object belonged to when a tick was recorded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SkaterOwner {
+    pub(super) player_id: PlayerId,
+    pub(super) player_name: Rc<str>,
+    pub(super) team: Team,
+}
+
+/// The owners of the skater objects in a tick, by object slot.
+pub(crate) type SkaterOwners = [Option<SkaterOwner>; 32];
 
 #[derive(Clone, Debug)]
 pub(super) struct ReplayTick {
     pub(super) game_step: u32,
-    pub(super) packets: [ObjectPacket; 32],
+    /// Shared with the packet history, which the tick is sent from.
+    pub(super) packets: Rc<[ObjectPacket; 32]>,
+    /// Shared with the previous tick while the owners stay the same.
+    pub(super) owners: Rc<SkaterOwners>,
 }
 
 pub struct HQMTickHistory {
@@ -51,10 +66,19 @@ impl HQMTickHistory {
         self.current_step = self.current_step.wrapping_add(1);
     }
 
-    pub(crate) fn record_tick(&mut self, packets: [ObjectPacket; 32]) {
+    pub(crate) fn record_tick(
+        &mut self,
+        packets: impl Into<Rc<[ObjectPacket; 32]>>,
+        owners: SkaterOwners,
+    ) {
+        let owners = match self.retained_ticks.newest() {
+            Some(previous) if *previous.owners == owners => previous.owners.clone(),
+            _ => Rc::new(owners),
+        };
         self.retained_ticks.push(ReplayTick {
             game_step: self.current_step,
-            packets,
+            packets: packets.into(),
+            owners,
         });
     }
 

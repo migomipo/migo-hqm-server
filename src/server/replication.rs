@@ -1,5 +1,6 @@
 //! Packet sequencing and history used to replicate game state to clients.
 
+use std::rc::Rc;
 use std::time::Instant;
 
 use crate::game::ScoreboardValues;
@@ -41,7 +42,8 @@ impl PacketNumber {
 
 struct ReplicationFrame {
     sequence: PacketNumber,
-    objects: [ObjectPacket; 32],
+    /// Shared with the replay history, so replayed ticks are not copied.
+    objects: Rc<[ObjectPacket; 32]>,
     created_at: Instant,
 }
 
@@ -60,11 +62,11 @@ impl PacketHistory {
         self.frames.clear();
     }
 
-    pub(crate) fn push(&mut self, objects: [ObjectPacket; 32]) -> PacketNumber {
+    pub(crate) fn push(&mut self, objects: impl Into<Rc<[ObjectPacket; 32]>>) -> PacketNumber {
         let sequence = self.latest().map_or(PacketNumber(0), PacketNumber::next);
         self.frames.push(ReplicationFrame {
             sequence,
-            objects,
+            objects: objects.into(),
             created_at: Instant::now(),
         });
         sequence
@@ -95,7 +97,7 @@ impl PacketHistory {
     }
 
     pub(crate) fn objects_for(&self, sequence: PacketNumber) -> Option<&[ObjectPacket; 32]> {
-        self.frame(sequence).map(|frame| &frame.objects)
+        self.frame(sequence).map(|frame| &*frame.objects)
     }
 
     pub(crate) fn baseline_objects_for(
@@ -231,7 +233,7 @@ mod tests {
         let mut history = PacketHistory::new();
         history.frames.push(ReplicationFrame {
             sequence: PacketNumber(u32::MAX - 3),
-            objects: objects(99),
+            objects: Rc::new(objects(99)),
             created_at: Instant::now(),
         });
         let pushed: Vec<_> = (0..4)
