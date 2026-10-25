@@ -7,27 +7,27 @@ build = "build.rs"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-glam = "0.32"
-glamx = "0.2"
+glam = "0.33"
+glamx = "0.3"
 tokio = { version = "1", features = ["net", "time", "macros", "rt-multi-thread", "sync", "fs", "parking_lot"] }
 tokio-util = { version = "0.7", features = ["codec", "net"] }
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1"
 bytes = "1.6"
-reqwest = { version = "0.12", default-features=false, features = ["multipart", "rustls-tls"] }
+reqwest = { version = "0.13", default-features=false, features = ["multipart", "rustls"] }
 tracing = "0.1"
 tracing-subscriber = {version="0.3", features = ["parking_lot"]}
 tracing-appender = "0.2"
 jiff = "0.2"
 arrayvec = "0.7.4"
 smallvec = { version = "1.11", features = ["union", "const_generics"]}
-systemctl = "0.4"
+systemctl = "0.5"
 futures = "0.3"
-itertools = "0.14.0"
-parking_lot = "0.12.2"
-notify-debouncer-full = "0.5"
+itertools = "0.15.0"
+parking_lot = "0.13"
+notify-debouncer-full = "0.7"
 anyhow = "1"
-cached = "0.54"
+cached = "4"
 
 [build-dependencies]
 vergen-git2 = { version = "1.0.7", features = [] }

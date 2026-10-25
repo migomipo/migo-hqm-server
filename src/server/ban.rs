@@ -1,4 +1,4 @@
-use cached::{Cached, TimedCache};
+use cached::{Cached, TtlCache};
 use itertools::Itertools;
 use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{
@@ -204,14 +204,14 @@ pub trait ExternalBanCheckRequests {
     fn req_clear_all_bans(&mut self) -> impl Future<Output = ()> + Send + 'static;
 }
 pub struct ExternalBanCheck<E> {
-    cache: Arc<Mutex<TimedCache<IpAddr, BanCheckResponse>>>,
+    cache: Arc<Mutex<TtlCache<IpAddr, BanCheckResponse>>>,
     req: E,
 }
 
 impl<E: ExternalBanCheckRequests> ExternalBanCheck<E> {
     pub fn new(req: E) -> Self {
         Self {
-            cache: Arc::new(Mutex::new(TimedCache::with_lifespan(10))),
+            cache: Arc::new(Mutex::new(TtlCache::new(Duration::from_secs(10)))),
             req,
         }
     }
