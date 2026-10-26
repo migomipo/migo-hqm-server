@@ -181,10 +181,12 @@ async fn write_ban_file(path: &Path, s: &str) -> Result<(), tokio::io::Error> {
 }
 
 async fn read_ban_file(path: &Path) -> Result<HashSet<IpAddr>, tokio::io::Error> {
+    // Creating the file when it is missing needs write access, even though it is only read here.
     let mut f = tokio::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
+        .write(true)
         .open(path)
         .await?;
     let mut s = String::new();
