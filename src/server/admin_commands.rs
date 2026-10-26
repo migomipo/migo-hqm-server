@@ -4,8 +4,7 @@ use crate::game::{PlayerId, PlayerIndex};
 use crate::gamemode::{ExitReason, GameMode};
 use crate::players::{MuteStatus, PlayerListExt, ServerPlayerData};
 use crate::{ReplayRecording, RestartMethod};
-use std::process::{Command, Stdio};
-use tracing::{info, warn};
+use tracing::info;
 
 impl HQMServer {
     pub(crate) fn mute_player(
@@ -192,13 +191,13 @@ impl HQMServer {
         if self.exit_requested.is_some() {
             return;
         }
-        let msg = format!("{} started server restart", player.player_name);
-        let started = match &self.config.restart {
+        match self.config.restart {
             RestartMethod::Exit => {
+                let msg = format!("{} started server restart", player.player_name);
+                info!("{msg}");
+                self.state.player_message_state.add_server_chat_message(msg);
                 self.exit_requested = Some(ServerExit::Restart);
-                true
             }
-            RestartMethod::Systemctl(unit) => spawn_systemctl_restart(unit),
             RestartMethod::Unavailable => {
                 self.state
                     .player_message_state
@@ -206,16 +205,7 @@ impl HQMServer {
                         "Restart is not available on this server",
                         admin_player_id,
                     );
-                return;
             }
-        };
-        if started {
-            info!("{msg}");
-            self.state.player_message_state.add_server_chat_message(msg);
-        } else {
-            self.state
-                .player_message_state
-                .add_directed_server_chat_message("Restart failed", admin_player_id);
         }
     }
 
@@ -496,36 +486,6 @@ impl HQMServer {
             }
         }
     }
-}
-
-/// Asks systemd to restart `unit`, for the deprecated `service` setting. systemd then stops the
-/// server with SIGTERM, which shuts it down like any other stop. Returns whether `systemctl` could
-/// be started; whether the restart was allowed is only logged.
-fn spawn_systemctl_restart(unit: &str) -> bool {
-    let child = Command::new("systemctl")
-        .args(["restart", "--no-block", unit])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn();
-    let child = match child {
-        Ok(child) => child,
-        Err(e) => {
-            warn!("Could not run systemctl to restart {unit}: {e}");
-            return false;
-        }
-    };
-    let unit = unit.to_owned();
-    std::thread::spawn(move || match child.wait_with_output() {
-        Ok(output) if output.status.success() => {}
-        Ok(output) => warn!(
-            "systemctl could not restart {unit} ({}): {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ),
-        Err(e) => warn!("Could not wait for systemctl: {e}"),
-    });
-    true
 }
 
 #[cfg(test)]

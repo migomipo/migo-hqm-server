@@ -71,6 +71,7 @@ struct ServerSection {
     replay_endpoint: Option<String>,
     replay_directory: Option<PathBuf>,
     supervised: Option<bool>,
+    /// Removed, and only read to warn about it.
     service: Option<String>,
     ban_file: Option<PathBuf>,
 }
@@ -132,23 +133,18 @@ fn parse_spawn_point(game_section: &GameSection) -> SpawnPoint {
 
 /// Chooses how /serverrestart restarts the server.
 fn restart_method(supervised: Option<bool>, service: Option<String>) -> RestartMethod {
+    if service.is_some() {
+        warn!(
+            "The service setting has been removed; run the server from the hqm@.service unit that comes with it to use /serverrestart"
+        );
+    }
     // systemd only sets NOTIFY_SOCKET for units with Type=notify, like the hqm@.service unit that
     // comes with the server, which starts the server again after EXIT_CODE_RESTART. Older units
-    // made for the service setting have the default Type=simple, and would not.
-    let supervised = supervised.unwrap_or_else(|| env::var_os("NOTIFY_SOCKET").is_some());
-    match service {
-        Some(_) if supervised => {
-            warn!("The service setting is deprecated and ignored, since the server is supervised");
-            RestartMethod::Exit
-        }
-        Some(unit) => {
-            warn!(
-                "The service setting is deprecated; use the hqm@.service unit that comes with the server instead"
-            );
-            RestartMethod::Systemctl(unit)
-        }
-        None if supervised => RestartMethod::Exit,
-        None => RestartMethod::Unavailable,
+    // have the default Type=simple, and would not.
+    if supervised.unwrap_or_else(|| env::var_os("NOTIFY_SOCKET").is_some()) {
+        RestartMethod::Exit
+    } else {
+        RestartMethod::Unavailable
     }
 }
 

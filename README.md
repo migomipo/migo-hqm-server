@@ -23,7 +23,7 @@ Each server runs in `/var/lib/hqm/<name>`, where its replays and relative `ban_f
 
 The server tells systemd when it has started and pings systemd's watchdog from the game loop, so a server that stops responding is restarted. It is also restarted if it crashes or after /serverrestart, but not if its configuration has an error.
 
-Units written for the old `service` setting keep working, but `/serverrestart` needs the new unit to restart the server without extra permissions.
+The `service` setting of older versions has been removed: `/serverrestart` needs the `hqm@.service` unit, or another supervisor with `supervised = true`.
 
 ## How to configure
 
@@ -47,7 +47,6 @@ Units written for the old `service` setting keep working, but `/serverrestart` n
 | welcome          | Welcome message that is sent to all players when they're joining. \n will create a new line. The client can only show 7 chat lines at a time, and it is not recommended to have more than three lines. |
 | replays          | (optional) "off" (default), "on" or "standby". With "on", all matches that start will be saved as replays; games that ended before the warmup ended will not be saved. With "standby", games are recorded but only saved if replays are turned on with /replay on before the game ends. |
 | supervised       | (optional) If true, /serverrestart shuts the server down and exits with code 75, so that a supervisor such as systemd or Docker starts it again. Default is true when the server runs from the `hqm@.service` unit (see "Running on Linux with systemd"), and false otherwise. |
-| service          | Deprecated. Name of a systemd unit that /serverrestart restarts with `systemctl restart`, which only works if the server's user may restart it. Ignored when the server is supervised; use the `hqm@.service` unit instead. |
 | replay_endpoint  | If configured (and replays are enabled), the server will send the replay data as a HTTP POST request (multipart form) to the given URL when matches end.                                               |
 | replay_directory | If configured (and replays are enabled), the server will save replays in this directory. Ignored if replay_endpoint is set.                                                                            |
 | ban_file         | If configured, stores and loads banned IPs in a text file located in this path. The text file will automatically be reloaded from disk if modified.                                                    |

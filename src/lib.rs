@@ -33,9 +33,6 @@ pub enum RestartMethod {
     /// The server shuts down and exits with [EXIT_CODE_RESTART], and a supervisor such as systemd
     /// or Docker starts it again.
     Exit,
-    /// The server runs `systemctl restart` with this unit name. Deprecated, as the server's user
-    /// is usually not allowed to restart units.
-    Systemctl(String),
     /// /serverrestart is not available.
     Unavailable,
 }
