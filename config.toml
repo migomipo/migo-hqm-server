@@ -3,6 +3,12 @@ name = "HQM Server"
 port = 27585
 # log_name = "server.log"
 # Custom log name prefix.
+# log_output = "auto"
+# Where log messages go: "file" for daily log files in the "log" folder,
+# "stdout" for standard output, or "auto" (the default) for systemd's journal
+# when running as a systemd service and log files otherwise.
+# log_retention_days = 30
+# How many daily log files to keep. 0 keeps them all.
 public = true
 team_max = 5
 player_max = 15

@@ -19,7 +19,7 @@ The `hqm@.service` unit runs any number of servers, each with its own configurat
 3. Put each server's configuration in `/etc/hqm/<name>.toml`.
 4. Run `systemctl enable --now hqm@<name>` to start the server and start it at boot.
 
-Each server runs in `/var/lib/hqm/<name>`, where its log files, replays and relative `ban_file` paths end up. `systemctl status hqm@<name>` shows the players and score of the current game, and `systemctl restart hqm@<name>` restarts the server like /serverrestart does.
+Each server runs in `/var/lib/hqm/<name>`, where its replays and relative `ban_file` paths end up. Its log goes to systemd's journal: `journalctl -u hqm@<name> -f` follows it, and `journalctl -u hqm@<name> -p warning` shows only warnings and errors. `systemctl status hqm@<name>` shows the players and score of the current game, and `systemctl restart hqm@<name>` restarts the server like /serverrestart does.
 
 The server tells systemd when it has started and pings systemd's watchdog from the game loop, so a server that stops responding is restarted. It is also restarted if it crashes or after /serverrestart, but not if its configuration has an error.
 
@@ -38,7 +38,9 @@ Units written for the old `service` setting keep working, but `/serverrestart` n
 | mode             | Game mode. Currently supported values are "match" (play matches), "warmup" (warmup mode forever) and "shootout" (shootout mode).                                                                       |
 | public           | If true, the server will notify the master server so that clients can find this server easily in the server list.                                                                                      |
 | public_address   | (optional) Master server address.                                                                                                                                                                      |
-| log_name         | (optional) Log name prefix. Log files will end up in a "log" folder in the current working directory, and be named *log_name*-*date*. Default log name prefix is the server name + ".log".             |
+| log_name         | (optional) Log name prefix. Log files will end up in a "log" folder in the current working directory, and be named *log_name*-*date*. Default log name prefix is the server name + ".log". |
+| log_output       | (optional) "auto" (default), "file" or "stdout". With "file", messages go to the log files; with "stdout", to standard output, for example for Docker. With "auto", they go to systemd's journal when the server runs as a systemd service, and to the log files otherwise. The RUST_LOG environment variable can change the log level, for example RUST_LOG=debug. |
+| log_retention_days | (optional) How many daily log files to keep; older ones are deleted. Default is 30, and 0 keeps them all. |
 | team_max         | Number of players allowed in each team.                                                                                                                                                                |
 | player_max       | Number of players allowed in the server.                                                                                                                                                               |
 | password         | (optional) Administrator password. If not set, or empty, administrator login is disabled.                                                                                                             |

@@ -23,6 +23,10 @@ use serde::Deserialize;
 use tracing::{error, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 
+use crate::logging::{LogConfiguration, LogOutput};
+
+mod logging;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum HQMServerMode {
@@ -61,6 +65,8 @@ struct ServerSection {
     mode: Option<HQMServerMode>,
     replays: Option<ReplayConfiguration>,
     log_name: Option<String>,
+    log_output: Option<LogOutput>,
+    log_retention_days: Option<usize>,
     welcome: Option<String>,
     replay_endpoint: Option<String>,
     replay_directory: Option<PathBuf>,
@@ -222,15 +228,11 @@ async fn run(log_guard: &mut Option<WorkerGuard>) -> anyhow::Result<ServerExit> 
             .log_name
             .unwrap_or_else(|| format!("{server_name}.log"));
 
-        let file_appender = tracing_appender::rolling::daily("log", log_name);
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-        *log_guard = Some(guard);
-        tracing_subscriber::fmt()
-            .with_line_number(false)
-            .with_file(false)
-            .with_target(false)
-            .with_writer(non_blocking)
-            .init();
+        *log_guard = Some(logging::init(LogConfiguration {
+            output: server_section.log_output.unwrap_or_default(),
+            file_name: &log_name,
+            retention_days: server_section.log_retention_days.unwrap_or(30),
+        })?);
 
         let welcome = server_section.welcome.unwrap_or_default();
 
