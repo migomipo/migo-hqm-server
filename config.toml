@@ -1,6 +1,9 @@
 [server]
 name = "HQM Server"
 port = 27585
+# bind_address = "203.0.113.5"
+# The IPv4 address to listen on, if the machine has several. By default, the
+# server listens on all of them.
 # log_name = "server.log"
 # Custom log name prefix.
 # log_output = "auto"

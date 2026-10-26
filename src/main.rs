@@ -1,5 +1,6 @@
 use std::env;
 use std::fmt;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -57,6 +58,7 @@ struct TomlConfiguration {
 struct ServerSection {
     name: String,
     port: u16,
+    bind_address: Option<Ipv4Addr>,
     public: bool,
     public_address: Option<String>,
     player_max: usize,
@@ -198,7 +200,11 @@ async fn run(log_guard: &mut Option<WorkerGuard>) -> anyhow::Result<ServerExit> 
         // Server information
         let server_section = conf.server;
         let server_name = server_section.name;
-        let server_port = server_section.port;
+        // The client only connects over IPv4, so the server only listens on IPv4.
+        let server_address = SocketAddr::from((
+            server_section.bind_address.unwrap_or(Ipv4Addr::UNSPECIFIED),
+            server_section.port,
+        ));
         let server_public = server_section.public;
         let public_address =
             if server_public {
@@ -386,7 +392,7 @@ async fn run(log_guard: &mut Option<WorkerGuard>) -> anyhow::Result<ServerExit> 
                 };
 
                 migo_hqm_server::run_server(
-                    server_port,
+                    server_address,
                     public_address.as_deref(),
                     config,
                     physics_config,
@@ -402,7 +408,7 @@ async fn run(log_guard: &mut Option<WorkerGuard>) -> anyhow::Result<ServerExit> 
                 let spawn_point = parse_spawn_point(&game_section);
 
                 migo_hqm_server::run_server(
-                    server_port,
+                    server_address,
                     public_address.as_deref(),
                     config,
                     physics_config,
@@ -417,7 +423,7 @@ async fn run(log_guard: &mut Option<WorkerGuard>) -> anyhow::Result<ServerExit> 
                 let shootout_config = ShootoutGameConfiguration { attempts };
 
                 migo_hqm_server::run_server(
-                    server_port,
+                    server_address,
                     public_address.as_deref(),
                     config,
                     physics_config,

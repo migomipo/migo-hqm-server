@@ -1648,7 +1648,7 @@ impl ShutdownSignals {
 /// Starts an HQM server. This method will not return until the server has shut down, and then
 /// says why.
 pub async fn run_server<B: GameMode>(
-    port: u16,
+    address: SocketAddr,
     public: Option<&str>,
     config: ServerConfiguration,
     physics_config: PhysicsConfiguration,
@@ -1667,9 +1667,9 @@ pub async fn run_server<B: GameMode>(
 
     let mut ticks = spawn_tick_thread()?;
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-
-    let socket = Arc::new(tokio::net::UdpSocket::bind(&addr).await?);
+    let socket = Arc::new(tokio::net::UdpSocket::bind(address).await.map_err(|e| {
+        std::io::Error::new(e.kind(), format!("could not listen at {address}: {e}"))
+    })?);
     info!(
         "Server listening at address {:?}",
         socket.local_addr().unwrap()
