@@ -1,10 +1,11 @@
-use crate::server::HQMServer;
+use crate::server::{HQMServer, ServerExit};
 
-use crate::ReplayRecording;
 use crate::game::{PlayerId, PlayerIndex};
 use crate::gamemode::{ExitReason, GameMode};
 use crate::players::{MuteStatus, PlayerListExt, ServerPlayerData};
-use tracing::info;
+use crate::{ReplayRecording, RestartMethod};
+use std::process::{Command, Stdio};
+use tracing::{info, warn};
 
 impl HQMServer {
     pub(crate) fn mute_player(
@@ -181,20 +182,40 @@ impl HQMServer {
     }
 
     pub(crate) fn restart_server(&mut self, admin_player_id: PlayerId) {
-        if let Some(player) = self
+        let Some(player) = self
             .state
             .player_message_state
             .check_admin_or_deny(admin_player_id)
-            && let Some(server_service) = self.config.server_service.as_deref()
-        {
-            let msg = format!("{} started server restart", player.player_name);
-            self.state.player_message_state.add_server_chat_message(msg);
-            let ctl = systemctl::SystemCtl::default();
-            if ctl.restart(server_service).is_err() {
+        else {
+            return;
+        };
+        if self.exit_requested.is_some() {
+            return;
+        }
+        let msg = format!("{} started server restart", player.player_name);
+        let started = match &self.config.restart {
+            RestartMethod::Exit => {
+                self.exit_requested = Some(ServerExit::Restart);
+                true
+            }
+            RestartMethod::Systemctl(unit) => spawn_systemctl_restart(unit),
+            RestartMethod::Unavailable => {
                 self.state
                     .player_message_state
-                    .add_directed_server_chat_message("Restart failed", admin_player_id);
+                    .add_directed_server_chat_message(
+                        "Restart is not available on this server",
+                        admin_player_id,
+                    );
+                return;
             }
+        };
+        if started {
+            info!("{msg}");
+            self.state.player_message_state.add_server_chat_message(msg);
+        } else {
+            self.state
+                .player_message_state
+                .add_directed_server_chat_message("Restart failed", admin_player_id);
         }
     }
 
@@ -477,6 +498,36 @@ impl HQMServer {
     }
 }
 
+/// Asks systemd to restart `unit`, for the deprecated `service` setting. systemd then stops the
+/// server with SIGTERM, which shuts it down like any other stop. Returns whether `systemctl` could
+/// be started; whether the restart was allowed is only logged.
+fn spawn_systemctl_restart(unit: &str) -> bool {
+    let child = Command::new("systemctl")
+        .args(["restart", "--no-block", unit])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn();
+    let child = match child {
+        Ok(child) => child,
+        Err(e) => {
+            warn!("Could not run systemctl to restart {unit}: {e}");
+            return false;
+        }
+    };
+    let unit = unit.to_owned();
+    std::thread::spawn(move || match child.wait_with_output() {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => warn!(
+            "systemctl could not restart {unit} ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+        Err(e) => warn!("Could not wait for systemctl: {e}"),
+    });
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,6 +656,39 @@ mod tests {
         let puck = start(&mut t);
         assert_eq!((puck.x, puck.z), (puck_start.x, puck_start.z));
         assert_eq!(t.take_chats(admin), ["Game reset by admin"]);
+    }
+
+    #[test]
+    fn serverrestart_with_exit_asks_the_server_to_exit_for_a_restart() {
+        let mut t = match_server();
+        t.server.config.restart = RestartMethod::Exit;
+        let admin = t.join_admin("admin");
+        t.take_messages(admin);
+        t.chat(admin, "/serverrestart");
+        assert_eq!(t.server.exit_requested, Some(ServerExit::Restart));
+        assert_eq!(t.take_chats(admin), ["admin started server restart"]);
+    }
+
+    #[test]
+    fn serverrestart_says_when_restarts_are_unavailable() {
+        let mut t = match_server();
+        let admin = t.join_admin("admin");
+        t.take_messages(admin);
+        t.chat(admin, "/serverrestart");
+        assert_eq!(t.server.exit_requested, None);
+        assert_eq!(
+            t.take_chats(admin),
+            ["Restart is not available on this server"]
+        );
+    }
+
+    #[test]
+    fn serverrestart_needs_an_administrator() {
+        let mut t = match_server();
+        t.server.config.restart = RestartMethod::Exit;
+        let player = t.join("player");
+        t.chat(player, "/serverrestart");
+        assert_eq!(t.server.exit_requested, None);
     }
 
     #[test]

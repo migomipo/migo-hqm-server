@@ -8,6 +8,23 @@ You will need a TOML configuration file to start; a default `config.toml` is pro
 
 Run `migo-hqm-server` to start the server with `config.toml` in the current working directory, or `migo-hqm-server <path-to-config>` to run with any TOML configuration file in your system.
 
+The server shuts down cleanly on Ctrl+C, and on SIGTERM on Linux, macOS and other Unix systems: it tells the players, waits a few seconds, saves the replay of the current game and exits. It exits with code 0 after a shutdown, 75 after /serverrestart, 78 if the configuration file could not be loaded, and 1 after other errors.
+
+## Running on Linux with systemd
+
+The `hqm@.service` unit runs any number of servers, each with its own configuration file, as a sandboxed temporary user.
+
+1. Install the server binary as `/usr/local/bin/migo-hqm-server`.
+2. Copy `hqm@.service` to `/etc/systemd/system/` and run `systemctl daemon-reload`.
+3. Put each server's configuration in `/etc/hqm/<name>.toml`.
+4. Run `systemctl enable --now hqm@<name>` to start the server and start it at boot.
+
+Each server runs in `/var/lib/hqm/<name>`, where its log files, replays and relative `ban_file` paths end up. `systemctl status hqm@<name>` shows the players and score of the current game, and `systemctl restart hqm@<name>` restarts the server like /serverrestart does.
+
+The server tells systemd when it has started and pings systemd's watchdog from the game loop, so a server that stops responding is restarted. It is also restarted if it crashes or after /serverrestart, but not if its configuration has an error.
+
+Units written for the old `service` setting keep working, but `/serverrestart` needs the new unit to restart the server without extra permissions.
+
 ## How to configure
 
 `config.toml` is a good starting point, and contains the important available settings. It is divided into three tables: `[server]`, `[game]`, and `[physics]`. Strings, such as rule and mode names, must be quoted; booleans and numbers must not be quoted.
@@ -27,7 +44,8 @@ Run `migo-hqm-server` to start the server with `config.toml` in the current work
 | password         | (optional) Administrator password. If not set, or empty, administrator login is disabled.                                                                                                             |
 | welcome          | Welcome message that is sent to all players when they're joining. \n will create a new line. The client can only show 7 chat lines at a time, and it is not recommended to have more than three lines. |
 | replays          | (optional) "off" (default), "on" or "standby". With "on", all matches that start will be saved as replays; games that ended before the warmup ended will not be saved. With "standby", games are recorded but only saved if replays are turned on with /replay on before the game ends. |
-| service          | Service name for Linux based systems. Command /serverrestart for restarting the service.                                                                                                               |
+| supervised       | (optional) If true, /serverrestart shuts the server down and exits with code 75, so that a supervisor such as systemd or Docker starts it again. Default is true when the server runs from the `hqm@.service` unit (see "Running on Linux with systemd"), and false otherwise. |
+| service          | Deprecated. Name of a systemd unit that /serverrestart restarts with `systemctl restart`, which only works if the server's user may restart it. Ignored when the server is supervised; use the `hqm@.service` unit instead. |
 | replay_endpoint  | If configured (and replays are enabled), the server will send the replay data as a HTTP POST request (multipart form) to the given URL when matches end.                                               |
 | replay_directory | If configured (and replays are enabled), the server will save replays in this directory. Ignored if replay_endpoint is set.                                                                            |
 | ban_file         | If configured, stores and loads banned IPs in a text file located in this path. The text file will automatically be reloaded from disk if modified.                                                    |
@@ -127,6 +145,6 @@ Run `migo-hqm-server` to start the server with `config.toml` in the current work
 | /set spawnplayerkeepstick *on/off* | Sets whether players keep their stick position when they are moved to their faceoff spots.                                                                                                                                                                                                                                                |
 | /kickall *S*                 | Kicks all players with a player name equal to *S* (case-insensitive). % can be used as wildcards at the start and end of *S* to match players with similar names. For example, migo%, %mipo and %gomi% all match MigoMipo.                                                                                                                |
 | /banall *S*                  | Same as /kickall, but also IP-bans.                                                                                                                                                                                                                                                                                                       |
-| /serverrestart               | Restarting the server service in Linux based OS (see "service" at "Server" section)                                                                                                                                                                                                                                                       |
+| /serverrestart               | Restarts the server, if it is supervised (see "supervised" in the "Server" section). Players get a few seconds' notice, and the current replay is saved. |
 
 

@@ -15,6 +15,7 @@ use glamx::Rot3;
 use std::error::Error;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::error::TrySendError;
+use tokio_util::task::TaskTracker;
 use tokio_util::udp::UdpFramed;
 use tracing::{info, warn};
 
@@ -46,6 +47,7 @@ pub mod recording;
 mod replay;
 mod replay_players;
 mod replication;
+mod systemd;
 #[cfg(test)]
 pub(crate) mod test_server;
 
@@ -468,6 +470,20 @@ pub(crate) struct HQMServer {
 
     pub(crate) ban: Box<dyn BanCheck>,
     pub(crate) save_recording: Box<dyn RecordingSaveMethod>,
+    /// The replays being saved, which the server waits for before it shuts down.
+    recording_tasks: TaskTracker,
+
+    /// Set when the server should shut down, such as after /serverrestart.
+    pub(crate) exit_requested: Option<ServerExit>,
+}
+
+/// Why [run_server] returned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerExit {
+    /// The server was asked to shut down by a signal, such as Ctrl+C or `systemctl stop`.
+    Shutdown,
+    /// An administrator asked for a restart with /serverrestart and [RestartMethod::Exit].
+    Restart,
 }
 
 impl HQMServer {
@@ -488,6 +504,8 @@ impl HQMServer {
             new_game_requested: false,
             ban,
             save_recording,
+            recording_tasks: TaskTracker::new(),
+            exit_requested: None,
 
             start_time: Default::default(),
             rink: Rink::new(30.0, 61.0, 8.5),
@@ -532,6 +550,30 @@ impl HQMServer {
             server_name: self.config.server_name.as_ref(),
         };
         let _ = socket.send((message, addr)).await;
+    }
+
+    /// A one-line status for `systemctl status`.
+    fn status(&self) -> String {
+        let players = format!(
+            "{}/{} players",
+            self.real_player_count(),
+            self.config.player_max
+        );
+        match self.state.replication.last_scoreboard {
+            Some(scoreboard) if self.has_current_game_been_active => {
+                let seconds = scoreboard.time / 100;
+                format!(
+                    "{players}, game {}: period {}, {}:{:02}, red {} - blue {}",
+                    self.game_id,
+                    scoreboard.period,
+                    seconds / 60,
+                    seconds % 60,
+                    scoreboard.red_score,
+                    scoreboard.blue_score
+                )
+            }
+            _ => players,
+        }
     }
 
     fn real_player_count(&self) -> usize {
@@ -1273,8 +1315,12 @@ impl HQMServer {
             recording_data.put_u32_le(size as u32);
             recording_data.put_slice(&old_recording_data);
             let recording_data = recording_data.freeze();
-            self.save_recording
-                .save_recording_data(&self.config, recording_data, self.start_time);
+            let save = self.save_recording.save_recording_data(
+                &self.config,
+                recording_data,
+                self.start_time,
+            );
+            self.recording_tasks.spawn(save);
         }
 
         let state = &mut self.state;
@@ -1546,7 +1592,61 @@ async fn send_updates(
     }
 }
 
-/// Starts an HQM server. This method will not return until the server has terminated.
+/// How long the server keeps running after it was asked to shut down, so that players see the
+/// message about it.
+const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(3);
+
+/// How long the server waits for replays to be saved when it shuts down.
+const SHUTDOWN_SAVE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The signals that ask the server to shut down: Ctrl+C everywhere, and SIGTERM on Unix, which is
+/// what `systemctl stop` and `docker stop` send.
+struct ShutdownSignals {
+    #[cfg(unix)]
+    terminate: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    interrupt: tokio::signal::unix::Signal,
+    #[cfg(windows)]
+    ctrl_c: tokio::signal::windows::CtrlC,
+}
+
+impl ShutdownSignals {
+    fn new() -> std::io::Result<Self> {
+        #[cfg(unix)]
+        use tokio::signal::unix::{SignalKind, signal};
+        Ok(Self {
+            #[cfg(unix)]
+            terminate: signal(SignalKind::terminate())?,
+            #[cfg(unix)]
+            interrupt: signal(SignalKind::interrupt())?,
+            #[cfg(windows)]
+            ctrl_c: tokio::signal::windows::ctrl_c()?,
+        })
+    }
+
+    /// Waits for the next signal, and returns its name.
+    async fn recv(&mut self) -> &'static str {
+        #[cfg(unix)]
+        {
+            tokio::select! {
+                _ = self.terminate.recv() => "SIGTERM",
+                _ = self.interrupt.recv() => "SIGINT",
+            }
+        }
+        #[cfg(windows)]
+        {
+            self.ctrl_c.recv().await;
+            "Ctrl+C"
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            std::future::pending().await
+        }
+    }
+}
+
+/// Starts an HQM server. This method will not return until the server has shut down, and then
+/// says why.
 pub async fn run_server<B: GameMode>(
     port: u16,
     public: Option<&str>,
@@ -1555,7 +1655,8 @@ pub async fn run_server<B: GameMode>(
     ban: Box<dyn BanCheck>,
     recording: Box<dyn RecordingSaveMethod>,
     mut behaviour: B,
-) -> std::io::Result<()> {
+) -> std::io::Result<ServerExit> {
+    let mut signals = ShutdownSignals::new()?;
     let reqwest_client = reqwest::Client::new();
 
     let mut server = HQMServer::new(config, physics_config, ban, recording);
@@ -1614,25 +1715,67 @@ pub async fn run_server<B: GameMode>(
     }
     let mut socket = UdpFramed::new(socket, HQMMessageCodec);
     let mut tick_rate = TickRateMeter::new(Instant::now());
-    loop {
+    let mut notifier = systemd::Notifier::from_env();
+    notifier.ready();
+    // When the server stops, once it has been asked to shut down.
+    let mut stop_at = None;
+    let exit = loop {
         tokio::select! {
             tick = ticks.recv() => {
                 if tick.is_none() {
                     return Err(std::io::Error::other("the tick thread stopped"));
                 }
                 tick_rate.tick_and_report();
-                server.tick(&mut socket, &mut behaviour).await
+                server.tick(&mut socket, &mut behaviour).await;
+                notifier.tick(|| server.status());
             },
             message = socket.next() => {
-                let Some(Ok((data, addr))) = message else {
-                    continue;
-                };
+                if let Some(Ok((data, addr))) = message {
+                    server
+                        .handle_message(addr, &mut socket, data, &mut behaviour)
+                        .await;
+                }
+            }
+            signal = signals.recv() => {
+                if stop_at.is_some() {
+                    info!("Received {signal} again, stopping now");
+                    break server.exit_requested.unwrap_or(ServerExit::Shutdown);
+                }
+                info!("Received {signal}, shutting down");
                 server
-                    .handle_message(addr, &mut socket, data, &mut behaviour)
-                    .await;
+                    .state
+                    .player_message_state
+                    .add_server_chat_message("Server is shutting down");
+                server.exit_requested.get_or_insert(ServerExit::Shutdown);
             }
         }
+        if let Some(exit) = server.exit_requested {
+            let stop_at = *stop_at.get_or_insert_with(|| {
+                notifier.stopping();
+                // Without players, there is no one to wait for.
+                if server.real_player_count() > 0 {
+                    Instant::now() + SHUTDOWN_GRACE_PERIOD
+                } else {
+                    Instant::now()
+                }
+            });
+            if Instant::now() >= stop_at {
+                break exit;
+            }
+        }
+    };
+
+    // Ends the current game, which saves its replay.
+    server.new_game();
+    server.recording_tasks.close();
+    if tokio::time::timeout(SHUTDOWN_SAVE_TIMEOUT, server.recording_tasks.wait())
+        .await
+        .is_err()
+    {
+        warn!("Gave up waiting for replays to be saved");
     }
+    info!("Server stopped");
+    Ok(exit)
 }
 
 /// A server with default settings and recording turned off, for tests.
@@ -1645,7 +1788,7 @@ pub(crate) fn test_server() -> HQMServer {
             player_max: 16,
             recording_enabled: ReplayRecording::Off,
             server_name: "test".to_owned(),
-            server_service: None,
+            restart: crate::RestartMethod::Unavailable,
         },
         PhysicsConfiguration::default(),
         Box::new(ban::InMemoryBanCheck::new()),

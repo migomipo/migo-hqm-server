@@ -1,5 +1,7 @@
 use std::env;
+use std::fmt;
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
 use migo_hqm_server::ban::{BanCheck, FileBanCheck, InMemoryBanCheck};
 use migo_hqm_server::game::PhysicsConfiguration;
@@ -13,9 +15,13 @@ use migo_hqm_server::gamemode::warmup::PermanentWarmup;
 use migo_hqm_server::record::{
     RecordingSaveMethod, RecordingSaveToFile, RecordingSendToHttpEndpoint,
 };
-use migo_hqm_server::{ReplayRecording, ServerConfiguration};
+use migo_hqm_server::{
+    EXIT_CODE_CONFIG, EXIT_CODE_RESTART, ReplayRecording, RestartMethod, ServerConfiguration,
+    ServerExit,
+};
 use serde::Deserialize;
-use tracing::warn;
+use tracing::{error, warn};
+use tracing_appender::non_blocking::WorkerGuard;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -58,6 +64,7 @@ struct ServerSection {
     welcome: Option<String>,
     replay_endpoint: Option<String>,
     replay_directory: Option<PathBuf>,
+    supervised: Option<bool>,
     service: Option<String>,
     ban_file: Option<PathBuf>,
 }
@@ -117,8 +124,60 @@ fn parse_spawn_point(game_section: &GameSection) -> SpawnPoint {
     }
 }
 
+/// Chooses how /serverrestart restarts the server.
+fn restart_method(supervised: Option<bool>, service: Option<String>) -> RestartMethod {
+    // systemd only sets NOTIFY_SOCKET for units with Type=notify, like the hqm@.service unit that
+    // comes with the server, which starts the server again after EXIT_CODE_RESTART. Older units
+    // made for the service setting have the default Type=simple, and would not.
+    let supervised = supervised.unwrap_or_else(|| env::var_os("NOTIFY_SOCKET").is_some());
+    match service {
+        Some(_) if supervised => {
+            warn!("The service setting is deprecated and ignored, since the server is supervised");
+            RestartMethod::Exit
+        }
+        Some(unit) => {
+            warn!(
+                "The service setting is deprecated; use the hqm@.service unit that comes with the server instead"
+            );
+            RestartMethod::Systemctl(unit)
+        }
+        None if supervised => RestartMethod::Exit,
+        None => RestartMethod::Unavailable,
+    }
+}
+
+/// An error in the configuration file, after which a supervisor should not restart the server.
+#[derive(Debug)]
+struct ConfigError(String);
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> ExitCode {
+    // Kept until the end, so that errors from run are written to the log file as well.
+    let mut log_guard = None;
+    match run(&mut log_guard).await {
+        Ok(ServerExit::Shutdown) => ExitCode::SUCCESS,
+        Ok(ServerExit::Restart) => ExitCode::from(EXIT_CODE_RESTART),
+        Err(e) => {
+            error!("{e:#}");
+            eprintln!("Error: {e:#}");
+            if e.is::<ConfigError>() {
+                ExitCode::from(EXIT_CODE_CONFIG)
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+    }
+}
+
+async fn run(log_guard: &mut Option<WorkerGuard>) -> anyhow::Result<ServerExit> {
     let args: Vec<String> = env::args().collect();
 
     let config_path = if args.len() > 1 {
@@ -129,8 +188,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration (if exists)
     if Path::new(config_path).exists() {
-        let config_text = std::fs::read_to_string(config_path)?;
-        let conf: TomlConfiguration = toml::from_str(&config_text)?;
+        let config_text = std::fs::read_to_string(config_path)
+            .map_err(|e| ConfigError(format!("Could not read {config_path}: {e}")))?;
+        let conf: TomlConfiguration = toml::from_str(&config_text)
+            .map_err(|e| ConfigError(format!("Invalid configuration in {config_path}: {e}")))?;
 
         // Server information
         let server_section = conf.server;
@@ -161,6 +222,16 @@ async fn main() -> anyhow::Result<()> {
             .log_name
             .unwrap_or_else(|| format!("{server_name}.log"));
 
+        let file_appender = tracing_appender::rolling::daily("log", log_name);
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        *log_guard = Some(guard);
+        tracing_subscriber::fmt()
+            .with_line_number(false)
+            .with_file(false)
+            .with_target(false)
+            .with_writer(non_blocking)
+            .init();
+
         let welcome = server_section.welcome.unwrap_or_default();
 
         let welcome_str = welcome
@@ -179,8 +250,6 @@ async fn main() -> anyhow::Result<()> {
                 Box::new(RecordingSaveToFile::new(dir))
             };
 
-        let server_service = server_section.service;
-
         let ban_file = server_section.ban_file;
 
         // Game
@@ -192,7 +261,7 @@ async fn main() -> anyhow::Result<()> {
             player_max: server_player_max,
             recording_enabled: replays_enabled,
             server_name,
-            server_service,
+            restart: restart_method(server_section.supervised, server_section.service),
         };
 
         // Physics
@@ -224,22 +293,13 @@ async fn main() -> anyhow::Result<()> {
             player_shift_turning,
         };
 
-        let file_appender = tracing_appender::rolling::daily("log", log_name);
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-        tracing_subscriber::fmt()
-            .with_line_number(false)
-            .with_file(false)
-            .with_target(false)
-            .with_writer(non_blocking)
-            .init();
-
         let ban: Box<dyn BanCheck> = if let Some(ban_file) = ban_file.as_deref() {
             Box::new(FileBanCheck::new(ban_file.to_owned()).await?)
         } else {
             Box::new(InMemoryBanCheck::new())
         };
 
-        match mode {
+        let exit = match mode {
             HQMServerMode::Match => {
                 let periods = game_section.periods.unwrap_or(3);
 
@@ -367,11 +427,11 @@ async fn main() -> anyhow::Result<()> {
                     replay_saving,
                     ShootoutGameMode::new(shootout_config),
                 )
-                .await?;
+                .await?
             }
         };
+        Ok(exit)
     } else {
-        println!("Could not open configuration file {config_path}!");
-    };
-    Ok(())
+        Err(ConfigError(format!("Could not open configuration file {config_path}!")).into())
+    }
 }

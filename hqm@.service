@@ -1,10 +1,58 @@
+# systemd unit for running one or more Migo HQM servers.
+#
+# Install the server binary as /usr/local/bin/migo-hqm-server, copy this file to
+# /etc/systemd/system/hqm@.service, and put each server's configuration in
+# /etc/hqm/<name>.toml. Then start a server and enable it at boot with
+#
+#     systemctl enable --now hqm@<name>
+#
+# Each server runs in its own directory, /var/lib/hqm/<name>, where relative paths in its
+# configuration (log files, replays, ban_file) end up.
+
 [Unit]
-Description=HQM Server
+Description=Migo HQM Server (%i)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-WorkingDirectory=/srv/hqm
-User=hqm
-ExecStart=/srv/hqm/migo-hqm-server /srv/hqm/%i.toml
+# The server tells systemd when it is ready, sends a status line for systemctl status and
+# keeps the watchdog happy as long as the game loop is running.
+Type=notify
+WatchdogSec=10
+ExecStart=/usr/local/bin/migo-hqm-server /etc/hqm/%i.toml
+WorkingDirectory=/var/lib/hqm/%i
+ConfigurationDirectory=hqm
+StateDirectory=hqm/%i
+
+# /serverrestart exits with code 75, which is a clean exit that is restarted. Crashes are
+# restarted too, but configuration errors (exit code 78) are not.
+Restart=on-failure
+RestartSec=2
+SuccessExitStatus=75
+RestartForceExitStatus=75
+RestartPreventExitStatus=78
+# The server gives players a few seconds' notice and saves the current replay when stopped.
+TimeoutStopSec=15
+
+# Sandboxing: the server runs as a temporary user that can only write to its own directory.
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target

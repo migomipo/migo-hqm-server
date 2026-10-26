@@ -13,10 +13,11 @@ welcome = """
 Welcome message 1
 Welcome message 2
 """
-# service = "hqm@config"
-# If you use a Linux- and systemd-based system, you can restart the service with
-# the in-game command /serverrestart. This requires setting service to the name
-# of the systemd unit the service will run as.
+# supervised = true
+# Lets administrators restart the server with /serverrestart, which makes the
+# server shut down and exit with code 75 so that a supervisor such as systemd or
+# Docker starts it again. This is on by default when the server runs from the
+# hqm@.service unit that comes with it, and off otherwise.
 # ban_file = "ban.txt"
 mode = "match"
 
