@@ -1965,10 +1965,10 @@ mod tests {
 
     #[test]
     fn tick_thread_keeps_a_limited_number_of_ticks_waiting() {
-        let mut ticks = spawn_tick_thread().unwrap();
+        let ticks = spawn_tick_thread().unwrap();
         std::thread::sleep(Duration::from_millis(200));
-        let waiting = std::iter::from_fn(|| ticks.try_recv().ok()).count();
-        assert_eq!(waiting, MAX_CATCH_UP_TICKS as usize);
+        // Counting by receiving would free a slot that the next tick can fill while counting.
+        assert_eq!(ticks.len(), MAX_CATCH_UP_TICKS as usize);
     }
 
     #[test]
