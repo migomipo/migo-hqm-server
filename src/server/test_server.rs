@@ -11,9 +11,11 @@ use crate::players::{HQMMessage, PlayerListExt, PlayerSlots, ServerPlayerData};
 
 /// The only client version the server accepts.
 const CLIENT_VERSION: u32 = 55;
-/// Key bits checked by [PlayerInput::join_red] and [PlayerInput::join_blue].
+/// Key bits checked by [PlayerInput::join_red], [PlayerInput::join_blue] and
+/// [PlayerInput::spectate].
 const JOIN_RED_KEY: u32 = 0x4;
 const JOIN_BLUE_KEY: u32 = 0x8;
+const SPECTATE_KEY: u32 = 0x20;
 
 /// Runs a game mode on a server without a network, for tests.
 ///
@@ -214,6 +216,12 @@ impl<M: GameMode> TestServer<M> {
             Team::Red => JOIN_RED_KEY,
             Team::Blue => JOIN_BLUE_KEY,
         };
+    }
+
+    /// Holds down the key for spectating, and lets go of the keys for joining a team.
+    pub(crate) fn press_spectate(&mut self, player_id: PlayerId) {
+        let keys = &mut self.input(player_id).keys;
+        *keys = (*keys & !(JOIN_RED_KEY | JOIN_BLUE_KEY)) | SPECTATE_KEY;
     }
 
     /// Sends a chat message or command from a player, as if it was typed in the client.

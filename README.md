@@ -100,7 +100,7 @@ The `service` setting of older versions has been removed: `/serverrestart` needs
 | /list                  | Lists up to 5 player IDs. These IDs are used for a few other commands to uniquely determine a player.                                                             |
 | /list *ID*             | Lists up to 5 player IDs, starting from *ID*, which must be a number.                                                                                             |
 | /search *S*            | Lists up to 5 player IDs of players who have the substring S in their player name.                                                                                |
-| /view *ID*             | Enters first person view of player with ID *ID*. If you're on the ice, your player will be removed and you will become a spectator.                               |
+| /view *ID*             | Enters first person view of player with ID *ID*. Only spectators can view other players, so leave the ice first.                                                  |
 | /views *S*             | Searches for player with name *S* and enters first person view of that player if a unique match is found. If multiple matches are found, they are listed instead. |
 | /restoreview           | Restores first person view.                                                                                                                                       |
 | /ping *ID*             | Get server-side ping of player with ID *ID*                                                                                                                       |

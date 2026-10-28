@@ -39,14 +39,15 @@ impl TeamSelection {
         self
     }
 
-    /// Moves players to and from teams based on their input, and returns the number of red and blue players.
+    /// Moves players to and from teams based on their input, and returns the number of players on
+    /// each team and who left the ice.
     ///
     /// `coords` gives the spawn position and rotation for the n-th player joining a team this tick.
     pub fn update(
         &mut self,
         ctx: &mut GameContext,
         coords: impl Fn(&Rink, Team, usize) -> (Vec3, Rot3),
-    ) -> (usize, usize) {
+    ) -> TeamUpdate {
         let mut red_player_count = 0;
         let mut blue_player_count = 0;
         let mut spectating_players = SmallVec::<[_; 32]>::new();
@@ -75,9 +76,12 @@ impl TeamSelection {
                 }
             }
         }
+        let mut spectated = Vec::new();
         for (player_id, player_name) in spectating_players {
             info!("{} ({}) is spectating", player_name, player_id);
-            self.force_spectate(ctx, player_id);
+            if self.force_spectate(ctx, player_id) {
+                spectated.push(player_id);
+            }
         }
 
         let mut add_players =
@@ -100,7 +104,11 @@ impl TeamSelection {
         add_players(joining_red, Team::Red, &mut red_player_count);
         add_players(joining_blue, Team::Blue, &mut blue_player_count);
 
-        (red_player_count, blue_player_count)
+        TeamUpdate {
+            red_players: red_player_count,
+            blue_players: blue_player_count,
+            spectated,
+        }
     }
 
     /// Moves a player to the spectators and starts their team switch cooldown.
@@ -119,15 +127,15 @@ impl TeamSelection {
 
     /// Handles the admin command `/fs <player index>`, which moves a player to the spectators,
     /// starts their team switch cooldown and announces it.
+    ///
+    /// Returns the player who was moved to the spectators, if any.
     pub fn handle_force_spectate_command(
         &mut self,
         ctx: &mut GameContext,
         admin_id: PlayerId,
         arg: &str,
-    ) {
-        let Some(admin_name) = ctx.require_admin(admin_id) else {
-            return;
-        };
+    ) -> Option<PlayerId> {
+        let admin_name = ctx.require_admin(admin_id)?;
         let Some(target) = arg
             .parse::<PlayerIndex>()
             .ok()
@@ -135,7 +143,7 @@ impl TeamSelection {
         else {
             ctx.messages
                 .add_directed_server_chat_message("No player with this ID exists", admin_id);
-            return;
+            return None;
         };
         let (target_id, target_name) = (target.id, target.name());
         if self.force_spectate(ctx, target_id) {
@@ -145,11 +153,13 @@ impl TeamSelection {
             );
             ctx.messages
                 .add_server_chat_message(format!("{target_name} forced off ice by {admin_name}"));
+            Some(target_id)
         } else {
             ctx.messages.add_directed_server_chat_message(
                 format!("{target_name} is not on the ice"),
                 admin_id,
             );
+            None
         }
     }
 
@@ -160,6 +170,17 @@ impl TeamSelection {
     pub fn remove_player(&mut self, player_id: PlayerId) {
         self.team_switch_timer.remove(&player_id);
     }
+}
+
+/// What [TeamSelection::update] did in a tick.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TeamUpdate {
+    /// Players on the red team after the update.
+    pub red_players: usize,
+    /// Players on the blue team after the update.
+    pub blue_players: usize,
+    /// Players who left the ice to spectate.
+    pub spectated: Vec<PlayerId>,
 }
 
 /// Whether a game goes on after a tick, or has finished and should be replaced by a new one.

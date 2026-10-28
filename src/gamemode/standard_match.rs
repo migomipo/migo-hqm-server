@@ -1,6 +1,6 @@
 use crate::game::{PhysicsEvent, PlayerId, RulesState, ScoreboardValues};
 use crate::gamemode::util::{
-    GameProgress, SpawnPoint, TeamSelection, get_spawnpoint, spawn_warmup_pucks,
+    GameProgress, SpawnPoint, TeamSelection, TeamUpdate, get_spawnpoint, spawn_warmup_pucks,
 };
 use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
 
@@ -77,10 +77,16 @@ impl StandardMatchGameMode {
             teams: TeamSelection::new(team_max),
         }
     }
-    fn update_players(&mut self, ctx: &mut GameContext) -> (usize, usize) {
+    fn update_players(&mut self, ctx: &mut GameContext) -> TeamUpdate {
         let point = self.spawn_point;
         self.teams
             .update(ctx, |rink, team, _| get_spawnpoint(rink, team, point))
+    }
+    /// Tells the match about a player who has left the ice.
+    fn player_left_ice(&mut self, player: PlayerId) {
+        if let StandardMatchState::Game(game) = &mut self.state {
+            game.player_left_ice(player);
+        }
     }
     /// Whether a game is on and play has not been stopped.
     pub(crate) fn is_playing(&self) -> bool {
@@ -97,10 +103,13 @@ impl GameMode for StandardMatchGameMode {
             .set_history_length(REPLAY_HISTORY_LENGTH as usize);
     }
     fn before_tick(&mut self, ctx: &mut GameContext) {
-        let (red, blue) = self.update_players(ctx);
+        let update = self.update_players(ctx);
+        for &player in &update.spectated {
+            self.player_left_ice(player);
+        }
         match &mut self.state {
             StandardMatchState::WaitingForGame(warmup) => {
-                if let Some(score) = warmup.before_tick(red, blue) {
+                if let Some(score) = warmup.before_tick(update.red_players, update.blue_players) {
                     self.start_game(score);
                 }
             }
@@ -151,7 +160,12 @@ impl GameMode for StandardMatchGameMode {
                         .add_directed_server_chat_message("Invalid faceoff position", player);
                 }
             }
-            "fs" => self.teams.handle_force_spectate_command(ctx, player, arg),
+            "fs" => {
+                if let Some(spectator) = self.teams.handle_force_spectate_command(ctx, player, arg)
+                {
+                    self.player_left_ice(spectator);
+                }
+            }
             _ => return CommandResult::Unknown,
         }
         CommandResult::Handled

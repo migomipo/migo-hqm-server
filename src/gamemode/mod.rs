@@ -1,4 +1,3 @@
-use crate::ServerConfiguration;
 use crate::game::{
     PhysicsConfiguration, PhysicsEvent, PlayerId, PlayerIndex, PlayerInput, Puck, PuckId, Rink,
     ScoreboardValues, SkaterObject, Team,
@@ -8,6 +7,7 @@ use crate::players::{
     ServerPlayerData,
 };
 use crate::server::{GameObject, HQMTickHistory, ObjectExt, ServerSplit, SkaterLinks};
+use crate::{ServerConfiguration, ServerExit};
 use glam::Vec3;
 use glamx::Rot3;
 use std::borrow::Cow;
@@ -67,21 +67,27 @@ pub trait GameMode {
     /// Called when a new game begins, before the first [GameMode::before_tick] of that game.
     ///
     /// A new game begins on the first tick with a player on the server after the server has
-    /// started or after the previous game was abandoned, and once the server is done with the
-    /// event in which [GameContext::new_game] was called. The server state, such as pucks and
+    /// started or after the previous game ended without players, and once the server is done with
+    /// the event in which [GameContext::new_game] was called. The server state, such as pucks and
     /// skaters, has been cleared at this point, so this is the one place to reset game mode state
     /// and set up the new game.
     fn game_started(&mut self, _ctx: &mut GameContext) {}
 
-    /// Called when the last player has left the server during a game, right before the game is
-    /// reset.
+    /// Called when the current game ends, right before the server state is reset. `reason` tells
+    /// why the game ended.
     ///
-    /// Bots do not count as players here. Bots added with [BotLifetime::Game] are removed when
-    /// the game is reset, right after this. The server state of the abandoned game can still be
-    /// read here. Game mode state does not need to be reset here, as [GameMode::game_started] is
-    /// called once a player joins again. Games that end through [GameContext::new_game] do not
-    /// call this, as the game mode already knows about them.
-    fn game_abandoned(&mut self, _ctx: &mut GameContext) {}
+    /// The server state of the game that ended can still be read here, so this is the place to
+    /// save results. Bots added with [BotLifetime::Game] are removed when the game is reset, right
+    /// after this. Game mode state does not need to be reset here, as [GameMode::game_started] is
+    /// called for the next game.
+    fn game_ended(&mut self, _ctx: &mut GameContext, _reason: GameEndReason) {}
+
+    /// Called when the server stops, after [GameMode::game_ended] for the game that was going
+    /// on, if any.
+    ///
+    /// Nothing more is sent to players after this, so this is the place to save state that lasts
+    /// across games, not to send messages. `exit` tells why the server stops.
+    fn before_shutdown(&mut self, _ctx: &mut GameContext, _exit: ServerExit) {}
 
     /// Called right before a player is removed from the server.
     ///
@@ -136,7 +142,7 @@ pub struct GameContext<'a> {
     pub config: &'a mut ServerConfiguration,
     /// Physics configuration. Changes take effect from the next physics simulation step.
     pub physics_config: &'a mut PhysicsConfiguration,
-    new_game_requested: &'a mut bool,
+    new_game_requested: &'a mut Option<GameEndReason>,
 }
 
 impl<'a> From<ServerSplit<'a>> for GameContext<'a> {
@@ -186,7 +192,8 @@ impl GameContext<'_> {
     ///
     /// Messages sent after this call are delivered in the new game, apart from team chat.
     pub fn new_game(&mut self) {
-        *self.new_game_requested = true;
+        self.new_game_requested
+            .get_or_insert(GameEndReason::NewGameRequested);
         self.messages.messages.defer_to_next_game();
     }
 
@@ -598,13 +605,26 @@ impl<'a> ServerPlayer<'a> {
 /// How long a bot added with [GameContext::add_bot] stays on the server.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BotLifetime {
-    /// The bot leaves when the current game ends, whether the game mode starts a new game with
-    /// [GameContext::new_game] or the game is abandoned. [GameMode::before_player_exit] is not
-    /// called for it.
+    /// The bot leaves when the current game ends, for any [GameEndReason], right after
+    /// [GameMode::game_ended]. [GameMode::before_player_exit] is not called for it.
     Game,
     /// The bot stays on the server across games until it is removed with
     /// [GameContext::remove_player].
     Server,
+}
+
+/// Why a game ended, given to [GameMode::game_ended].
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GameEndReason {
+    /// The game mode asked for a new game with [GameContext::new_game].
+    NewGameRequested,
+    /// An admin reset the game with /reset.
+    AdminReset,
+    /// The last player left the server. Bots do not count as players here.
+    Abandoned,
+    /// The server is shutting down.
+    ServerShutdown,
 }
 
 /// Whether a game mode knows a chat command, returned from [GameMode::handle_command].

@@ -451,9 +451,10 @@ impl ShootoutGameMode {
     }
 
     fn update_players(&mut self, ctx: &mut GameContext) -> (usize, usize) {
-        self.teams.update(ctx, |rink, team, _| {
+        let update = self.teams.update(ctx, |rink, team, _| {
             get_spawnpoint(rink, team, SpawnPoint::Bench)
-        })
+        });
+        (update.red_players, update.blue_players)
     }
 }
 
@@ -511,9 +512,10 @@ impl GameMode for ShootoutGameMode {
         player_id: PlayerId,
     ) -> CommandResult {
         match cmd {
-            "fs" => self
-                .teams
-                .handle_force_spectate_command(ctx, player_id, arg),
+            "fs" => {
+                self.teams
+                    .handle_force_spectate_command(ctx, player_id, arg);
+            }
             _ => return CommandResult::Unknown,
         }
         CommandResult::Handled

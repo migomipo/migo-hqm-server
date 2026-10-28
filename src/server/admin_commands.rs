@@ -1,7 +1,7 @@
 use crate::server::{HQMServer, ServerExit};
 
 use crate::game::{PlayerId, PlayerIndex};
-use crate::gamemode::{ExitReason, GameMode};
+use crate::gamemode::{ExitReason, GameEndReason, GameMode};
 use crate::players::{MuteStatus, PlayerListExt, ServerPlayerData};
 use crate::{ReplayRecording, RestartMethod};
 use tracing::info;
@@ -437,6 +437,7 @@ impl HQMServer {
             let name = player.player_name.clone();
             info!("{} ({}) reset game", name, admin_player_id);
             self.context().new_game();
+            self.new_game_requested = Some(GameEndReason::AdminReset);
             let msg = format!("Game reset by {name}");
             self.state.player_message_state.add_server_chat_message(msg);
         }

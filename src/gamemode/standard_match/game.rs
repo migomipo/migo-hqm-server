@@ -9,9 +9,9 @@ use glamx::Rot3;
 use crate::game::RinkSideOfLine::{BlueSide, RedSide};
 use crate::game::{PhysicsEvent, PlayerId, Puck, PuckId, RulesState, ScoreboardValues, Team};
 use crate::gamemode::GameContext;
-#[cfg(doc)]
-use crate::gamemode::GameMode;
 use crate::gamemode::util::GameProgress;
+#[cfg(doc)]
+use crate::gamemode::{GameMode, util::TeamSelection};
 use crate::history::History;
 
 mod faceoff;
@@ -417,6 +417,10 @@ pub enum MatchEvent {
 ///   returns [GameProgress::Finished], the game mode decides what comes next, such as calling
 ///   [GameContext::new_game].
 /// - [Match::after_tick] and [Match::scoreboard] in [GameMode::after_tick].
+/// - [Match::player_left_ice] whenever the game mode takes a player off the ice, such as the
+///   players that [TeamSelection::update] and [TeamSelection::handle_force_spectate_command]
+///   report. Players who leave the server do not need to be reported, as a player who comes back
+///   gets a new [PlayerId].
 ///
 /// For goal replays, the game mode also sets the replay history to [REPLAY_HISTORY_LENGTH] ticks
 /// in [GameMode::init]. The match does not touch players who are not on a team, or pucks outside
@@ -1116,21 +1120,19 @@ impl PlayingState {
 }
 
 impl Match {
+    /// Tells the match that a player's skater has left the ice. A goalie who leaves the ice is
+    /// treated as a skater from then on, until the next faceoff, even if they are already back on
+    /// the ice.
+    pub fn player_left_ice(&mut self, player: PlayerId) {
+        if let MatchState::Playing(playing) = &mut self.state {
+            playing.started_goalies.remove(&player);
+        }
+    }
     /// Runs the period clock and the break timers, and sets up faceoffs when breaks end.
-    ///
-    /// A goalie who is no longer on the ice is treated as a skater from then on, until the next
-    /// faceoff. A goalie who leaves the ice and comes back between two calls is still the goalie,
-    /// so a game mode that lets players back on right away, such as without a team switch
-    /// cooldown after removing them, can be fooled.
     ///
     /// Returns [GameProgress::Finished] once the game-over break has run out. Events from this
     /// call, such as [MatchEvent::PeriodEnded], are returned from the next [Match::after_tick].
     pub fn before_tick(&mut self, ctx: &mut GameContext, settings: &MatchSettings) -> GameProgress {
-        if let MatchState::Playing(playing) = &mut self.state {
-            playing
-                .started_goalies
-                .retain(|&player| ctx.objects.skater(player).is_some());
-        }
         // Both the period clock and the stoppage timer stand still while a replay is shown, so
         // a goal replay neither uses up game time nor the pause before the next faceoff.
         if ctx.replay.is_in_replay() {
@@ -1830,44 +1832,53 @@ mod tests {
         assert!(matches!(playing.offside, Offside::InZone(Team::Red)));
     }
 
-    #[test]
-    fn goalie_who_leaves_the_ice_is_not_the_goalie_on_return() {
-        let mut server = crate::server::test_server();
-        let goalie = add_player(&mut server, "goalie", 1);
-        let center = add_player(&mut server, "center", 2);
-        let mut ctx = server.context();
-        for player in [goalie, center] {
-            assert!(ctx.spawn_skater(player, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false));
-        }
-        let config = MatchConfiguration::default();
-        let mut mode = StandardMatchGameMode::new(config, 5, SpawnPoint::Center);
-        mode.settings.preferred_positions.insert(goalie, "G");
-        let mut game = Match::start(&config, (0, 0));
-        game.apply(
-            &mut ctx,
-            &mode.settings,
-            MatchTransition::StartPlaying {
-                faceoff: Faceoff::Center,
-                reset_clock: true,
-            },
-        );
-        mode.state = StandardMatchState::Game(game);
-        let is_goalie = |mode: &StandardMatchGameMode| match &mode.state {
+    /// A match with a red goalie, `red[1]`, with play on after the opening faceoff.
+    fn match_with_goalie() -> MatchGame {
+        let mut game = MatchGame::join(MatchGame::quick_config(), 2, 1);
+        game.chat(game.red[1], "/sp g");
+        game.play_until_faceoff();
+        assert!(is_goalie(&game, game.red[1]));
+        game
+    }
+
+    fn is_goalie(game: &MatchGame, player: PlayerId) -> bool {
+        match &game.t.mode.mode.state {
             StandardMatchState::Game(Match {
                 state: MatchState::Playing(playing),
                 ..
-            }) => playing.started_goalies.contains(&goalie),
+            }) => playing.started_goalies.contains(&player),
             _ => panic!("expected play to be on"),
-        };
+        }
+    }
 
-        mode.before_tick(&mut ctx);
-        assert!(is_goalie(&mode));
+    #[test]
+    fn goalie_who_leaves_the_ice_is_not_the_goalie_on_return() {
+        let mut game = match_with_goalie();
+        let goalie = game.red[1];
 
-        assert!(ctx.move_to_spectator(goalie));
-        mode.before_tick(&mut ctx);
-        assert!(ctx.spawn_skater(goalie, Team::Red, Vec3::ZERO, Rot3::IDENTITY, false));
-        mode.before_tick(&mut ctx);
-        assert!(!is_goalie(&mode));
+        // Without a team switch cooldown, the goalie is back on the next tick.
+        game.t.mode.mode.teams.team_switch_cooldown = 0;
+        game.chat(game.admin(), &format!("/fs {}", goalie.index.0));
+        game.t.press_join(goalie, Team::Red);
+        game.tick();
+        assert!(game.t.ctx().objects.skater(goalie).is_some());
+        assert!(!is_goalie(&game, goalie));
+    }
+
+    #[test]
+    fn goalie_who_spectates_is_not_the_goalie_on_return() {
+        let mut game = match_with_goalie();
+        let goalie = game.red[1];
+        game.t.mode.mode.teams.team_switch_cooldown = 0;
+
+        game.t.press_spectate(goalie);
+        game.tick();
+        assert!(game.t.ctx().objects.skater(goalie).is_none());
+        game.t.input(goalie).keys = 0;
+        game.t.press_join(goalie, Team::Red);
+        game.tick();
+        assert!(game.t.ctx().objects.skater(goalie).is_some());
+        assert!(!is_goalie(&game, goalie));
     }
 
     #[test]

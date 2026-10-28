@@ -41,9 +41,10 @@ impl GameMode for PermanentWarmup {
         player_id: PlayerId,
     ) -> CommandResult {
         match cmd {
-            "fs" => self
-                .teams
-                .handle_force_spectate_command(ctx, player_id, arg),
+            "fs" => {
+                self.teams
+                    .handle_force_spectate_command(ctx, player_id, arg);
+            }
             _ => return CommandResult::Unknown,
         }
         CommandResult::Handled

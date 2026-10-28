@@ -19,7 +19,7 @@ use tokio_util::task::TaskTracker;
 use tokio_util::udp::UdpFramed;
 use tracing::{info, warn};
 
-use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
+use crate::gamemode::{CommandResult, ExitReason, GameContext, GameEndReason, GameMode};
 
 use self::ban::{BanCheck, BanCheckResponse};
 use self::recording::RecordingSaveMethod;
@@ -448,7 +448,7 @@ pub(crate) struct ServerSplit<'a> {
     pub(crate) rink: &'a mut Rink,
     pub(crate) config: &'a mut ServerConfiguration,
     pub(crate) physics_config: &'a mut PhysicsConfiguration,
-    pub(crate) new_game_requested: &'a mut bool,
+    pub(crate) new_game_requested: &'a mut Option<GameEndReason>,
 }
 
 pub(crate) struct HQMServer {
@@ -464,9 +464,10 @@ pub(crate) struct HQMServer {
     pub start_time: Timestamp,
 
     has_current_game_been_active: bool,
-    /// Whether a game mode asked for a new game with [GameContext::new_game], which
-    /// [HQMServer::start_requested_game] carries out.
-    new_game_requested: bool,
+    /// Why the current game should end, if a game mode asked for a new game with
+    /// [GameContext::new_game] or an admin reset the game. [HQMServer::start_requested_game]
+    /// carries it out.
+    new_game_requested: Option<GameEndReason>,
 
     pub(crate) ban: Box<dyn BanCheck>,
     pub(crate) save_recording: Box<dyn RecordingSaveMethod>,
@@ -501,7 +502,7 @@ impl HQMServer {
             game_id: 1,
 
             has_current_game_been_active: false,
-            new_game_requested: false,
+            new_game_requested: None,
             ban,
             save_recording,
             recording_tasks: TaskTracker::new(),
@@ -872,9 +873,23 @@ impl HQMServer {
         {
             let view_player_name = view_player.player_name.clone();
 
-            // A player on the ice becomes a spectator to view someone else.
-            if player_id != view_player_id {
-                self.state.skater_links().move_to_spectator(player_id);
+            // Only spectators can view other players. Taking players off the ice is up to the
+            // game mode.
+            if player_id != view_player_id
+                && self
+                    .state
+                    .player_message_state
+                    .players
+                    .get_player(player_id)
+                    .is_some_and(|player| player.has_skater())
+            {
+                self.state
+                    .player_message_state
+                    .add_directed_server_chat_message(
+                        "Only spectators can view other players",
+                        player_id,
+                    );
+                return;
             }
 
             if let Some(player) = self
@@ -1185,9 +1200,7 @@ impl HQMServer {
 
         if self.real_player_count() == 0 {
             if self.has_current_game_been_active {
-                info!("Game {} abandoned", self.game_id);
-                behaviour.game_abandoned(&mut self.context());
-                self.new_game();
+                self.end_game(behaviour, GameEndReason::Abandoned);
             }
             return None;
         }
@@ -1285,27 +1298,45 @@ impl HQMServer {
         info!("New game {} started", self.game_id);
     }
 
-    /// Carries out a new game that a game mode asked for with [GameContext::new_game].
+    /// Carries out a new game that a game mode asked for with [GameContext::new_game], or that
+    /// an admin asked for with /reset.
     ///
     /// This is called once the server is done with the event in which the game mode asked for it,
     /// such as a tick's [GameMode::before_tick], a chat command or a player leaving. The new game
     /// starts right away if there are players, and otherwise on the first tick with a player.
     pub(crate) fn start_requested_game<B: GameMode>(&mut self, behaviour: &mut B) {
-        if !self.new_game_requested {
+        let Some(reason) = self.new_game_requested else {
             return;
-        }
-        info!("Game {} ended", self.game_id);
-        self.new_game();
+        };
+        self.end_game(behaviour, reason);
         if self.real_player_count() > 0 {
             self.start_game(behaviour);
         }
     }
 
-    /// Ends the current game and resets the server state.
+    /// Ends the current game, calling [GameMode::game_ended] if it has begun, and resets the
+    /// server state.
+    fn end_game<B: GameMode>(&mut self, behaviour: &mut B, reason: GameEndReason) {
+        if self.has_current_game_been_active {
+            info!("Game {} ended: {:?}", self.game_id, reason);
+            behaviour.game_ended(&mut self.context(), reason);
+        }
+        self.new_game();
+    }
+
+    /// Ends the current game and calls [GameMode::before_shutdown], once the server is done
+    /// running.
+    fn shut_down<B: GameMode>(&mut self, behaviour: &mut B, exit: ServerExit) {
+        // Ending the game saves its replay.
+        self.end_game(behaviour, GameEndReason::ServerShutdown);
+        behaviour.before_shutdown(&mut self.context(), exit);
+    }
+
+    /// Resets the server state for a new game, without telling the game mode.
     pub fn new_game(&mut self) {
         self.game_id += 1;
         self.has_current_game_been_active = false;
-        self.new_game_requested = false;
+        self.new_game_requested = None;
 
         let old_recording_data = self.state.recording.take_data();
         if self.config.recording_enabled == ReplayRecording::On && !old_recording_data.is_empty() {
@@ -1765,8 +1796,7 @@ pub async fn run_server<B: GameMode>(
         }
     };
 
-    // Ends the current game, which saves its replay.
-    server.new_game();
+    server.shut_down(&mut behaviour, exit);
     server.recording_tasks.close();
     if tokio::time::timeout(SHUTDOWN_SAVE_TIMEOUT, server.recording_tasks.wait())
         .await
@@ -2204,11 +2234,12 @@ mod tests {
     }
 
     #[test]
-    fn game_abandoned_is_called_before_the_game_is_reset() {
+    fn game_ended_is_called_before_the_game_is_reset() {
         #[derive(Default)]
         struct TracksLifecycle {
             started: u32,
-            abandoned_with_pucks: Vec<usize>,
+            ended_with_pucks: Vec<(GameEndReason, usize)>,
+            shut_down: Vec<(ServerExit, usize)>,
         }
 
         impl GameMode for TracksLifecycle {
@@ -2228,8 +2259,13 @@ mod tests {
                     .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
             }
 
-            fn game_abandoned(&mut self, ctx: &mut GameContext) {
-                self.abandoned_with_pucks.push(ctx.objects.pucks().count());
+            fn game_ended(&mut self, ctx: &mut GameContext, reason: GameEndReason) {
+                self.ended_with_pucks
+                    .push((reason, ctx.objects.pucks().count()));
+            }
+
+            fn before_shutdown(&mut self, ctx: &mut GameContext, exit: ServerExit) {
+                self.shut_down.push((exit, ctx.objects.pucks().count()));
             }
         }
 
@@ -2248,16 +2284,76 @@ mod tests {
         server.state.remove_player(player_id, true);
         server.advance_tick(&mut behaviour);
         server.advance_tick(&mut behaviour);
-        assert_eq!(behaviour.abandoned_with_pucks, [1]);
+        assert_eq!(
+            std::mem::take(&mut behaviour.ended_with_pucks),
+            [(GameEndReason::Abandoned, 1)]
+        );
         assert!(server.state.objects.iter().all(Option::is_none));
 
-        server
+        let admin = server
             .state
             .player_message_state
             .add_player("test", address)
             .unwrap();
         server.advance_tick(&mut behaviour);
         assert_eq!(behaviour.started, 2);
+
+        server
+            .state
+            .player_message_state
+            .players
+            .get_player_mut(admin)
+            .unwrap()
+            .is_admin = true;
+        server.process_message("/reset".to_owned(), admin, &mut behaviour);
+        assert_eq!(
+            std::mem::take(&mut behaviour.ended_with_pucks),
+            [(GameEndReason::AdminReset, 1)]
+        );
+        assert_eq!(behaviour.started, 3);
+
+        // The game ends before the shutdown, so the game mode sees the cleared server.
+        server.shut_down(&mut behaviour, ServerExit::Restart);
+        assert_eq!(
+            behaviour.ended_with_pucks,
+            [(GameEndReason::ServerShutdown, 1)]
+        );
+        assert_eq!(behaviour.shut_down, [(ServerExit::Restart, 0)]);
+    }
+
+    #[test]
+    fn shutdown_without_a_game_only_calls_before_shutdown() {
+        #[derive(Default)]
+        struct CountsEnds {
+            ended: u32,
+            shut_down: u32,
+        }
+
+        impl GameMode for CountsEnds {
+            fn before_tick(&mut self, _ctx: &mut GameContext) {}
+
+            fn after_tick(
+                &mut self,
+                _ctx: &mut GameContext,
+                _events: &[PhysicsEvent],
+            ) -> ScoreboardValues {
+                ScoreboardValues::default()
+            }
+
+            fn game_ended(&mut self, _ctx: &mut GameContext, _reason: GameEndReason) {
+                self.ended += 1;
+            }
+
+            fn before_shutdown(&mut self, _ctx: &mut GameContext, _exit: ServerExit) {
+                self.shut_down += 1;
+            }
+        }
+
+        let mut server = test_server();
+        let mut behaviour = CountsEnds::default();
+        server.shut_down(&mut behaviour, ServerExit::Shutdown);
+        assert_eq!(behaviour.ended, 0);
+        assert_eq!(behaviour.shut_down, 1);
     }
 
     #[test]
@@ -2305,7 +2401,8 @@ mod tests {
                 self.standing = Some(standing);
             }
 
-            fn game_abandoned(&mut self, ctx: &mut GameContext) {
+            fn game_ended(&mut self, ctx: &mut GameContext, reason: GameEndReason) {
+                assert_eq!(reason, GameEndReason::Abandoned);
                 self.abandoned += 1;
                 // The bots are still here, and leave when the game is reset.
                 assert!(ctx.players.get(self.skating.take().unwrap()).is_some());
@@ -2432,8 +2529,8 @@ mod tests {
                     .spawn_puck(Puck::new(Vec3::ZERO, Rot3::IDENTITY));
             }
 
-            fn game_abandoned(&mut self, _ctx: &mut GameContext) {
-                self.events.push("abandoned".to_owned());
+            fn game_ended(&mut self, _ctx: &mut GameContext, reason: GameEndReason) {
+                self.events.push(format!("ended {reason:?}"));
             }
 
             fn before_player_exit(
@@ -2453,7 +2550,15 @@ mod tests {
         t.take_messages(player);
 
         t.chat(player, "/restart");
-        assert_eq!(t.mode.events, ["started", "restart with 1 puck", "started"]);
+        assert_eq!(
+            t.mode.events,
+            [
+                "started",
+                "restart with 1 puck",
+                "ended NewGameRequested",
+                "started"
+            ]
+        );
         assert_eq!(t.ctx().objects.pucks().count(), 1);
         assert_eq!(t.take_chats(player), ["Restarting"]);
 
@@ -2462,11 +2567,12 @@ mod tests {
         t.leave(player);
         t.tick();
         assert_eq!(t.ctx().objects.pucks().count(), 0);
-        assert_eq!(t.mode.events.len(), 3);
+        assert_eq!(t.mode.events.len(), 5);
+        assert_eq!(t.mode.events[4], "ended NewGameRequested");
         t.join("next");
         t.tick();
         assert_eq!(t.mode.events.last().unwrap(), "started");
-        assert!(!t.mode.events.contains(&"abandoned".to_owned()));
+        assert!(!t.mode.events.contains(&"ended Abandoned".to_owned()));
     }
 
     #[test]
@@ -2639,12 +2745,22 @@ mod tests {
     }
 
     #[test]
-    fn view_from_the_ice_makes_the_player_a_spectator() {
+    fn only_spectators_can_view_other_players() {
         let mut game = MatchGame::start(MatchGame::quick_config(), 1, 1);
         let viewer = game.red[0];
         game.chat(viewer, "/view 1");
+        assert!(
+            game.heard("Only spectators can view other players"),
+            "{:?}",
+            game.heard
+        );
+        assert!(game.t.ctx().objects.skater(viewer).is_some());
+
+        game.chat(viewer, &format!("/view {}", viewer.index.0));
+        assert!(!game.heard("View has been restored"));
+        assert!(game.t.ctx().move_to_spectator(viewer));
+        game.chat(viewer, "/view 1");
         assert!(game.heard("You are now viewing blue0"), "{:?}", game.heard);
-        assert!(game.t.ctx().objects.skater(viewer).is_none());
     }
 
     #[test]
@@ -2750,8 +2866,7 @@ mod tests {
         };
         let mut game = MatchGame::start(config, 1, 1);
         let player = game.red[0];
-        game.chat(player, "/view 1");
-        assert!(game.t.ctx().objects.skater(player).is_none());
+        assert!(game.t.ctx().move_to_spectator(player));
         game.heard.clear();
         game.chat(player, "/lefty");
         assert!(

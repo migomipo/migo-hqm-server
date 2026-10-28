@@ -4,9 +4,10 @@
 use glam::Vec3;
 use glamx::Rot3;
 
+use crate::ServerExit;
 use crate::game::{HALF_TURN_Y, PhysicsEvent, PlayerId, ScoreboardValues, Team};
 use crate::gamemode::util::SpawnPoint;
-use crate::gamemode::{CommandResult, ExitReason, GameContext, GameMode};
+use crate::gamemode::{CommandResult, ExitReason, GameContext, GameEndReason, GameMode};
 use crate::players::PlayerListExt;
 use crate::server::test_server::TestServer;
 
@@ -41,8 +42,11 @@ impl<M: GameMode> GameMode for Recorder<M> {
     fn game_started(&mut self, ctx: &mut GameContext) {
         self.mode.game_started(ctx)
     }
-    fn game_abandoned(&mut self, ctx: &mut GameContext) {
-        self.mode.game_abandoned(ctx)
+    fn game_ended(&mut self, ctx: &mut GameContext, reason: GameEndReason) {
+        self.mode.game_ended(ctx, reason)
+    }
+    fn before_shutdown(&mut self, ctx: &mut GameContext, exit: ServerExit) {
+        self.mode.before_shutdown(ctx, exit)
     }
     fn before_player_exit(
         &mut self,
