@@ -10,6 +10,12 @@ Run `migo-hqm-server` to start the server with `config.toml` in the current work
 
 The server shuts down cleanly on Ctrl+C, and on SIGTERM on Linux, macOS and other Unix systems: it tells the players, waits a few seconds, saves the replay of the current game and exits. It exits with code 0 after a shutdown, 75 after /serverrestart, 78 if the configuration file could not be loaded, and 1 after other errors.
 
+## Linux requirements
+
+The Linux downloads ending in `-linux-gnu` (or `-linux-gnueabihf`) need glibc 2.28 or newer, which covers Debian 10, Ubuntu 20.04, RHEL/Rocky/AlmaLinux 8 and newer releases. The exception is LoongArch, which needs glibc 2.36, the first release that supports it. You can check your version with `ldd --version`.
+
+If your glibc is older, or you see an error like ``version `GLIBC_2.xx' not found``, use the download ending in `-linux-musl` (or `-linux-musleabihf`) instead. It does not depend on the system glibc and runs on any Linux distribution.
+
 ## Running on Linux with systemd
 
 The `hqm@.service` unit runs any number of servers, each with its own configuration file, as a sandboxed temporary user.

@@ -62,7 +62,7 @@ jobs:
             {"target": "x86_64-unknown-freebsd", "os": "ubuntu-latest"},
             {"target": "riscv64gc-unknown-linux-gnu", "os": "ubuntu-latest"},
             {"target": "riscv64gc-unknown-linux-musl", "os": "ubuntu-latest", "cross-main": true},
-            {"target": "loongarch64-unknown-linux-gnu", "os": "ubuntu-latest", "cross-main": true},
+            {"target": "loongarch64-unknown-linux-gnu", "os": "ubuntu-latest", "cross-main": true, "max-glibc": "2.36"},
             {"target": "loongarch64-unknown-linux-musl", "os": "ubuntu-latest", "cross-main": true}
           ]'
           if [ "$ALL_TARGETS" != "true" ]; then
@@ -105,16 +105,17 @@ jobs:
           # Tag builds can only read caches from their own tag or the default branch, so only master saves them
           rust-cache-parameters: >-
             {"save-if": "${{ github.ref == 'refs/heads/master' }}"}
-      # Guards against release binaries that need a newer glibc than common distros ship
+      # glibc policy (see "Linux requirements" in README.md): linux-gnu binaries must run on glibc 2.28,
+      # or on the first glibc that supports the architecture if that is newer (set with "max-glibc")
       - name: Check required glibc version
         if: contains(matrix.platform.target, '-linux-gnu')
         env:
-          MAX_GLIBC: GLIBC_2.31 # Debian 11, Ubuntu 20.04
+          MAX_GLIBC: ${{ matrix.platform.max-glibc || '2.28' }}
         run: |
-          required=$(readelf --dyn-syms --wide target/${{ matrix.platform.target }}/release/migo-hqm-server | grep -o 'GLIBC_2\.[0-9]*' | sort -uV | tail -n 1)
-          echo "Binary requires $required"
+          required=$(readelf --dyn-syms --wide target/${{ matrix.platform.target }}/release/migo-hqm-server | grep -o 'GLIBC_2\.[0-9]*' | sed 's/^GLIBC_//' | sort -uV | tail -n 1)
+          echo "Binary requires glibc $required, the limit is $MAX_GLIBC"
           if [ "$(printf '%s\n' "$required" "$MAX_GLIBC" | sort -V | tail -n 1)" != "$MAX_GLIBC" ]; then
-            echo "::error::Binary requires $required, newer than the allowed $MAX_GLIBC"
+            echo "::error::Binary requires glibc $required, newer than the allowed $MAX_GLIBC"
             exit 1
           fi
         shell: bash
