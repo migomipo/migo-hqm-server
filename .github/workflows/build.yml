@@ -99,9 +99,25 @@ jobs:
           args: "--locked --release"
           strip: true
           cross-version: ${{ matrix.platform.cross-main && env.CROSS_MAIN || '' }}
+          # Without this, x86_64 Linux targets build natively against the runner's glibc, and the binary
+          # will not start on any distro with an older glibc. Cross images link against an old glibc.
+          force-use-cross: ${{ matrix.platform.os == 'ubuntu-latest' }}
           # Tag builds can only read caches from their own tag or the default branch, so only master saves them
           rust-cache-parameters: >-
             {"save-if": "${{ github.ref == 'refs/heads/master' }}"}
+      # Guards against release binaries that need a newer glibc than common distros ship
+      - name: Check required glibc version
+        if: contains(matrix.platform.target, '-linux-gnu')
+        env:
+          MAX_GLIBC: GLIBC_2.31 # Debian 11, Ubuntu 20.04
+        run: |
+          required=$(readelf --dyn-syms --wide target/${{ matrix.platform.target }}/release/migo-hqm-server | grep -o 'GLIBC_2\.[0-9]*' | sort -uV | tail -n 1)
+          echo "Binary requires $required"
+          if [ "$(printf '%s\n' "$required" "$MAX_GLIBC" | sort -V | tail -n 1)" != "$MAX_GLIBC" ]; then
+            echo "::error::Binary requires $required, newer than the allowed $MAX_GLIBC"
+            exit 1
+          fi
+        shell: bash
       - run: |
           7z a migo-hqm-server-${{ matrix.platform.target }}.zip config.toml README.md example_replay_integration.py ".\target\${{ matrix.platform.target }}\release\migo-hqm-server.exe"
         shell: bash
