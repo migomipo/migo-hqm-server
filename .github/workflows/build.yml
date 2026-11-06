@@ -16,8 +16,9 @@ on:
 
 env:
   BIN: migo-hqm-server
-  # cross 0.2.5 (the latest release) has no LoongArch or RISC-V musl images, so those targets build cross from this main commit
-  CROSS_MAIN: 526d03ddcd2f70e683074b3ea6f75ed300f33132
+  # Linux and FreeBSD targets are cross-compiled with cargo-zigbuild, using zig as the C compiler and linker
+  ZIG_VERSION: 0.17.0
+  CARGO_ZIGBUILD_VERSION: 0.24.1
 
 permissions:
   contents: read
@@ -61,9 +62,9 @@ jobs:
             {"target": "x86_64-unknown-linux-musl", "os": "ubuntu-latest"},
             {"target": "x86_64-unknown-freebsd", "os": "ubuntu-latest"},
             {"target": "riscv64gc-unknown-linux-gnu", "os": "ubuntu-latest"},
-            {"target": "riscv64gc-unknown-linux-musl", "os": "ubuntu-latest", "cross-main": true},
-            {"target": "loongarch64-unknown-linux-gnu", "os": "ubuntu-latest", "cross-main": true, "max-glibc": "2.36"},
-            {"target": "loongarch64-unknown-linux-musl", "os": "ubuntu-latest", "cross-main": true}
+            {"target": "riscv64gc-unknown-linux-musl", "os": "ubuntu-latest"},
+            {"target": "loongarch64-unknown-linux-gnu", "os": "ubuntu-latest", "max-glibc": "2.36"},
+            {"target": "loongarch64-unknown-linux-musl", "os": "ubuntu-latest"}
           ]'
           if [ "$ALL_TARGETS" != "true" ]; then
             platforms=$(jq 'map(select(.common))' <<< "$platforms")
@@ -90,23 +91,42 @@ jobs:
         platform: ${{ fromJSON(needs.setup.outputs.platforms) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build binary
-        uses: houseabsolute/actions-rust-cross@21b0f18dc621b25bfae556ff2791fca4173121e8 # v1.0.8
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.platform.target }}
+          rustup default stable
+        shell: bash
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          command: "build"
-          target: ${{ matrix.platform.target }}
-          toolchain: "stable"
-          args: "--locked --release"
-          strip: true
-          cross-version: ${{ matrix.platform.cross-main && env.CROSS_MAIN || '' }}
-          # Without this, x86_64 Linux targets build natively against the runner's glibc, and the binary
-          # will not start on any distro with an older glibc. Cross images link against an old glibc.
-          force-use-cross: ${{ matrix.platform.os == 'ubuntu-latest' }}
+          key: ${{ matrix.platform.target }}
           # Tag builds can only read caches from their own tag or the default branch, so only master saves them
-          rust-cache-parameters: >-
-            {"save-if": "${{ github.ref == 'refs/heads/master' }}"}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Install zig and cargo-zigbuild
+        if: matrix.platform.os == 'ubuntu-latest'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zigbuild"
+          "$RUNNER_TEMP/zigbuild/bin/pip" install "ziglang==$ZIG_VERSION" "cargo-zigbuild==$CARGO_ZIGBUILD_VERSION"
+          # cargo-zigbuild finds zig through "python3 -m ziglang", so the venv's python3 must come first on PATH
+          echo "$RUNNER_TEMP/zigbuild/bin" >> "$GITHUB_PATH"
+      - name: Build binary
+        if: matrix.platform.os != 'ubuntu-latest'
+        run: cargo build --locked --release --target ${{ matrix.platform.target }}
+        shell: bash
       # glibc policy (see "Linux requirements" in README.md): linux-gnu binaries must run on glibc 2.28,
-      # or on the first glibc that supports the architecture if that is newer (set with "max-glibc")
+      # or on the first glibc that supports the architecture if that is newer (set with "max-glibc").
+      # zigbuild links linux-gnu targets against the glibc version given as a suffix on the target name.
+      - name: Build binary with cargo-zigbuild
+        if: matrix.platform.os == 'ubuntu-latest'
+        env:
+          TARGET: ${{ matrix.platform.target }}
+          MAX_GLIBC: ${{ matrix.platform.max-glibc || '2.28' }}
+        run: |
+          zig_target="$TARGET"
+          if [[ "$TARGET" == *-linux-gnu* ]]; then
+            zig_target="$TARGET.$MAX_GLIBC"
+          fi
+          cargo zigbuild --locked --release --target "$zig_target"
+        shell: bash
       - name: Check required glibc version
         if: contains(matrix.platform.target, '-linux-gnu')
         env:
