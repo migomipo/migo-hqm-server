@@ -12,7 +12,7 @@ The server shuts down cleanly on Ctrl+C, and on SIGTERM on Linux, macOS and othe
 
 ## Linux requirements
 
-The Linux downloads ending in `-linux-gnu` (or `-linux-gnueabihf`) need glibc 2.28 or newer, which covers Debian 10, Ubuntu 20.04, RHEL/Rocky/AlmaLinux 8 and newer releases. The exception is LoongArch, which needs glibc 2.36, the first release that supports it. You can check your version with `ldd --version`.
+The Linux downloads ending in `-linux-gnu` (or `-linux-gnueabihf`) need glibc 2.28 or newer, which covers Debian 10, Ubuntu 20.04, RHEL/Rocky/AlmaLinux 8 and newer releases. The exceptions are LoongArch, which needs glibc 2.36, the first release that supports it, and 64-bit little-endian PowerPC (`powerpc64le`), which needs glibc 2.34 (RHEL/Rocky/AlmaLinux 9, Ubuntu 22.04 and newer). You can check your version with `ldd --version`.
 
 If your glibc is older, or you see an error like ``version `GLIBC_2.xx' not found``, use the download ending in `-linux-musl` (or `-linux-musleabihf`) instead. It does not depend on the system glibc and runs on any Linux distribution.
 

@@ -64,7 +64,10 @@ jobs:
             {"target": "riscv64gc-unknown-linux-gnu", "os": "ubuntu-latest"},
             {"target": "riscv64gc-unknown-linux-musl", "os": "ubuntu-latest"},
             {"target": "loongarch64-unknown-linux-gnu", "os": "ubuntu-latest", "max-glibc": "2.36"},
-            {"target": "loongarch64-unknown-linux-musl", "os": "ubuntu-latest"}
+            {"target": "loongarch64-unknown-linux-musl", "os": "ubuntu-latest"},
+            {"target": "powerpc64le-unknown-linux-gnu", "os": "ubuntu-latest", "max-glibc": "2.34"},
+            {"target": "powerpc64le-unknown-linux-musl", "os": "ubuntu-latest"},
+            {"target": "s390x-unknown-linux-gnu", "os": "ubuntu-latest"}
           ]'
           if [ "$ALL_TARGETS" != "true" ]; then
             platforms=$(jq 'map(select(.common))' <<< "$platforms")
