@@ -61,6 +61,7 @@ jobs:
             {"target": "x86_64-unknown-linux-gnu", "os": "ubuntu-latest", "common": true},
             {"target": "x86_64-unknown-linux-musl", "os": "ubuntu-latest"},
             {"target": "x86_64-unknown-freebsd", "os": "ubuntu-latest"},
+            {"target": "x86_64-unknown-netbsd", "os": "ubuntu-latest"},
             {"target": "riscv64gc-unknown-linux-gnu", "os": "ubuntu-latest"},
             {"target": "riscv64gc-unknown-linux-musl", "os": "ubuntu-latest"},
             {"target": "loongarch64-unknown-linux-gnu", "os": "ubuntu-latest", "max-glibc": "2.36"},
